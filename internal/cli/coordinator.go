@@ -71,6 +71,14 @@ type CoordinatorWhoami struct {
 	Auth  string `json:"auth"`
 }
 
+type CoordinatorImageResponse struct {
+	Image AWSImage `json:"image"`
+}
+
+type CoordinatorImagesResponse struct {
+	Images []AWSImage `json:"images"`
+}
+
 type CoordinatorGitHubLoginStart struct {
 	LoginID   string `json:"loginID"`
 	URL       string `json:"url"`
@@ -340,6 +348,46 @@ func (c *CoordinatorClient) Whoami(ctx context.Context) (CoordinatorWhoami, erro
 	var res CoordinatorWhoami
 	err := c.do(ctx, http.MethodGet, "/v1/whoami", nil, &res)
 	return res, err
+}
+
+func (c *CoordinatorClient) CurrentAWSImage(ctx context.Context, region string) (AWSImage, error) {
+	var res CoordinatorImageResponse
+	values := url.Values{}
+	values.Set("provider", "aws")
+	if region != "" {
+		values.Set("region", region)
+	}
+	path := "/v1/images/current?" + values.Encode()
+	err := c.do(ctx, http.MethodGet, path, nil, &res)
+	return res.Image, err
+}
+
+func (c *CoordinatorClient) AWSImages(ctx context.Context, region, name string) ([]AWSImage, error) {
+	var res CoordinatorImagesResponse
+	values := url.Values{}
+	values.Set("provider", "aws")
+	if region != "" {
+		values.Set("region", region)
+	}
+	if name != "" {
+		values.Set("name", name)
+	}
+	path := "/v1/images?" + values.Encode()
+	err := c.do(ctx, http.MethodGet, path, nil, &res)
+	return res.Images, err
+}
+
+func (c *CoordinatorClient) CreateAWSImage(ctx context.Context, leaseID, name, description string, noReboot, wait bool) (AWSImage, error) {
+	var res CoordinatorImageResponse
+	err := c.do(ctx, http.MethodPost, "/v1/images", map[string]any{
+		"provider":    "aws",
+		"leaseID":     leaseID,
+		"name":        name,
+		"description": description,
+		"noReboot":    noReboot,
+		"wait":        wait,
+	}, &res)
+	return res.Image, err
 }
 
 func (c *CoordinatorClient) StartGitHubLogin(ctx context.Context, pollSecretHash, provider string) (CoordinatorGitHubLoginStart, error) {

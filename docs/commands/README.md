@@ -15,6 +15,7 @@ Command docs live here, one file per top-level command. Keep `docs/cli.md` as th
 - [logs](logs.md)
 - [results](results.md)
 - [cache](cache.md)
+- [image](image.md)
 - [status](status.md)
 - [list](list.md)
 - [usage](usage.md)

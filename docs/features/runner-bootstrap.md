@@ -24,9 +24,9 @@ Bootstrap installs:
 - jq;
 - OpenSSH server.
 
-Bootstrap intentionally does not install project language runtimes such as Go, Node, pnpm, Docker, databases, or service dependencies. Those belong in GitHub Actions hydration, devcontainers, Nix, mise/asdf, or repository setup scripts. A machine should not pass readiness until `crabbox-ready` succeeds over SSH.
+Bootstrap intentionally does not install project language runtimes such as Go, Node, pnpm, Docker, databases, or service dependencies. Those belong in GitHub Actions hydration, devcontainers, Nix, mise/asdf, repository setup scripts, or a trusted AWS AMI selected with `aws.ami` / `CRABBOX_AWS_AMI`. A machine should not pass readiness until `crabbox-ready` succeeds over SSH.
 
-The CLI prefers the configured SSH port and can fall back to port 22 during early bootstrap. Long term, snapshots or provider images can replace slow cloud-init once the bootstrap contract is stable.
+The CLI prefers the configured SSH port and can fall back to port 22 during early bootstrap. `crabbox image create` can capture a scrubbed AWS AMI from a warmed lease when cloud-init plus hydration is too slow for repeated work.
 
 Related docs:
 

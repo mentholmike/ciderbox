@@ -114,6 +114,49 @@ func TestCoordinatorTouchAndUpdateHeartbeatBodies(t *testing.T) {
 	}
 }
 
+func TestCoordinatorImageMethods(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.String()
+		data, _ := io.ReadAll(r.Body)
+		gotBody = string(data)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.String(), "/v1/images/current?"):
+			_, _ = w.Write([]byte(`{"image":{"id":"ami-123","name":"current","source":"config","region":"eu-west-1"}}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.String(), "/v1/images?"):
+			_, _ = w.Write([]byte(`{"images":[{"id":"ami-123","name":"cached"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/images":
+			_, _ = w.Write([]byte(`{"image":{"id":"ami-456","name":"created","source":"created"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	client := CoordinatorClient{BaseURL: server.URL, Client: server.Client()}
+
+	image, err := client.CurrentAWSImage(context.Background(), "eu-west-1")
+	if err != nil || image.ID != "ami-123" || !strings.Contains(gotPath, "provider=aws") {
+		t.Fatalf("current image=%#v path=%s err=%v", image, gotPath, err)
+	}
+	images, err := client.AWSImages(context.Background(), "eu-west-1", "openclaw-*")
+	if err != nil || len(images) != 1 || images[0].ID != "ami-123" || !strings.Contains(gotPath, "name=openclaw-%2A") {
+		t.Fatalf("images=%#v path=%s err=%v", images, gotPath, err)
+	}
+	created, err := client.CreateAWSImage(context.Background(), "cbx_123", "openclaw-cache", "warm", true, false)
+	if err != nil || created.ID != "ami-456" || gotMethod != http.MethodPost {
+		t.Fatalf("created=%#v method=%s err=%v", created, gotMethod, err)
+	}
+	for _, want := range []string{`"leaseID":"cbx_123"`, `"name":"openclaw-cache"`, `"noReboot":true`} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body missing %q: %s", want, gotBody)
+		}
+	}
+}
+
 func curlConfigValueForTest(t *testing.T, config, key string) string {
 	t.Helper()
 	prefix := key + " = "

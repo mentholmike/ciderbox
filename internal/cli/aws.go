@@ -304,9 +304,121 @@ func (c *AWSClient) SetTags(ctx context.Context, id string, labels map[string]st
 	return err
 }
 
+type AWSImage struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	State        string            `json:"state,omitempty"`
+	OwnerID      string            `json:"ownerId,omitempty"`
+	CreationDate string            `json:"creationDate,omitempty"`
+	Public       bool              `json:"public,omitempty"`
+	Source       string            `json:"source,omitempty"`
+	Region       string            `json:"region,omitempty"`
+	Tags         map[string]string `json:"tags,omitempty"`
+}
+
+func (c *AWSClient) CurrentImage(ctx context.Context, cfg Config) (AWSImage, error) {
+	imageID, source, err := c.currentImageID(ctx, cfg)
+	if err != nil {
+		return AWSImage{}, err
+	}
+	image, err := c.describeImage(ctx, imageID)
+	if err != nil {
+		return AWSImage{}, err
+	}
+	image.Source = source
+	image.Region = cfg.AWSRegion
+	return image, nil
+}
+
+func (c *AWSClient) ListImages(ctx context.Context, cfg Config, name string) ([]AWSImage, error) {
+	filters := []types.Filter{
+		{Name: aws.String("state"), Values: []string{"available", "pending"}},
+	}
+	if name != "" {
+		filters = append(filters, types.Filter{Name: aws.String("name"), Values: []string{name}})
+	} else {
+		filters = append(filters,
+			types.Filter{Name: aws.String("tag:crabbox"), Values: []string{"true"}},
+			types.Filter{Name: aws.String("tag:crabbox_image"), Values: []string{"true"}},
+		)
+	}
+	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		Owners:  []string{"self"},
+		Filters: filters,
+	})
+	if err != nil {
+		return nil, err
+	}
+	images := make([]AWSImage, 0, len(out.Images))
+	for _, image := range out.Images {
+		view := awsImageToView(image)
+		view.Region = cfg.AWSRegion
+		images = append(images, view)
+	}
+	sort.Slice(images, func(i, j int) bool {
+		return images[i].CreationDate > images[j].CreationDate
+	})
+	return images, nil
+}
+
+func (c *AWSClient) CreateImage(ctx context.Context, cfg Config, instanceID, name, description, leaseID, slug string, noReboot, wait bool) (AWSImage, error) {
+	if name == "" {
+		return AWSImage{}, exit(2, "--name is required")
+	}
+	now := time.Now().UTC()
+	tags := map[string]string{
+		"Name":          name,
+		"crabbox":       "true",
+		"crabbox_image": "true",
+		"created_by":    "crabbox",
+		"provider":      "aws",
+		"region":        cfg.AWSRegion,
+		"created_at":    now.Format(time.RFC3339),
+	}
+	if leaseID != "" {
+		tags["source_lease"] = leaseID
+	}
+	if slug != "" {
+		tags["source_slug"] = slug
+	}
+	out, err := c.ec2.CreateImage(ctx, &ec2.CreateImageInput{
+		Description: aws.String(description),
+		InstanceId:  aws.String(instanceID),
+		Name:        aws.String(name),
+		NoReboot:    aws.Bool(noReboot),
+		TagSpecifications: []types.TagSpecification{
+			{ResourceType: types.ResourceTypeImage, Tags: awsTags(tags)},
+			{ResourceType: types.ResourceTypeSnapshot, Tags: awsTags(tags)},
+		},
+	})
+	if err != nil {
+		return AWSImage{}, err
+	}
+	imageID := aws.ToString(out.ImageId)
+	if wait {
+		waiter := ec2.NewImageAvailableWaiter(c.ec2)
+		if err := waiter.Wait(ctx, &ec2.DescribeImagesInput{ImageIds: []string{imageID}}, 45*time.Minute); err != nil {
+			return AWSImage{}, err
+		}
+	}
+	image, err := c.describeImage(ctx, imageID)
+	if err != nil {
+		return AWSImage{ID: imageID, Name: name, State: "pending", Source: "created", Region: cfg.AWSRegion, Tags: tags}, nil
+	}
+	image.Source = "created"
+	image.Region = cfg.AWSRegion
+	return image, nil
+}
+
 func (c *AWSClient) resolveAMI(ctx context.Context, cfg Config) (string, error) {
+	imageID, _, err := c.currentImageID(ctx, cfg)
+	return imageID, err
+}
+
+func (c *AWSClient) currentImageID(ctx context.Context, cfg Config) (string, string, error) {
 	if cfg.AWSAMI != "" {
-		return cfg.AWSAMI, nil
+		return cfg.AWSAMI, "config", nil
 	}
 	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
 		Owners: []string{awsUbuntuOwner},
@@ -318,15 +430,45 @@ func (c *AWSClient) resolveAMI(ctx context.Context, cfg Config) (string, error) 
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(out.Images) == 0 {
-		return "", exit(3, "no Ubuntu 24.04 x86_64 AMI found in %s; set CRABBOX_AWS_AMI", cfg.AWSRegion)
+		return "", "", exit(3, "no Ubuntu 24.04 x86_64 AMI found in %s; set CRABBOX_AWS_AMI", cfg.AWSRegion)
 	}
 	sort.Slice(out.Images, func(i, j int) bool {
 		return aws.ToString(out.Images[i].CreationDate) > aws.ToString(out.Images[j].CreationDate)
 	})
-	return aws.ToString(out.Images[0].ImageId), nil
+	return aws.ToString(out.Images[0].ImageId), "ubuntu-default", nil
+}
+
+func (c *AWSClient) describeImage(ctx context.Context, imageID string) (AWSImage, error) {
+	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		ImageIds: []string{imageID},
+	})
+	if err != nil {
+		return AWSImage{}, err
+	}
+	if len(out.Images) == 0 {
+		return AWSImage{}, exit(4, "aws image not found: %s", imageID)
+	}
+	return awsImageToView(out.Images[0]), nil
+}
+
+func awsImageToView(image types.Image) AWSImage {
+	tags := make(map[string]string)
+	for _, tag := range image.Tags {
+		tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+	}
+	return AWSImage{
+		ID:           aws.ToString(image.ImageId),
+		Name:         aws.ToString(image.Name),
+		Description:  aws.ToString(image.Description),
+		State:        string(image.State),
+		OwnerID:      aws.ToString(image.OwnerId),
+		CreationDate: aws.ToString(image.CreationDate),
+		Public:       aws.ToBool(image.Public),
+		Tags:         tags,
+	}
 }
 
 func (c *AWSClient) ensureSecurityGroup(ctx context.Context, cfg Config) (string, error) {

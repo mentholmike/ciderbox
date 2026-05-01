@@ -5,7 +5,7 @@ import { cloudInit } from "./bootstrap";
 import { awsInstanceTypeCandidatesForClass, validCIDRs, type LeaseConfig } from "./config";
 import { leaseProviderLabels } from "./provider-labels";
 import { leaseProviderName } from "./slug";
-import type { Env, ProviderMachine } from "./types";
+import type { AWSImageView, Env, ProviderMachine } from "./types";
 
 const awsUbuntuOwner = "099720109477";
 const ec2Version = "2016-11-15";
@@ -163,6 +163,84 @@ export class EC2SpotClient {
     });
   }
 
+  async currentImage(config: LeaseConfig): Promise<AWSImageView> {
+    const { imageID, source } = await this.currentImageID(config);
+    const image = await this.describeImage(imageID);
+    return { ...image, source, region: this.region };
+  }
+
+  async listImages(name: string): Promise<AWSImageView[]> {
+    const params: Record<string, string> = {
+      "Owner.1": "self",
+      "Filter.1.Name": "state",
+      "Filter.1.Value.1": "available",
+      "Filter.1.Value.2": "pending",
+    };
+    if (name) {
+      params["Filter.2.Name"] = "name";
+      params["Filter.2.Value.1"] = name;
+    } else {
+      params["Filter.2.Name"] = "tag:crabbox";
+      params["Filter.2.Value.1"] = "true";
+      params["Filter.3.Name"] = "tag:crabbox_image";
+      params["Filter.3.Value.1"] = "true";
+    }
+    const root = await this.ec2("DescribeImages", params);
+    return items(record(root["imagesSet"])["item"])
+      .map((item) => ({ ...imageToView(item), region: this.region }))
+      .toSorted((left, right) => (right.creationDate ?? "").localeCompare(left.creationDate ?? ""));
+  }
+
+  async createImage(
+    instanceID: string,
+    name: string,
+    description: string,
+    leaseID: string,
+    slug: string,
+    noReboot: boolean,
+    wait: boolean,
+  ): Promise<AWSImageView> {
+    const now = new Date().toISOString();
+    const tags: Record<string, string> = {
+      Name: name,
+      crabbox: "true",
+      crabbox_image: "true",
+      created_by: "crabbox",
+      provider: "aws",
+      region: this.region,
+      created_at: now,
+      source_lease: leaseID,
+    };
+    if (slug) {
+      tags["source_slug"] = slug;
+    }
+    const params: Record<string, string> = {
+      InstanceId: instanceID,
+      Name: name,
+      Description: description,
+      NoReboot: noReboot ? "true" : "false",
+      "TagSpecification.1.ResourceType": "image",
+      "TagSpecification.2.ResourceType": "snapshot",
+    };
+    addTags(params, "TagSpecification.1.Tag", tags);
+    addTags(params, "TagSpecification.2.Tag", tags);
+    const root = await this.ec2("CreateImage", params);
+    const imageID = asString(root["imageId"]);
+    if (wait) {
+      await this.waitForImage(imageID);
+    }
+    return this.describeImage(imageID)
+      .then((image) => ({ ...image, source: "created" }))
+      .catch(() => ({
+        id: imageID,
+        name,
+        state: "pending",
+        source: "created",
+        region: this.region,
+        tags,
+      }));
+  }
+
   async setTags(instanceID: string, labels: Record<string, string>): Promise<void> {
     const params: Record<string, string> = { "ResourceId.1": instanceID };
     addTags(params, "Tag", labels);
@@ -252,8 +330,13 @@ export class EC2SpotClient {
   }
 
   private async resolveAMI(config: LeaseConfig): Promise<string> {
+    const { imageID } = await this.currentImageID(config);
+    return imageID;
+  }
+
+  private async currentImageID(config: LeaseConfig): Promise<{ imageID: string; source: string }> {
     if (config.awsAMI || this.env.CRABBOX_AWS_AMI) {
-      return config.awsAMI || this.env.CRABBOX_AWS_AMI || "";
+      return { imageID: config.awsAMI || this.env.CRABBOX_AWS_AMI || "", source: "config" };
     }
     const root = await this.ec2("DescribeImages", {
       "Owner.1": awsUbuntuOwner,
@@ -273,7 +356,34 @@ export class EC2SpotClient {
     if (!imageID) {
       throw new Error(`no Ubuntu 24.04 x86_64 AMI found in ${this.region}`);
     }
-    return imageID;
+    return { imageID, source: "ubuntu-default" };
+  }
+
+  private async describeImage(imageID: string): Promise<AWSImageView> {
+    const root = await this.ec2("DescribeImages", { "ImageId.1": imageID });
+    const image = items(record(root["imagesSet"])["item"])[0];
+    const view = imageToView(image);
+    if (!view.id) {
+      throw new Error(`aws image not found: ${imageID}`);
+    }
+    return { ...view, region: this.region };
+  }
+
+  private async waitForImage(imageID: string): Promise<void> {
+    const deadline = Date.now() + 2_700_000;
+    while (Date.now() < deadline) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- polling waits for AMI state.
+      const image = await this.describeImage(imageID);
+      if (image.state === "available") {
+        return;
+      }
+      if (image.state === "failed") {
+        throw new Error(`aws image failed: ${imageID}`);
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- this delay is the polling interval.
+      await sleep(15_000);
+    }
+    throw new Error(`timed out waiting for AWS image: ${imageID}`);
   }
 
   private async ensureSecurityGroup(config: LeaseConfig): Promise<string> {
@@ -430,6 +540,20 @@ function instanceToMachine(input: unknown): ProviderMachine {
     serverType: asString(instance["instanceType"]),
     host: asString(instance["ipAddress"]),
     labels: tags,
+  };
+}
+
+function imageToView(input: unknown): AWSImageView {
+  const image = record(input);
+  return {
+    id: asString(image["imageId"]),
+    name: asString(image["name"]),
+    description: asString(image["description"]),
+    state: asString(image["imageState"]),
+    ownerId: asString(image["imageOwnerId"] || image["ownerId"]),
+    creationDate: asString(image["creationDate"]),
+    public: asString(image["isPublic"]) === "true",
+    tags: tagMap(image["tagSet"]),
   };
 }
 

@@ -42,6 +42,9 @@ crabbox results <run-id> [--json]
 crabbox cache stats --id <lease-id-or-slug> [--json]
 crabbox cache purge --id <lease-id-or-slug> --kind pnpm|npm|docker|git|all --force
 crabbox cache warm --id <lease-id-or-slug> -- <command...>
+crabbox image current [--json]
+crabbox image list [--name <glob>] [--json]
+crabbox image create --id <lease-id-or-slug> --name <ami-name> [--wait] [--no-reboot]
 crabbox actions hydrate --id <lease-id-or-slug> [--workflow <file|name|id>] [--wait-timeout <duration>]
 crabbox actions register --id <lease-id-or-slug> [--repo owner/name]
 crabbox actions dispatch [--workflow <file|name|id>] [-f key=value]
@@ -154,6 +157,13 @@ Inspect or warm caches on a kept box:
 crabbox cache stats --id blue-lobster
 crabbox cache warm --id blue-lobster -- pnpm install --frozen-lockfile
 crabbox cache purge --id blue-lobster --kind pnpm --force
+```
+
+Create a warm AWS image from a hydrated kept box:
+
+```sh
+crabbox image current
+crabbox image create --id blue-lobster --name openclaw-crabbox-20260501 --wait
 ```
 
 Trusted operator lease controls:

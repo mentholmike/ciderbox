@@ -58,6 +58,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.results(ctx, args[1:])
 	case "cache":
 		return a.cache(ctx, args[1:])
+	case "image":
+		return a.image(ctx, args[1:])
 	case "config":
 		return a.config(ctx, args[1:])
 	case "init":
@@ -125,6 +127,7 @@ Commands:
   logs        Print recorded run logs
   results     Show recorded test result summaries
   cache       Inspect, purge, or warm remote caches
+  image       Inspect and create AWS runner AMIs
   status      Show lease state; add --wait to block until ready
   list        List Crabbox machines
   usage       Show cost and usage estimates by user, org, or fleet
@@ -147,6 +150,9 @@ Common Flows:
   crabbox logs run_123
   crabbox results run_123
   crabbox cache stats --id blue-lobster
+  crabbox image current
+  crabbox image list
+  crabbox image create --id blue-lobster --name openclaw-crabbox-20260501
   crabbox usage --scope org
   crabbox admin leases --state active
   crabbox warmup --actions-runner

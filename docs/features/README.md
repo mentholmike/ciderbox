@@ -22,6 +22,7 @@ Core features:
 - [History and logs](history-logs.md): coordinator run records and retained remote output tails.
 - [Test results](test-results.md): JUnit summaries attached to recorded runs.
 - [Cache controls](cache.md): inspect, purge, and warm remote package/build caches.
+- [AWS images](../commands/image.md): inspect and create scrubbed AMIs from warmed AWS leases.
 - [Auth and admin](auth-admin.md): login/logout/whoami and trusted operator controls.
 - [Lifecycle cleanup](lifecycle-cleanup.md): release, expiry, keep mode, and direct cleanup.
 - [Repository onboarding](repository-onboarding.md): `crabbox init`, repo config, workflow stub, and agent skill.
@@ -37,6 +38,7 @@ Command docs:
 - [logs](../commands/logs.md)
 - [results](../commands/results.md)
 - [cache](../commands/cache.md)
+- [image](../commands/image.md)
 - [status](../commands/status.md)
 - [list](../commands/list.md)
 - [usage](../commands/usage.md)

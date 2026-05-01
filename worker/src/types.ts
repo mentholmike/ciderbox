@@ -201,3 +201,25 @@ export interface ProviderMachine {
   host: string;
   labels: Record<string, string>;
 }
+
+export interface AWSImageView {
+  id: string;
+  name?: string;
+  description?: string;
+  state?: string;
+  ownerId?: string;
+  creationDate?: string;
+  public?: boolean;
+  source?: string;
+  region?: string;
+  tags?: Record<string, string>;
+}
+
+export interface AWSImageCreateRequest {
+  provider?: Provider;
+  leaseID?: string;
+  name?: string;
+  description?: string;
+  noReboot?: boolean;
+  wait?: boolean;
+}

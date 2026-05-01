@@ -292,6 +292,74 @@ describe("fleet lease identity and idle", () => {
     );
     expect(allowed.status).toBe(200);
   });
+
+  it("keeps AWS image routes admin-only and creates images from leases", async () => {
+    const storage = new MemoryStorage();
+    const calls: string[] = [];
+    const fleet = testFleet(storage, {
+      aws: {
+        ...fakeProvider(),
+        async currentImage() {
+          calls.push("current");
+          return { id: "ami-current", name: "current", source: "config", region: "eu-west-1" };
+        },
+        async listAWSImages(name: string) {
+          calls.push(`list:${name}`);
+          return [{ id: "ami-cached", name: "openclaw-crabbox", region: "eu-west-1" }];
+        },
+        async createAWSImage(lease: LeaseRecord, name: string) {
+          calls.push(`create:${lease.id}:${name}`);
+          return { id: "ami-created", name, source: "created", region: "eu-west-1" };
+        },
+      },
+    });
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        slug: "blue-lobster",
+        provider: "aws",
+        cloudID: "i-123",
+        region: "eu-west-1",
+      }),
+    );
+
+    const denied = await fleet.fetch(
+      request("GET", "/v1/images", {
+        headers: {
+          "cf-access-authenticated-user-email": "friend@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(denied.status).toBe(403);
+
+    const current = await fleet.fetch(
+      request("GET", "/v1/images/current?provider=aws", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({ image: { id: "ami-current" } });
+
+    const listed = await fleet.fetch(
+      request("GET", "/v1/images?provider=aws&name=openclaw-*", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({ images: [{ id: "ami-cached" }] });
+
+    const created = await fleet.fetch(
+      request("POST", "/v1/images", {
+        headers: { "x-crabbox-admin": "true" },
+        body: { provider: "aws", leaseID: "cbx_000000000001", name: "openclaw-cache" },
+      }),
+    );
+    expect(created.status).toBe(200);
+    await expect(created.json()).resolves.toMatchObject({ image: { id: "ami-created" } });
+    expect(calls).toEqual(["current", "list:openclaw-*", "create:cbx_000000000001:openclaw-cache"]);
+  });
 });
 
 describe("fleet run history", () => {

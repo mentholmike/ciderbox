@@ -6,6 +6,8 @@ import { errorMessage, json, pathParts, readJson, requestOwner } from "./http";
 import { githubAuthRoute } from "./oauth";
 import { leaseSlugFromID, normalizeLeaseSlug, slugWithCollisionSuffix } from "./slug";
 import type {
+  AWSImageCreateRequest,
+  AWSImageView,
   Env,
   LeaseRecord,
   LeaseRequest,
@@ -49,6 +51,12 @@ export class FleetDurableObject implements DurableObject {
       }
       if (method === "GET" && parts.join("/") === "v1/whoami") {
         return this.whoami(request);
+      }
+      if (parts[0] === "v1" && parts[1] === "images") {
+        if (!isAdminRequest(request)) {
+          return json({ error: "forbidden", message: "admin token required" }, { status: 403 });
+        }
+        return await this.imageRoute(request, parts[2]);
       }
       if (method === "GET" && parts.join("/") === "v1/admin/leases") {
         if (!isAdminRequest(request)) {
@@ -264,6 +272,68 @@ export class FleetDurableObject implements DurableObject {
                 .catch(() => [])),
             ];
     return json({ machines });
+  }
+
+  private async imageRoute(request: Request, action?: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const url = new URL(request.url);
+    const provider = url.searchParams.get("provider") || "aws";
+    const region = url.searchParams.get("region") || this.env.CRABBOX_AWS_REGION || "eu-west-1";
+    if (provider !== "aws") {
+      return json(
+        { error: "bad_request", message: "image routes only support provider=aws" },
+        { status: 400 },
+      );
+    }
+    if (method === "GET" && action === "current") {
+      const config = leaseConfig({
+        provider: "aws",
+        awsRegion: region,
+        sshPublicKey: "ssh-ed25519 crabbox-image-inspect",
+      });
+      const image = await this.provider("aws", region).currentImage?.(config);
+      return json({ image });
+    }
+    if (method === "GET" && !action) {
+      const images = await this.provider("aws", region).listAWSImages?.(
+        url.searchParams.get("name") || "",
+      );
+      return json({ images: images ?? [] });
+    }
+    if (method === "POST" && !action) {
+      const input = await readJson<AWSImageCreateRequest>(request);
+      if (input.provider && input.provider !== "aws") {
+        return json(
+          { error: "bad_request", message: "image create only supports provider=aws" },
+          { status: 400 },
+        );
+      }
+      if (!input.leaseID || !input.name) {
+        return json(
+          { error: "bad_request", message: "leaseID and name are required" },
+          { status: 400 },
+        );
+      }
+      const lease = await this.resolveLease(input.leaseID, request, true);
+      if (!lease) {
+        return notFound();
+      }
+      if (lease.provider !== "aws") {
+        return json(
+          { error: "bad_request", message: `lease provider is ${lease.provider}` },
+          { status: 400 },
+        );
+      }
+      const image = await this.provider("aws", lease.region).createAWSImage?.(
+        lease,
+        input.name,
+        input.description || "",
+        Boolean(input.noReboot),
+        Boolean(input.wait),
+      );
+      return json({ image });
+    }
+    return json({ error: "not_found" }, { status: 404 });
   }
 
   private async listLeases(request: Request): Promise<Response> {
@@ -811,6 +881,15 @@ interface CloudProvider {
     serverType: string,
     config: ReturnType<typeof leaseConfig>,
   ): Promise<number | undefined>;
+  currentImage?(config: ReturnType<typeof leaseConfig>): Promise<AWSImageView>;
+  listAWSImages?(name: string): Promise<AWSImageView[]>;
+  createAWSImage?(
+    lease: LeaseRecord,
+    name: string,
+    description: string,
+    noReboot: boolean,
+    wait: boolean,
+  ): Promise<AWSImageView>;
 }
 
 class HetznerProvider implements CloudProvider {
@@ -892,5 +971,31 @@ class AWSProvider implements CloudProvider {
 
   hourlyPriceUSD(serverType: string): Promise<number | undefined> {
     return this.client.hourlySpotPriceUSD(serverType);
+  }
+
+  currentImage(config: ReturnType<typeof leaseConfig>): Promise<AWSImageView> {
+    return this.client.currentImage(config);
+  }
+
+  listAWSImages(name: string): Promise<AWSImageView[]> {
+    return this.client.listImages(name);
+  }
+
+  createAWSImage(
+    lease: LeaseRecord,
+    name: string,
+    description: string,
+    noReboot: boolean,
+    wait: boolean,
+  ): Promise<AWSImageView> {
+    return this.client.createImage(
+      lease.cloudID,
+      name,
+      description,
+      lease.id,
+      lease.slug || "",
+      noReboot,
+      wait,
+    );
   }
 }

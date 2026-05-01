@@ -89,6 +89,7 @@ For the full mental model, see [How Crabbox Works](docs/how-it-works.md). For th
 - **Blacksmith Testbox wrapper.** Set `provider: blacksmith-testbox` to delegate warmup/run/list/status/stop to the Blacksmith CLI while Crabbox keeps local slugs, repo claims, timing summaries, and config conventions.
 - **Cost guardrails.** Per-lease and monthly spend caps. Live pricing from EC2 Spot history or Hetzner server-type prices, with static fallbacks. `crabbox usage` summarizes spend by user, org, provider, and type.
 - **GitHub Actions hydration.** `crabbox actions hydrate` registers a leased box as an ephemeral Actions runner, so the repo's own workflow installs runtimes, services, and secrets. Crabbox does not parse Actions YAML.
+- **AWS image cache.** `crabbox image current|list|create` lets trusted operators inspect the active AMI and capture scrubbed, warmed AWS runner images after hydration.
 - **OpenClaw plugin.** The repo root is a native OpenClaw plugin. Agents drive Crabbox through `crabbox_run`, `crabbox_warmup`, `crabbox_status`, `crabbox_list`, and `crabbox_stop` instead of shelling out.
 - **Operator surface.** `doctor`, `init`, `status`, `inspect`, `list`, `usage`, `history`, `logs`, `results`, `cache`, `admin`, `cleanup`, plus `--json` output where it matters.
 

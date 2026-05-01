@@ -32,6 +32,7 @@ AWS behavior:
 - uses Spot placement score across configured regions in direct AWS mode;
 - can fall back to On-Demand after Spot capacity/quota failures when configured;
 - fetches Spot price history when cost estimates need provider pricing.
+- can inspect the configured runner AMI, list Crabbox-created AMIs, and create a tagged AMI from an existing AWS lease after best-effort scrub.
 
 Machine classes map to provider-specific types:
 
@@ -50,6 +51,8 @@ beast     c7a.48xlarge, c7i.48xlarge, m7a.48xlarge, m7i.48xlarge, r7a.48xlarge, 
 ```
 
 Direct provider mode still exists when no coordinator is configured. It uses local AWS credentials or `HCLOUD_TOKEN`/`HETZNER_TOKEN` and should stay secondary to the brokered path.
+
+AWS images are an operator acceleration layer, not a secret store. Bake Docker, buildx, language runtimes, package caches, and heavy base layers. Keep runtime secrets in the coordinator, GitHub Actions, AWS instance profiles, SSM, or a secrets manager.
 
 Crabbox can also wrap Blacksmith Testboxes with `provider: blacksmith-testbox`. That backend does not use the Crabbox broker or direct cloud credentials. It shells out to the authenticated Blacksmith CLI for `testbox warmup`, `run`, `status`, `list`, and `stop`, while Crabbox keeps local slugs, repo claims, config, and timing summaries. See [Blacksmith Testbox](blacksmith-testbox.md).
 
