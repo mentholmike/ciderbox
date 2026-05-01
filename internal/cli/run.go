@@ -281,6 +281,11 @@ func (a App) runCommand(ctx context.Context, args []string) error {
 		if err := checkSyncPreflight(manifest, cfg, *forceSyncLarge, a.Stderr); err != nil {
 			return err
 		}
+		timings.syncStats = syncStats{
+			files:   len(manifest.Files),
+			bytes:   manifest.Bytes,
+			deleted: len(manifest.Deleted),
+		}
 		timings.syncSteps.preflight = time.Since(stepStart)
 		fingerprint := ""
 		if cfg.Sync.Fingerprint {
@@ -309,11 +314,13 @@ func (a App) runCommand(ctx context.Context, args []string) error {
 			timings.syncSteps.gitSeed = time.Since(stepStart)
 		}
 		manifestData := manifest.NUL()
+		deletedManifestData := manifest.DeletedNUL()
+		timings.syncStats.manifestBytes = int64(len(manifestData) + len(deletedManifestData))
 		stepStart = time.Now()
-		if err := runSSHInputQuiet(ctx, target, remoteWriteSyncManifestNew(workdir), string(manifestData)); err != nil {
+		if err := runSSHInputQuietBytes(ctx, target, remoteWriteSyncManifestNew(workdir), manifestData); err != nil {
 			return exit(7, "write sync manifest: %v", err)
 		}
-		if err := runSSHInputQuiet(ctx, target, remoteWriteSyncDeletedNew(workdir), string(manifest.DeletedNUL())); err != nil {
+		if err := runSSHInputQuietBytes(ctx, target, remoteWriteSyncDeletedNew(workdir), deletedManifestData); err != nil {
 			return exit(7, "write sync delete manifest: %v", err)
 		}
 		timings.syncSteps.manifestWrite = time.Since(stepStart)
@@ -409,7 +416,7 @@ afterSync:
 		}
 	}
 	if runID != "" {
-		if _, err := coord.FinishRun(context.Background(), runID, code, timings.sync, timings.command, logBuffer.String(), logBuffer.Truncated(), results); err != nil {
+		if _, err := coord.FinishRun(context.Background(), runID, code, runFinishMetricsFromTimings(timings), logBuffer.String(), logBuffer.Truncated(), results); err != nil {
 			fmt.Fprintf(a.Stderr, "warning: run history finish failed for %s: %v\n", runID, err)
 		}
 	}
@@ -427,7 +434,15 @@ type runTimings struct {
 	sync        time.Duration
 	command     time.Duration
 	syncSteps   syncStepTimings
+	syncStats   syncStats
 	syncSkipped bool
+}
+
+type syncStats struct {
+	files         int
+	bytes         int64
+	deleted       int
+	manifestBytes int64
 }
 
 type syncStepTimings struct {
@@ -458,7 +473,27 @@ func formatRunSummary(timings runTimings, total time.Duration, exitCode int) str
 	if breakdown := formatSyncStepTimings(timings.syncSteps); breakdown != "" {
 		summary += " sync_steps=" + breakdown
 	}
+	if stats := formatSyncStats(timings.syncStats); stats != "" {
+		summary += " " + stats
+	}
 	return summary
+}
+
+func formatSyncStats(stats syncStats) string {
+	if stats.files == 0 && stats.bytes == 0 && stats.deleted == 0 && stats.manifestBytes == 0 {
+		return ""
+	}
+	parts := []string{
+		fmt.Sprintf("sync_files=%d", stats.files),
+		fmt.Sprintf("sync_bytes=%s", humanBytes(stats.bytes)),
+	}
+	if stats.deleted > 0 {
+		parts = append(parts, fmt.Sprintf("sync_deleted=%d", stats.deleted))
+	}
+	if stats.manifestBytes > 0 {
+		parts = append(parts, fmt.Sprintf("sync_manifest=%s", humanBytes(stats.manifestBytes)))
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatSyncStepTimings(steps syncStepTimings) string {

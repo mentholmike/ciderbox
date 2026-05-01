@@ -125,8 +125,16 @@ func runSSHCombinedOutput(ctx context.Context, target SSHTarget, remote string) 
 }
 
 func runSSHInputQuiet(ctx context.Context, target SSHTarget, remote, input string) error {
+	return runSSHInputQuietReader(ctx, target, remote, strings.NewReader(input))
+}
+
+func runSSHInputQuietBytes(ctx context.Context, target SSHTarget, remote string, input []byte) error {
+	return runSSHInputQuietReader(ctx, target, remote, bytes.NewReader(input))
+}
+
+func runSSHInputQuietReader(ctx context.Context, target SSHTarget, remote string, input io.Reader) error {
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs(target, remote)...)
-	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdin = input
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd.Run()

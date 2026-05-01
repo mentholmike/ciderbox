@@ -451,6 +451,11 @@ describe("fleet run history", () => {
           exitCode: 0,
           syncMs: 12,
           commandMs: 34,
+          syncFiles: 123,
+          syncBytes: 4567,
+          syncDeleted: 2,
+          syncManifestBytes: 789,
+          syncSkipped: true,
           log: "ok\n",
           results: {
             format: "junit",
@@ -468,10 +473,24 @@ describe("fleet run history", () => {
     );
     expect(finish.status).toBe(200);
     const finished = (await finish.json()) as {
-      run: { state: string; logBytes: number; results?: { tests: number } };
+      run: {
+        state: string;
+        logBytes: number;
+        syncFiles?: number;
+        syncBytes?: number;
+        syncDeleted?: number;
+        syncManifestBytes?: number;
+        syncSkipped?: boolean;
+        results?: { tests: number };
+      };
     };
     expect(finished.run.state).toBe("succeeded");
     expect(finished.run.logBytes).toBe(3);
+    expect(finished.run.syncFiles).toBe(123);
+    expect(finished.run.syncBytes).toBe(4567);
+    expect(finished.run.syncDeleted).toBe(2);
+    expect(finished.run.syncManifestBytes).toBe(789);
+    expect(finished.run.syncSkipped).toBe(true);
     expect(finished.run.results?.tests).toBe(2);
 
     const listed = await fleet.fetch(
@@ -537,6 +556,40 @@ describe("fleet run history", () => {
     );
     expect(finish.status).toBe(404);
     expect(storage.value<string>("runlog:run_000000000001")).toBe("secret log\n");
+  });
+
+  it("keeps only the bounded log tail", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(storage);
+    const create = await fleet.fetch(
+      request("POST", "/v1/runs", {
+        body: {
+          leaseID: "cbx_000000000001",
+          provider: "aws",
+          class: "beast",
+          serverType: "c7a.48xlarge",
+          command: ["go", "test", "./..."],
+        },
+      }),
+    );
+    const { run } = (await create.json()) as { run: { id: string } };
+    const log = `${"a".repeat(70 * 1024)}tail`;
+
+    const finish = await fleet.fetch(
+      request("POST", `/v1/runs/${run.id}/finish`, {
+        body: { exitCode: 0, log },
+      }),
+    );
+    expect(finish.status).toBe(200);
+    const finished = (await finish.json()) as {
+      run: { logBytes: number; logTruncated: boolean };
+    };
+    expect(finished.run.logBytes).toBe(64 * 1024);
+    expect(finished.run.logTruncated).toBe(true);
+
+    const stored = storage.value<string>(`runlog:${run.id}`) ?? "";
+    expect(new TextEncoder().encode(stored).byteLength).toBe(64 * 1024);
+    expect(stored.endsWith("tail")).toBe(true);
   });
 
   it("bounds stored result summaries", async () => {

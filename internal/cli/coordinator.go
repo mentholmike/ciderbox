@@ -118,6 +118,11 @@ type CoordinatorRun struct {
 	SyncMs       int64              `json:"syncMs,omitempty"`
 	CommandMs    int64              `json:"commandMs,omitempty"`
 	DurationMs   int64              `json:"durationMs,omitempty"`
+	SyncFiles    int                `json:"syncFiles,omitempty"`
+	SyncBytes    int64              `json:"syncBytes,omitempty"`
+	SyncDeleted  int                `json:"syncDeleted,omitempty"`
+	SyncManifest int64              `json:"syncManifestBytes,omitempty"`
+	SyncSkipped  bool               `json:"syncSkipped,omitempty"`
 	LogBytes     int64              `json:"logBytes"`
 	LogTruncated bool               `json:"logTruncated"`
 	Results      *TestResultSummary `json:"results,omitempty"`
@@ -478,15 +483,42 @@ func (c *CoordinatorClient) CreateRun(ctx context.Context, leaseID string, cfg C
 	return res.Run, err
 }
 
-func (c *CoordinatorClient) FinishRun(ctx context.Context, runID string, exitCode int, sync, command time.Duration, log string, truncated bool, results *TestResultSummary) (CoordinatorRun, error) {
+type RunFinishMetrics struct {
+	Sync         time.Duration
+	Command      time.Duration
+	SyncFiles    int
+	SyncBytes    int64
+	SyncDeleted  int
+	SyncManifest int64
+	SyncSkipped  bool
+}
+
+func runFinishMetricsFromTimings(timings runTimings) RunFinishMetrics {
+	return RunFinishMetrics{
+		Sync:         timings.sync,
+		Command:      timings.command,
+		SyncFiles:    timings.syncStats.files,
+		SyncBytes:    timings.syncStats.bytes,
+		SyncDeleted:  timings.syncStats.deleted,
+		SyncManifest: timings.syncStats.manifestBytes,
+		SyncSkipped:  timings.syncSkipped,
+	}
+}
+
+func (c *CoordinatorClient) FinishRun(ctx context.Context, runID string, exitCode int, metrics RunFinishMetrics, log string, truncated bool, results *TestResultSummary) (CoordinatorRun, error) {
 	var res CoordinatorRunResponse
 	err := c.do(ctx, http.MethodPost, "/v1/runs/"+url.PathEscape(runID)+"/finish", map[string]any{
-		"exitCode":     exitCode,
-		"syncMs":       sync.Milliseconds(),
-		"commandMs":    command.Milliseconds(),
-		"log":          log,
-		"logTruncated": truncated,
-		"results":      results,
+		"exitCode":          exitCode,
+		"syncMs":            metrics.Sync.Milliseconds(),
+		"commandMs":         metrics.Command.Milliseconds(),
+		"syncFiles":         metrics.SyncFiles,
+		"syncBytes":         metrics.SyncBytes,
+		"syncDeleted":       metrics.SyncDeleted,
+		"syncManifestBytes": metrics.SyncManifest,
+		"syncSkipped":       metrics.SyncSkipped,
+		"log":               log,
+		"logTruncated":      truncated,
+		"results":           results,
 	}, &res)
 	return res.Run, err
 }

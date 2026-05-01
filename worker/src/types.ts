@@ -112,6 +112,11 @@ export interface RunRecord {
   syncMs?: number;
   commandMs?: number;
   durationMs?: number;
+  syncFiles?: number;
+  syncBytes?: number;
+  syncDeleted?: number;
+  syncManifestBytes?: number;
+  syncSkipped?: boolean;
   logBytes: number;
   logTruncated: boolean;
   results?: TestResultSummary;
@@ -131,6 +136,11 @@ export interface RunFinishRequest {
   exitCode: number;
   syncMs?: number;
   commandMs?: number;
+  syncFiles?: number;
+  syncBytes?: number;
+  syncDeleted?: number;
+  syncManifestBytes?: number;
+  syncSkipped?: boolean;
   log?: string;
   logTruncated?: boolean;
   results?: TestResultSummary;

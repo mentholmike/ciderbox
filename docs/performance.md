@@ -95,3 +95,11 @@ Use wall-clock timing around the whole command, not just the remote test process
 ```
 
 The useful number includes lease wait, SSH readiness, sync, Git hydration, command execution, and release. For warm leases, sync fingerprints and package caches should make repeated runs much faster than cold runs.
+
+Coordinator-backed runs also retain structured metrics in `history --json`:
+
+```sh
+bin/crabbox history --lease cbx_... --json
+```
+
+Use `syncMs`, `commandMs`, `durationMs`, `syncFiles`, `syncBytes`, `syncDeleted`, `syncManifestBytes`, and `syncSkipped` to separate source sync overhead from the remote command itself. If memory looks high, compare those values against `free -h`, `ps aux --sort=-rss | head`, `docker system df`, and `bin/crabbox cache stats --id cbx_...` on the same lease before blaming the coordinator path.

@@ -510,18 +510,35 @@ export class FleetDurableObject implements DurableObject {
     if (commandMs !== undefined) {
       run.commandMs = commandMs;
     }
+    const syncFiles = finiteNumber(input.syncFiles);
+    if (syncFiles !== undefined) {
+      run.syncFiles = syncFiles;
+    }
+    const syncBytes = finiteNumber(input.syncBytes);
+    if (syncBytes !== undefined) {
+      run.syncBytes = syncBytes;
+    }
+    const syncDeleted = finiteNumber(input.syncDeleted);
+    if (syncDeleted !== undefined) {
+      run.syncDeleted = syncDeleted;
+    }
+    const syncManifestBytes = finiteNumber(input.syncManifestBytes);
+    if (syncManifestBytes !== undefined) {
+      run.syncManifestBytes = syncManifestBytes;
+    }
+    run.syncSkipped = Boolean(input.syncSkipped);
     if (Number.isFinite(started)) {
       run.durationMs = now.getTime() - started;
     }
     run.state = run.exitCode === 0 ? "succeeded" : "failed";
     run.endedAt = now.toISOString();
-    const log = input.log ?? "";
-    run.logBytes = new TextEncoder().encode(log).byteLength;
-    run.logTruncated = Boolean(input.logTruncated);
+    const boundedLog = boundedRunLog(input.log ?? "");
+    run.logBytes = boundedLog.bytes;
+    run.logTruncated = Boolean(input.logTruncated) || boundedLog.truncated;
     if (input.results) {
       run.results = boundedTestResults(input.results);
     }
-    await this.state.storage.put(runLogKey(runID), log);
+    await this.state.storage.put(runLogKey(runID), boundedLog.log);
     await this.putRun(run);
     return json({ run });
   }
@@ -765,6 +782,21 @@ function finiteNumber(value: number | undefined): number | undefined {
 const MAX_RESULT_FILES = 50;
 const MAX_RESULT_FAILURES = 100;
 const MAX_RESULT_STRING_BYTES = 4096;
+const MAX_RUN_LOG_BYTES = 64 * 1024;
+
+function boundedRunLog(log: string): { log: string; bytes: number; truncated: boolean } {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(log);
+  if (bytes.byteLength <= MAX_RUN_LOG_BYTES) {
+    return { log, bytes: bytes.byteLength, truncated: false };
+  }
+  const decoder = new TextDecoder();
+  let out = decoder.decode(bytes.slice(bytes.byteLength - MAX_RUN_LOG_BYTES));
+  while (encoder.encode(out).byteLength > MAX_RUN_LOG_BYTES) {
+    out = out.slice(1);
+  }
+  return { log: out, bytes: encoder.encode(out).byteLength, truncated: true };
+}
 
 function boundedTestResults(results: TestResultSummary): TestResultSummary {
   return {

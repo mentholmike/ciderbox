@@ -47,7 +47,7 @@ Reports include lease count, active lease count, elapsed runtime, estimated elap
 
 ## Run History And Logs
 
-Coordinator-backed `crabbox run` creates a run record before the remote command starts and finishes it with exit code, timing, and the latest retained output tail.
+Coordinator-backed `crabbox run` creates a run record before the remote command starts and finishes it with exit code, timing, sync size metrics, and the latest retained output tail.
 
 Use:
 
@@ -59,7 +59,13 @@ bin/crabbox logs run_...
 bin/crabbox results run_...
 ```
 
-History is for command debugging, not unlimited log archival. Logs are bounded tails of remote stdout/stderr. Test results are stored as structured summaries when `--junit` or `results.junit` is configured.
+History is for command debugging, not unlimited log archival. Logs are bounded tails of remote stdout/stderr on both the CLI and coordinator side. Test results are stored as structured summaries when `--junit` or `results.junit` is configured.
+
+Useful JSON fields for slow-run triage:
+
+- `syncMs`, `commandMs`, and `durationMs`;
+- `syncFiles`, `syncBytes`, `syncDeleted`, `syncManifestBytes`, and `syncSkipped`;
+- `logBytes` and `logTruncated`.
 
 ## Remote Debugging
 

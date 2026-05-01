@@ -12,6 +12,7 @@
 - Added Blacksmith Testbox workflow flags for `crabbox warmup` and `crabbox run`, enabling one-command Testbox runs without repo YAML or environment variables.
 - Added AWS runner image management with `crabbox image current`, `image list`, `image create`, and `image promote` so trusted operators can bake and select warmed AMIs.
 - Added configured GitHub Actions hydrate fields through `actions.fields`, with CLI `-f key=value` overrides for repo-specific workflow inputs.
+- Added structured sync-size metrics to coordinator run history for latency and throughput triage.
 
 ### Changed
 
@@ -28,6 +29,7 @@
 - Fixed `whoami` reporting for GitHub browser-login tokens.
 - Fixed exact `cbx_...` lookups bypassing owner-scoped slug authorization checks.
 - Added cleanup and a pending-login cap for unauthenticated GitHub OAuth login starts.
+- Rebounded coordinator-stored run logs to the latest 64 KiB tail even if a client bypasses the CLI cap.
 
 ## 0.1.0 - 2026-05-01
 
