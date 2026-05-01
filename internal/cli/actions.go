@@ -624,7 +624,7 @@ if [ ! -x ./config.sh ] || [ ! -f ".crabbox-runner-version-$version-$runner_arch
   touch ".crabbox-runner-version-$version-$runner_arch"
 fi
 if [ -f .runner ]; then
-  ./config.sh remove --unattended --token "$RUNNER_TOKEN" || true
+  ./config.sh remove --token "$RUNNER_TOKEN" || true
 fi
 sudo ./bin/installdependencies.sh >/tmp/crabbox-actions-runner-deps.log 2>&1 || true
 ./config.sh --unattended --replace %s --url "https://github.com/${RUNNER_REPO}" --token "$RUNNER_TOKEN" --name "$RUNNER_NAME" --labels "$RUNNER_LABELS"

@@ -23,6 +23,7 @@
 ### Fixed
 
 - Cleaned up Blacksmith Testbox local lease claims and per-lease SSH keys after failed warmups, explicit stops, and one-shot runs.
+- Fixed GitHub Actions runner reuse by avoiding the unsupported `config.sh remove --unattended` flag on current runner releases.
 - Restricted Worker admin routes to shared-token admin auth so GitHub browser-login users cannot call admin endpoints.
 - Fixed `whoami` reporting for GitHub browser-login tokens.
 - Fixed exact `cbx_...` lookups bypassing owner-scoped slug authorization checks.

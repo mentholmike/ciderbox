@@ -126,12 +126,16 @@ func TestGitHubActionsRunnerInstallScriptUsesOfficialRunner(t *testing.T) {
 	for _, want := range []string{
 		"https://api.github.com/repos/actions/runner/releases/latest",
 		"https://github.com/actions/runner/releases/download/",
+		"./config.sh remove --token",
 		"./config.sh --unattended --replace --ephemeral",
 		"crabbox-actions-runner.service",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("install script missing %q", want)
 		}
+	}
+	if strings.Contains(got, "remove --unattended") {
+		t.Fatalf("install script should not pass --unattended to config.sh remove")
 	}
 }
 
