@@ -95,6 +95,7 @@ CRABBOX_SHARED_TOKEN
 HETZNER_TOKEN
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
+CRABBOX_AWS_MAC_HOST_ID required for brokered target=macos
 ```
 
 Cost-control secrets and settings:

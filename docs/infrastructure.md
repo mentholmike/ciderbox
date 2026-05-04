@@ -172,6 +172,7 @@ Brokered AWS credentials live as Worker secrets:
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
+CRABBOX_AWS_MAC_HOST_ID required for brokered target=macos
 ```
 
 Direct fallback env is whatever the AWS SDK can resolve, such as:
@@ -296,6 +297,7 @@ HETZNER_TOKEN
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
+CRABBOX_AWS_MAC_HOST_ID required for brokered target=macos
 CRABBOX_SHARED_TOKEN
 CRABBOX_GITHUB_CLIENT_ID
 CRABBOX_GITHUB_CLIENT_SECRET
