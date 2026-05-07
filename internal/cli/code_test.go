@@ -1,25 +1,84 @@
 package cli
 
 import (
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nhooyr.io/websocket"
 )
 
 func TestWebCodeURLs(t *testing.T) {
-	if got := webCodeAgentURL("https://crabbox.openclaw.ai", "cbx_abcdef123456", "code_abc"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/code/agent?ticket=code_abc" {
+	if got := webCodeAgentURL("https://crabbox.openclaw.ai", "cbx_abcdef123456"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/code/agent" {
 		t.Fatalf("agent URL=%q", got)
+	}
+	if got := webCodeAgentURLWithTicket("https://crabbox.openclaw.ai", "cbx_abcdef123456", "code_abc"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/code/agent?ticket=code_abc" {
+		t.Fatalf("agent fallback URL=%q", got)
 	}
 	if got := webCodePortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456"); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/code/" {
 		t.Fatalf("portal URL=%q", got)
 	}
 	if got := webCodePortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456", "/work/cbx/repo/worker"); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/code/?folder=%2Fwork%2Fcbx%2Frepo%2Fworker" {
 		t.Fatalf("portal URL with folder=%q", got)
+	}
+}
+
+func TestConnectCodeBridgeSendsTicketInAuthorizationHeader(t *testing.T) {
+	agentConnected := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/leases/cbx_abcdef123456/code/ticket":
+			if r.Method != http.MethodPost {
+				t.Errorf("ticket method=%s", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Errorf("authorization=%q", got)
+			}
+			_ = json.NewEncoder(w).Encode(coordinatorCodeTicket{
+				Ticket:  "code_abcdef1234567890abcdef1234567890",
+				LeaseID: "cbx_abcdef123456",
+			})
+		case "/v1/leases/cbx_abcdef123456/code/agent":
+			if got := r.URL.Query().Get("ticket"); got != "" {
+				t.Errorf("query ticket=%q", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer code_abcdef1234567890abcdef1234567890" {
+				t.Errorf("bridge authorization=%q", got)
+			}
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("websocket accept: %v", err)
+				return
+			}
+			close(agentConnected)
+			_, _, _ = conn.Read(context.Background())
+			_ = conn.Close(websocket.StatusNormalClosure, "test done")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	coord := &CoordinatorClient{BaseURL: server.URL, Token: "test-token", Client: server.Client()}
+	bridge, err := connectCodeBridge(ctx, coord, "cbx_abcdef123456", "127.0.0.1", "8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(websocket.StatusNormalClosure, "test done")
+
+	select {
+	case <-agentConnected:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }
 

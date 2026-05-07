@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +19,11 @@ import (
 )
 
 func TestWebVNCURLs(t *testing.T) {
-	if got := webVNCAgentURL("https://crabbox.openclaw.ai", "cbx_abcdef123456", "wvnc_abc"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/webvnc/agent?ticket=wvnc_abc" {
+	if got := webVNCAgentURL("https://crabbox.openclaw.ai", "cbx_abcdef123456"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/webvnc/agent" {
 		t.Fatalf("agent URL=%q", got)
+	}
+	if got := webVNCAgentURLWithTicket("https://crabbox.openclaw.ai", "cbx_abcdef123456", "wvnc_abc"); got != "wss://crabbox.openclaw.ai/v1/leases/cbx_abcdef123456/webvnc/agent?ticket=wvnc_abc" {
+		t.Fatalf("agent fallback URL=%q", got)
 	}
 	if got := webVNCPortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456", "", "secret value"); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/vnc#password=secret+value" {
 		t.Fatalf("portal URL=%q", got)
@@ -78,8 +82,11 @@ func TestConnectWebVNCBridgeRegistersAgentBeforeServe(t *testing.T) {
 				LeaseID: "cbx_abcdef123456",
 			})
 		case "/v1/leases/cbx_abcdef123456/webvnc/agent":
-			if got := r.URL.Query().Get("ticket"); got != "wvnc_abcdef1234567890abcdef1234567890" {
-				t.Errorf("ticket=%q", got)
+			if got := r.URL.Query().Get("ticket"); got != "" {
+				t.Errorf("query ticket=%q", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer wvnc_abcdef1234567890abcdef1234567890" {
+				t.Errorf("bridge authorization=%q", got)
 			}
 			conn, err := websocket.Accept(w, r, nil)
 			if err != nil {
@@ -153,6 +160,22 @@ func TestRetryableWebVNCBridgeErrors(t *testing.T) {
 				t.Fatalf("retryable=%v, want %v", got, tc.retryable)
 			}
 		})
+	}
+}
+
+func TestRetryBridgeTicketInQuery(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Body:       io.NopCloser(strings.NewReader("old broker needs query ticket")),
+	}
+	if !retryBridgeTicketInQuery(resp, errors.New("websocket rejected")) {
+		t.Fatal("expected unauthorized websocket response to retry with query ticket")
+	}
+	if retryBridgeTicketInQuery(&http.Response{StatusCode: http.StatusForbidden}, errors.New("forbidden")) {
+		t.Fatal("forbidden response should not retry with query ticket")
+	}
+	if retryBridgeTicketInQuery(resp, nil) {
+		t.Fatal("successful dial should not retry with query ticket")
 	}
 }
 

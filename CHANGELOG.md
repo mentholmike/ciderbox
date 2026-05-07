@@ -8,6 +8,7 @@
 - Fixed `run --no-sync` timing summaries so they report `sync_skipped=true`.
 - Fixed native Windows command output so first-use PowerShell progress records do not leak CLIXML into run logs.
 - Fixed Islo provider sync so `crabbox run --provider islo` uploads the local workspace, uses the correct `/workspace/<workdir>`, and falls back to chunked exec upload while the archive API returns server errors.
+- Fixed Code and WebVNC bridge websocket auth so upgraded brokers receive short-lived bridge tickets in the `Authorization` header instead of logging them in URL query strings, while preserving query fallback for older brokers.
 
 ## 0.6.0 - 2026-05-07
 

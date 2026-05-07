@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   FleetDurableObject,
+  bridgeTicketFromRequest,
   codeForwardHeaders,
   codeResponseHeaders,
   flushPendingWebVNC,
@@ -1316,6 +1317,21 @@ describe("fleet lease identity and idle", () => {
       }),
     );
     expect(missingTicket.status).toBe(401);
+  });
+
+  it("accepts bridge tickets in authorization before falling back to query strings", () => {
+    expect(
+      bridgeTicketFromRequest(
+        request("GET", "/v1/leases/blue-lobster/code/agent?ticket=code_query", {
+          headers: { authorization: "Bearer code_header" },
+        }),
+      ),
+    ).toBe("code_header");
+    expect(
+      bridgeTicketFromRequest(
+        request("GET", "/v1/leases/blue-lobster/code/agent?ticket=code_query"),
+      ),
+    ).toBe("code_query");
   });
 
   it("uses a VS Code-compatible CSP for code proxy responses", () => {

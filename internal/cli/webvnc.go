@@ -398,9 +398,14 @@ func connectWebVNCBridge(ctx context.Context, coord *CoordinatorClient, leaseID,
 		_ = tcp.Close()
 		return nil, err
 	}
-	ws, _, err := websocket.Dial(ctx, webVNCAgentURL(coord.BaseURL, leaseID, ticket.Ticket), &websocket.DialOptions{
-		HTTPHeader: coord.webVNCAccessHeaders(),
+	ws, resp, err := websocket.Dial(ctx, webVNCAgentURL(coord.BaseURL, leaseID), &websocket.DialOptions{
+		HTTPHeader: bridgeTicketHeaders(coord, ticket.Ticket),
 	})
+	if retryBridgeTicketInQuery(resp, err) {
+		ws, _, err = websocket.Dial(ctx, webVNCAgentURLWithTicket(coord.BaseURL, leaseID, ticket.Ticket), &websocket.DialOptions{
+			HTTPHeader: coord.webVNCAccessHeaders(),
+		})
+	}
 	if err != nil {
 		_ = tcp.Close()
 		return nil, err
@@ -506,7 +511,24 @@ func (c *CoordinatorClient) webVNCAccessHeaders() http.Header {
 	return header
 }
 
-func webVNCAgentURL(base, leaseID, ticket string) string {
+func bridgeTicketHeaders(coord *CoordinatorClient, ticket string) http.Header {
+	headers := coord.webVNCAccessHeaders()
+	headers.Set("Authorization", "Bearer "+ticket)
+	return headers
+}
+
+func retryBridgeTicketInQuery(resp *http.Response, err error) bool {
+	if err == nil || resp == nil {
+		return false
+	}
+	if resp.Body != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	return resp.StatusCode == http.StatusUnauthorized
+}
+
+func webVNCAgentURL(base, leaseID string) string {
 	u, err := url.Parse(base)
 	if err != nil {
 		return base
@@ -517,6 +539,16 @@ func webVNCAgentURL(base, leaseID, ticket string) string {
 		u.Scheme = "ws"
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/v1/leases/" + url.PathEscape(leaseID) + "/webvnc/agent"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
+func webVNCAgentURLWithTicket(base, leaseID, ticket string) string {
+	u, err := url.Parse(webVNCAgentURL(base, leaseID))
+	if err != nil {
+		return base
+	}
 	values := url.Values{}
 	values.Set("ticket", ticket)
 	u.RawQuery = values.Encode()

@@ -1356,7 +1356,7 @@ export class FleetDurableObject implements DurableObject {
   }
 
   private async consumeWebVNCTicket(request: Request): Promise<WebVNCTicketRecord | undefined> {
-    const value = new URL(request.url).searchParams.get("ticket") ?? "";
+    const value = bridgeTicketFromRequest(request);
     if (!validWebVNCTicket(value)) {
       return undefined;
     }
@@ -1385,7 +1385,7 @@ export class FleetDurableObject implements DurableObject {
   }
 
   private async consumeCodeTicket(request: Request): Promise<CodeTicketRecord | undefined> {
-    const value = new URL(request.url).searchParams.get("ticket") ?? "";
+    const value = bridgeTicketFromRequest(request);
     if (!validCodeTicket(value)) {
       return undefined;
     }
@@ -2171,6 +2171,15 @@ function validWebVNCTicket(value: string | undefined): value is string {
 
 function validCodeTicket(value: string | undefined): value is string {
   return typeof value === "string" && /^code_[a-f0-9]{32}$/.test(value);
+}
+
+export function bridgeTicketFromRequest(request: Request): string {
+  const auth = request.headers.get("authorization")?.trim() ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(auth);
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+  return new URL(request.url).searchParams.get("ticket") ?? "";
 }
 
 function validImageID(value: string | undefined): value is string {
