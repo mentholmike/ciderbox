@@ -45,17 +45,23 @@ func TestStopDaemonProcessKillsProcessGroup(t *testing.T) {
 func waitForPIDFile(t *testing.T, path string) int {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
 	for {
 		data, err := os.ReadFile(path)
 		if err == nil {
-			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-			if parseErr != nil {
-				t.Fatal(parseErr)
+			value := strings.TrimSpace(string(data))
+			if value != "" {
+				pid, parseErr := strconv.Atoi(value)
+				if parseErr == nil {
+					return pid
+				}
+				lastErr = parseErr
 			}
-			return pid
+		} else {
+			lastErr = err
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for pid file %s: %v", path, err)
+			t.Fatalf("timed out waiting for pid file %s: %v", path, lastErr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
