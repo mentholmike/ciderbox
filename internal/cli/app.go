@@ -95,6 +95,8 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 		return a.screenshot(ctx, helpArgs), true
 	case "artifacts":
 		return nil, false
+	case "capsule":
+		return nil, false
 	case "inspect":
 		return a.inspect(ctx, helpArgs), true
 	case "stop", "release":
@@ -157,6 +159,7 @@ Commands:
   usage       Show cost and usage estimates by user, org, or fleet
   admin       Lease admin controls for trusted operators
   actions     Register GitHub Actions runners or dispatch workflows
+  capsule     Capture and replay lightweight failure capsules
   ssh         Print the SSH command for a lease
   vnc         Print or open VNC connection details for a desktop lease
   webvnc      Bridge a desktop lease into the authenticated web portal
@@ -198,6 +201,8 @@ Common Flows:
   crabbox warmup --actions-runner
   crabbox actions hydrate --id blue-lobster
   crabbox actions dispatch -f testbox_id=cbx_abcdef123456
+  crabbox capsule from-actions https://github.com/openclaw/crabbox/actions/runs/123 --replay 'go test ./...'
+  crabbox capsule replay capsules/openclaw-crabbox-actions-123/capsule.yaml --keep
   crabbox run --provider ssh --target macos --static-host mac.local -- echo ok
   crabbox run --provider ssh --target windows --windows-mode normal --static-host win.local -- pwsh -NoProfile -Command '$PSVersionTable'
   crabbox stop blue-lobster

@@ -70,6 +70,10 @@ crabbox cache warm --id <lease-id-or-slug> -- <command...>
 crabbox actions hydrate --id <lease-id-or-slug> [--workflow <file|name|id>] [--wait-timeout <duration>] [--timing-json]
 crabbox actions register --id <lease-id-or-slug> [--repo owner/name]
 crabbox actions dispatch [--workflow <file|name|id>] [-f key=value]
+crabbox capsule from-actions <run-url> --replay '<command>' [--output <dir>]
+crabbox capsule replay <capsule.yaml> [--keep]
+crabbox capsule inspect <capsule.yaml> [--json]
+crabbox capsule promote <capsule.yaml> --regression
 crabbox status --id <lease-id-or-slug> [--network auto|tailscale|public] [--wait]
 crabbox list [--json]
 crabbox share --id <lease-id-or-slug> [--user <email>] [--org] [--role use|manage] [--list] [--json]
@@ -144,6 +148,15 @@ crabbox warmup
 crabbox actions hydrate --id blue-lobster
 crabbox run --id blue-lobster -- pnpm test:changed
 crabbox stop blue-lobster
+```
+
+Capture and replay a failed GitHub Actions run:
+
+```sh
+crabbox capsule from-actions https://github.com/openclaw/crabbox/actions/runs/123 --replay 'go test ./...'
+crabbox capsule replay capsules/openclaw-crabbox-actions-123/capsule.yaml --keep
+crabbox ssh --id blue-lobster
+crabbox capsule promote capsules/openclaw-crabbox-actions-123/capsule.yaml --regression
 ```
 
 Use Blacksmith Testboxes through the same Crabbox surface:
