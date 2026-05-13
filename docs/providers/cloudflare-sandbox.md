@@ -1,7 +1,9 @@
 # Cloudflare Sandbox Provider
 
 Use `provider: cloudflare-sandbox` when Crabbox should run commands through a
-Cloudflare Worker backed by a custom Cloudflare Containers image.
+Cloudflare Worker backed by a custom Cloudflare Containers image. The provider
+also accepts the aliases `cf-containers`, `cloudflare-containers`,
+`cf-sandbox`, and `cloudflare`.
 
 Cloudflare Sandbox is a delegated run provider. Crabbox owns local repo archive
 creation, local lease claims, timing output, command rendering, and friendly

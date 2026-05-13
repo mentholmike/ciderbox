@@ -17,7 +17,7 @@ func RegisterCloudflareSandboxProviderFlags(fs *flag.FlagSet, defaults Config) a
 }
 
 func ApplyCloudflareSandboxProviderFlags(cfg *Config, fs *flag.FlagSet, values any) error {
-	if cfg.Provider == providerName || cfg.Provider == "cf-sandbox" || cfg.Provider == "cloudflare" {
+	if cfg.Provider == providerName || cfg.Provider == "cf-sandbox" || cfg.Provider == "cf-containers" || cfg.Provider == "cloudflare" || cfg.Provider == "cloudflare-containers" {
 		if flagWasSet(fs, "class") {
 			return exit(2, "--class is not supported for provider=%s", providerName)
 		}

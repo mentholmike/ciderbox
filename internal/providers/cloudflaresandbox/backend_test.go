@@ -22,6 +22,12 @@ func TestCloudflareSandboxProviderSpec(t *testing.T) {
 	if len(spec.Features) != 1 || spec.Features[0] != "archive-sync" {
 		t.Fatalf("spec.Features = %#v, want archive-sync", spec.Features)
 	}
+	aliases := Provider{}.Aliases()
+	for _, want := range []string{"cf-sandbox", "cf-containers", "cloudflare", "cloudflare-containers"} {
+		if !containsString(aliases, want) {
+			t.Fatalf("aliases = %#v, missing %q", aliases, want)
+		}
+	}
 }
 
 func TestCloudflareSandboxWorkdirRejectsBroadPaths(t *testing.T) {
@@ -102,6 +108,15 @@ func TestDurationCeil(t *testing.T) {
 	if got := durationMillisecondsCeil(1500 * time.Microsecond); got != 2 {
 		t.Fatalf("durationMillisecondsCeil = %d, want 2", got)
 	}
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCloudflareSandboxStatusPrunesExpiredClaim(t *testing.T) {
