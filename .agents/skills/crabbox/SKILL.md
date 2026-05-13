@@ -70,6 +70,7 @@ Run commands:
 
 ```sh
 crabbox run --id <cbx_id-or-slug> -- pnpm test:changed
+crabbox run --id <cbx_id-or-slug> --full-resync -- pnpm test:changed
 crabbox run --id <cbx_id-or-slug> --shell "corepack enable && pnpm install --frozen-lockfile && pnpm test"
 ```
 
@@ -104,8 +105,21 @@ crabbox run \
 ```
 
 Crabbox parses simple `export NAME=value` and `NAME=value` profile lines
-without executing the profile. It prints names plus redacted presence/length
-metadata only.
+without executing the profile. It probes the uploaded profile remotely and
+prints names plus redacted presence/length metadata only. On POSIX SSH leases,
+add `--env-helper <name>` when follow-up commands should reuse a remote
+`.crabbox/env/<name>` wrapper:
+
+```sh
+crabbox run \
+  --env-from-profile ~/.project-live.profile \
+  --allow-env API_TOKEN \
+  --env-helper live \
+  -- ./.crabbox/env/live ./scripts/live-smoke.sh
+```
+
+Persist helpers only on leases you control; the profile remains on the remote
+workdir until cleanup, lease reset, or `--full-resync`.
 
 Use fresh PR checkout when local dependency churn or dirty sync would confuse
 the result:
@@ -121,6 +135,9 @@ from the current GitHub origin. Non-GitHub hosts are rejected.
 When sync guardrails look high because the checkout is noisy, prefer
 `--fresh-pr ... --apply-local-patch`. Normal sync output prints both the full
 candidate and the dirty delta; guardrails use the dirty delta when present.
+When a warm lease smells stale, use `--full-resync` (alias `--fresh-sync`) to
+reset the remote workdir, skip the sync fingerprint fast path, reseed Git when
+possible, and upload the checkout from scratch.
 
 ## Observability And Captures
 
@@ -156,7 +173,9 @@ bundles are local-only and not redacted by Crabbox; review before sharing.
 
 Use `crabbox sync-plan` before large runs. Unexpected counts usually mean
 generated churn; add project-specific excludes to `.crabboxignore` or
-`sync.exclude`.
+`sync.exclude`. If quiet rsync watchdogs or SSH timeouts print `next_action=`,
+follow that hint: usually retry with `--full-resync`, then replace the lease if
+the problem persists.
 
 ## Useful Commands
 
@@ -254,9 +273,10 @@ target supports them.
 
 Delegated run providers own command transport. Expect them to reject SSH-run
 features such as `--script`, `--script-stdin`, `--fresh-pr`, local stdout/stderr
-captures, `--capture-on-fail`, and `--download`, unless that provider doc says
-otherwise. `--keep-on-failure` is still useful for one-shot delegated providers
-that Crabbox would otherwise stop after a failed command.
+captures, `--capture-on-fail`, `--download`, `--full-resync`, and
+`--env-helper`, unless that provider doc says otherwise. `--keep-on-failure` is
+still useful for one-shot delegated providers that Crabbox would otherwise stop
+after a failed command.
 
 Native Windows targets use PowerShell and tar-based manifest sync. Prefer
 plain argv for one executable and `--shell` for multi-statement PowerShell.
