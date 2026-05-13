@@ -2,6 +2,20 @@
 
 ## 0.13.1 - Unreleased
 
+### Fixed
+
+- Fixed Hetzner Cloud server-list parsing: `private_net` is returned by the
+  API as an array of network attachments (per Hetzner's documented schema),
+  but `Server.PrivateNet` was modeled as a struct, causing every Hetzner
+  command (`list`, `doctor`, `warmup`, `run --id ...`) to fail with
+  `json: cannot unmarshal array into Go struct field Server.servers.private_net ...`
+  as soon as any server existed in the account. Promoted `PrivateNet` to a
+  named type with a best-effort `UnmarshalJSON` that accepts both Hetzner's
+  array shape (lifts the first attachment's `ip` into `PrivateNet.IPv4.IP`)
+  and the legacy struct shape used elsewhere. Azure / Proxmox callers are
+  unaffected — they set the field via direct assignment. Regression tests
+  cover empty array, attached array, legacy struct, and null/omitted shapes.
+
 ## 0.13.0 - 2026-05-13
 
 ### Added
