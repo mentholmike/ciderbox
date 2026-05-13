@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "crabbox-cloudflare-sandbox-runner",
-  "main": "src/cloudflare_sandbox_runner.ts",
+  "name": "crabbox-cloudflare-container-runner",
+  "main": "src/cloudflare_container_runner.ts",
   "compatibility_date": "2026-05-13",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
@@ -9,8 +9,8 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      "image": "./cloudflare-sandbox.Dockerfile",
-      "instance_type": "lite",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "standard-4",
       "max_instances": 4,
     },
   ],
@@ -24,7 +24,7 @@
   },
   "migrations": [
     {
-      "tag": "cloudflare-sandbox-v1",
+      "tag": "cloudflare-container-v1",
       "new_sqlite_classes": ["Sandbox"],
     },
   ],

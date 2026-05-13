@@ -3,6 +3,6 @@
   "compilerOptions": {
     "skipLibCheck": true
   },
-  "include": ["src/cloudflare_sandbox_runner.ts"],
+  "include": ["src/cloudflare_container_runner.ts"],
   "exclude": []
 }

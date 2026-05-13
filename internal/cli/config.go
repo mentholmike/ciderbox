@@ -85,7 +85,7 @@ type Config struct {
 	Islo               IsloConfig
 	Tensorlake         TensorlakeConfig
 	Modal              ModalConfig
-	CloudflareSandbox  CloudflareSandboxConfig
+	CFContainers       CFContainersConfig
 	Semaphore          SemaphoreConfig
 	Sprites            SpritesConfig
 	Tailscale          TailscaleConfig
@@ -212,7 +212,7 @@ type ModalConfig struct {
 	Python  string
 }
 
-type CloudflareSandboxConfig struct {
+type CFContainersConfig struct {
 	APIURL  string
 	Token   string
 	Workdir string
@@ -469,7 +469,7 @@ func baseConfig() Config {
 			Workdir: "/workspace/crabbox",
 			Python:  "python3",
 		},
-		CloudflareSandbox: CloudflareSandboxConfig{
+		CFContainers: CFContainersConfig{
 			Workdir: "/workspace/crabbox",
 		},
 		Proxmox: ProxmoxConfig{
@@ -497,51 +497,50 @@ func baseConfig() Config {
 }
 
 type fileConfig struct {
-	Profile           string                       `yaml:"profile,omitempty"`
-	Provider          string                       `yaml:"provider,omitempty"`
-	Target            string                       `yaml:"target,omitempty"`
-	TargetOS          string                       `yaml:"targetOS,omitempty"`
-	Windows           *fileWindowsConfig           `yaml:"windows,omitempty"`
-	Desktop           *bool                        `yaml:"desktop,omitempty"`
-	Browser           *bool                        `yaml:"browser,omitempty"`
-	Code              *bool                        `yaml:"code,omitempty"`
-	Network           string                       `yaml:"network,omitempty"`
-	Class             string                       `yaml:"class,omitempty"`
-	ServerType        string                       `yaml:"serverType,omitempty"`
-	Coordinator       string                       `yaml:"coordinator,omitempty"`
-	CoordinatorToken  string                       `yaml:"coordinatorToken,omitempty"`
-	Broker            *fileBrokerConfig            `yaml:"broker,omitempty"`
-	Hetzner           *fileHetznerConfig           `yaml:"hetzner,omitempty"`
-	AWS               *fileAWSConfig               `yaml:"aws,omitempty"`
-	Azure             *fileAzureConfig             `yaml:"azure,omitempty"`
-	GCP               *fileGCPConfig               `yaml:"gcp,omitempty"`
-	Proxmox           *fileProxmoxConfig           `yaml:"proxmox,omitempty"`
-	SSH               *fileSSHConfig               `yaml:"ssh,omitempty"`
-	Sync              *fileSyncConfig              `yaml:"sync,omitempty"`
-	Run               *fileRunConfig               `yaml:"run,omitempty"`
-	Env               *fileEnvConfig               `yaml:"env,omitempty"`
-	Capacity          *fileCapacityConfig          `yaml:"capacity,omitempty"`
-	Actions           *fileActionsConfig           `yaml:"actions,omitempty"`
-	Blacksmith        *fileBlacksmithConfig        `yaml:"blacksmith,omitempty"`
-	Namespace         *fileNamespaceConfig         `yaml:"namespace,omitempty"`
-	Daytona           *fileDaytonaConfig           `yaml:"daytona,omitempty"`
-	E2B               *fileE2BConfig               `yaml:"e2b,omitempty"`
-	Islo              *fileIsloConfig              `yaml:"islo,omitempty"`
-	Tensorlake        *fileTensorlakeConfig        `yaml:"tensorlake,omitempty"`
-	Modal             *fileModalConfig             `yaml:"modal,omitempty"`
-	CFContainers      *fileCloudflareSandboxConfig `yaml:"cfContainers,omitempty"`
-	CloudflareSandbox *fileCloudflareSandboxConfig `yaml:"cloudflareSandbox,omitempty"`
-	Semaphore         *fileSemaphoreConfig         `yaml:"semaphore,omitempty"`
-	Sprites           *fileSpritesConfig           `yaml:"sprites,omitempty"`
-	Tailscale         *fileTailscaleConfig         `yaml:"tailscale,omitempty"`
-	Static            *fileStaticConfig            `yaml:"static,omitempty"`
-	Results           *fileResultsConfig           `yaml:"results,omitempty"`
-	Cache             *fileCacheConfig             `yaml:"cache,omitempty"`
-	Lease             *fileLeaseConfig             `yaml:"lease,omitempty"`
-	Jobs              map[string]fileJobConfig     `yaml:"jobs,omitempty"`
-	TTL               string                       `yaml:"ttl,omitempty"`
-	IdleTimeout       string                       `yaml:"idleTimeout,omitempty"`
-	WorkRoot          string                       `yaml:"workRoot,omitempty"`
+	Profile          string                   `yaml:"profile,omitempty"`
+	Provider         string                   `yaml:"provider,omitempty"`
+	Target           string                   `yaml:"target,omitempty"`
+	TargetOS         string                   `yaml:"targetOS,omitempty"`
+	Windows          *fileWindowsConfig       `yaml:"windows,omitempty"`
+	Desktop          *bool                    `yaml:"desktop,omitempty"`
+	Browser          *bool                    `yaml:"browser,omitempty"`
+	Code             *bool                    `yaml:"code,omitempty"`
+	Network          string                   `yaml:"network,omitempty"`
+	Class            string                   `yaml:"class,omitempty"`
+	ServerType       string                   `yaml:"serverType,omitempty"`
+	Coordinator      string                   `yaml:"coordinator,omitempty"`
+	CoordinatorToken string                   `yaml:"coordinatorToken,omitempty"`
+	Broker           *fileBrokerConfig        `yaml:"broker,omitempty"`
+	Hetzner          *fileHetznerConfig       `yaml:"hetzner,omitempty"`
+	AWS              *fileAWSConfig           `yaml:"aws,omitempty"`
+	Azure            *fileAzureConfig         `yaml:"azure,omitempty"`
+	GCP              *fileGCPConfig           `yaml:"gcp,omitempty"`
+	Proxmox          *fileProxmoxConfig       `yaml:"proxmox,omitempty"`
+	SSH              *fileSSHConfig           `yaml:"ssh,omitempty"`
+	Sync             *fileSyncConfig          `yaml:"sync,omitempty"`
+	Run              *fileRunConfig           `yaml:"run,omitempty"`
+	Env              *fileEnvConfig           `yaml:"env,omitempty"`
+	Capacity         *fileCapacityConfig      `yaml:"capacity,omitempty"`
+	Actions          *fileActionsConfig       `yaml:"actions,omitempty"`
+	Blacksmith       *fileBlacksmithConfig    `yaml:"blacksmith,omitempty"`
+	Namespace        *fileNamespaceConfig     `yaml:"namespace,omitempty"`
+	Daytona          *fileDaytonaConfig       `yaml:"daytona,omitempty"`
+	E2B              *fileE2BConfig           `yaml:"e2b,omitempty"`
+	Islo             *fileIsloConfig          `yaml:"islo,omitempty"`
+	Tensorlake       *fileTensorlakeConfig    `yaml:"tensorlake,omitempty"`
+	Modal            *fileModalConfig         `yaml:"modal,omitempty"`
+	CFContainers     *fileCFContainersConfig  `yaml:"cfContainers,omitempty"`
+	Semaphore        *fileSemaphoreConfig     `yaml:"semaphore,omitempty"`
+	Sprites          *fileSpritesConfig       `yaml:"sprites,omitempty"`
+	Tailscale        *fileTailscaleConfig     `yaml:"tailscale,omitempty"`
+	Static           *fileStaticConfig        `yaml:"static,omitempty"`
+	Results          *fileResultsConfig       `yaml:"results,omitempty"`
+	Cache            *fileCacheConfig         `yaml:"cache,omitempty"`
+	Lease            *fileLeaseConfig         `yaml:"lease,omitempty"`
+	Jobs             map[string]fileJobConfig `yaml:"jobs,omitempty"`
+	TTL              string                   `yaml:"ttl,omitempty"`
+	IdleTimeout      string                   `yaml:"idleTimeout,omitempty"`
+	WorkRoot         string                   `yaml:"workRoot,omitempty"`
 }
 
 type fileWindowsConfig struct {
@@ -743,24 +742,24 @@ type fileModalConfig struct {
 	Python  string `yaml:"python,omitempty"`
 }
 
-type fileCloudflareSandboxConfig struct {
+type fileCFContainersConfig struct {
 	APIURL  string `yaml:"apiUrl,omitempty"`
 	Token   string `yaml:"token,omitempty"`
 	Workdir string `yaml:"workdir,omitempty"`
 }
 
-func applyCloudflareContainersFileConfig(cfg *Config, file *fileCloudflareSandboxConfig) {
+func applyCFContainersFileConfig(cfg *Config, file *fileCFContainersConfig) {
 	if file == nil {
 		return
 	}
 	if file.APIURL != "" {
-		cfg.CloudflareSandbox.APIURL = file.APIURL
+		cfg.CFContainers.APIURL = file.APIURL
 	}
 	if file.Token != "" {
-		cfg.CloudflareSandbox.Token = file.Token
+		cfg.CFContainers.Token = file.Token
 	}
 	if file.Workdir != "" {
-		cfg.CloudflareSandbox.Workdir = file.Workdir
+		cfg.CFContainers.Workdir = file.Workdir
 	}
 }
 
@@ -1442,8 +1441,7 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 			cfg.Modal.Python = file.Modal.Python
 		}
 	}
-	applyCloudflareContainersFileConfig(cfg, file.CloudflareSandbox)
-	applyCloudflareContainersFileConfig(cfg, file.CFContainers)
+	applyCFContainersFileConfig(cfg, file.CFContainers)
 	if file.Semaphore != nil {
 		if file.Semaphore.Host != "" {
 			cfg.Semaphore.Host = file.Semaphore.Host
@@ -1862,9 +1860,9 @@ func applyEnv(cfg *Config) {
 	cfg.Modal.Image = getenv("CRABBOX_MODAL_IMAGE", cfg.Modal.Image)
 	cfg.Modal.Workdir = getenv("CRABBOX_MODAL_WORKDIR", cfg.Modal.Workdir)
 	cfg.Modal.Python = getenv("CRABBOX_MODAL_PYTHON", cfg.Modal.Python)
-	cfg.CloudflareSandbox.APIURL = getenv("CRABBOX_CF_CONTAINERS_API_URL", getenv("CRABBOX_CF_CONTAINERS_URL", getenv("CRABBOX_CLOUDFLARE_SANDBOX_API_URL", getenv("CRABBOX_CLOUDFLARE_SANDBOX_URL", cfg.CloudflareSandbox.APIURL))))
-	cfg.CloudflareSandbox.Token = getenv("CRABBOX_CF_CONTAINERS_TOKEN", getenv("CRABBOX_CLOUDFLARE_SANDBOX_TOKEN", cfg.CloudflareSandbox.Token))
-	cfg.CloudflareSandbox.Workdir = getenv("CRABBOX_CF_CONTAINERS_WORKDIR", getenv("CRABBOX_CLOUDFLARE_SANDBOX_WORKDIR", cfg.CloudflareSandbox.Workdir))
+	cfg.CFContainers.APIURL = getenv("CRABBOX_CF_CONTAINERS_API_URL", getenv("CRABBOX_CF_CONTAINERS_URL", cfg.CFContainers.APIURL))
+	cfg.CFContainers.Token = getenv("CRABBOX_CF_CONTAINERS_TOKEN", cfg.CFContainers.Token)
+	cfg.CFContainers.Workdir = getenv("CRABBOX_CF_CONTAINERS_WORKDIR", cfg.CFContainers.Workdir)
 	cfg.Semaphore.Host = getenv("CRABBOX_SEMAPHORE_HOST", getenv("SEMAPHORE_HOST", cfg.Semaphore.Host))
 	cfg.Semaphore.Token = getenv("CRABBOX_SEMAPHORE_TOKEN", getenv("SEMAPHORE_API_TOKEN", cfg.Semaphore.Token))
 	cfg.Semaphore.Project = getenv("CRABBOX_SEMAPHORE_PROJECT", getenv("SEMAPHORE_PROJECT", cfg.Semaphore.Project))

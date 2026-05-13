@@ -19,7 +19,10 @@ class MockContainer {
   readonly schedules: Array<{ when: Date | number; callback: string }> = [];
   deletedSchedules: string[] = [];
   destroyed = false;
+  stopped = false;
   started = false;
+  renewedActivityTimeouts = 0;
+  execResponse: Response | undefined;
 
   constructor(ctx: { storage: MemoryStorage }) {
     this.ctx = ctx;
@@ -32,6 +35,7 @@ class MockContainer {
   async containerFetch(input: string | URL): Promise<Response> {
     const url = new URL(String(input));
     if (url.pathname === "/v1/exec") {
+      if (this.execResponse) return this.execResponse;
       return new Response('{"type":"complete","exitCode":0}\n', {
         headers: { "Content-Type": "application/x-ndjson" },
       });
@@ -48,6 +52,14 @@ class MockContainer {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+  }
+
+  renewActivityTimeout(): void {
+    this.renewedActivityTimeouts += 1;
   }
 
   deleteSchedules(name: string): void {
@@ -73,9 +85,9 @@ vi.mock("@cloudflare/containers", () => ({
   getContainer: (namespace: { get(id: string): unknown }, id: string) => namespace.get(id),
 }));
 
-const { Sandbox } = await import("../src/cloudflare_sandbox_runner");
+const { Sandbox } = await import("../src/cloudflare_container_runner");
 
-describe("Cloudflare sandbox runner lifecycle", () => {
+describe("CF Containers runner lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-13T18:00:00Z"));
@@ -142,6 +154,56 @@ describe("Cloudflare sandbox runner lifecycle", () => {
     });
   });
 
+  it("does not expire a lease while a command stream is active", async () => {
+    const storage = new MemoryStorage();
+    const sandbox = new Sandbox({ storage });
+    await sandbox.fetch(
+      new Request("http://crabbox.internal/__crabbox/create", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "cbx_test",
+          workdir: "/workspace/repo",
+          idleTimeoutSeconds: 10,
+        }),
+      }),
+    );
+
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    sandbox.execResponse = new Response(
+      new ReadableStream<Uint8Array>({
+        start(nextController) {
+          controller = nextController;
+          nextController.enqueue(
+            new TextEncoder().encode('{"type":"stdout","data":"started\\n"}\n'),
+          );
+        },
+      }),
+      { headers: { "Content-Type": "application/x-ndjson" } },
+    );
+
+    const response = await sandbox.fetch(
+      new Request("http://crabbox.internal/__crabbox/exec-stream", {
+        method: "POST",
+        body: JSON.stringify({ command: "sleep 30", cwd: "/workspace/repo" }),
+      }),
+    );
+
+    vi.setSystemTime(new Date("2026-05-13T18:00:11Z"));
+    await sandbox.expireIfIdle();
+    expect(sandbox.destroyed).toBe(false);
+
+    controller?.close();
+    await response.text();
+    await vi.runAllTimersAsync();
+
+    const status = await sandbox.fetch(new Request("http://crabbox.internal/__crabbox/status"));
+    await expect(status.json()).resolves.toMatchObject({
+      state: "running",
+      lastTouchedAt: "2026-05-13T18:00:11.000Z",
+      expiresAt: "2026-05-13T18:00:21.000Z",
+    });
+  });
+
   it("expires and destroys the container after the deadline", async () => {
     const sandbox = new Sandbox({ storage: new MemoryStorage() });
     await sandbox.fetch(
@@ -169,6 +231,32 @@ describe("Cloudflare sandbox runner lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: "sandbox expired",
       state: "expired",
+    });
+  });
+
+  it("keeps the container awake when platform activity expires before the lease", async () => {
+    const sandbox = new Sandbox({ storage: new MemoryStorage() });
+    await sandbox.fetch(
+      new Request("http://crabbox.internal/__crabbox/create", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "cbx_test",
+          workdir: "/workspace/repo",
+          idleTimeoutSeconds: 3600,
+        }),
+      }),
+    );
+
+    vi.setSystemTime(new Date("2026-05-13T18:31:00Z"));
+    await sandbox.onActivityExpired();
+
+    expect(sandbox.destroyed).toBe(false);
+    expect(sandbox.stopped).toBe(false);
+    expect(sandbox.renewedActivityTimeouts).toBe(1);
+    const status = await sandbox.fetch(new Request("http://crabbox.internal/__crabbox/status"));
+    await expect(status.json()).resolves.toMatchObject({
+      state: "running",
+      expiresAt: "2026-05-13T19:00:00.000Z",
     });
   });
 });

@@ -1,4 +1,4 @@
-package cloudflaresandbox
+package cloudflare
 
 import (
 	"flag"
@@ -15,7 +15,7 @@ type Provider struct{}
 func (Provider) Name() string { return providerName }
 
 func (Provider) Aliases() []string {
-	return []string{"cloudflare-containers", "cloudflare", legacyProviderName, "cf-sandbox"}
+	return []string{"cloudflare-containers", cloudflareContainerName, "cf-container"}
 }
 
 func (Provider) Spec() core.ProviderSpec {
@@ -29,13 +29,13 @@ func (Provider) Spec() core.ProviderSpec {
 }
 
 func (Provider) RegisterFlags(fs *flag.FlagSet, defaults core.Config) any {
-	return RegisterCloudflareSandboxProviderFlags(fs, defaults)
+	return RegisterCFContainersProviderFlags(fs, defaults)
 }
 
 func (Provider) ApplyFlags(cfg *core.Config, fs *flag.FlagSet, values any) error {
-	return ApplyCloudflareSandboxProviderFlags(cfg, fs, values)
+	return ApplyCFContainersProviderFlags(cfg, fs, values)
 }
 
 func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, error) {
-	return NewCloudflareSandboxBackend(p.Spec(), cfg, rt), nil
+	return NewCFContainersBackend(p.Spec(), cfg, rt), nil
 }

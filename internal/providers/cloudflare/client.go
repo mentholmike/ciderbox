@@ -1,4 +1,4 @@
-package cloudflaresandbox
+package cloudflare
 
 import (
 	"bufio"
@@ -17,13 +17,13 @@ import (
 	"time"
 )
 
-type cloudflareSandboxClient struct {
+type cfContainersClient struct {
 	baseURL string
 	token   string
 	http    *http.Client
 }
 
-type cloudflareSandbox struct {
+type cfContainer struct {
 	ID        string            `json:"id"`
 	State     string            `json:"state"`
 	Workdir   string            `json:"workdir"`
@@ -56,47 +56,58 @@ type execStreamEvent struct {
 	ExitCode *int   `json:"exitCode,omitempty"`
 }
 
-func newCloudflareSandboxClient(cfg Config, rt Runtime) (*cloudflareSandboxClient, error) {
-	apiURL := strings.TrimSpace(cfg.CloudflareSandbox.APIURL)
+func newCFContainersClient(cfg Config, rt Runtime) (*cfContainersClient, error) {
+	apiURL := strings.TrimSpace(cfg.CFContainers.APIURL)
 	if apiURL == "" {
 		return nil, exit(2, "%s requires --cf-containers-url or CRABBOX_CF_CONTAINERS_URL", providerName)
 	}
-	token := strings.TrimSpace(cfg.CloudflareSandbox.Token)
+	token := strings.TrimSpace(cfg.CFContainers.Token)
 	if token == "" {
-		return nil, exit(2, "%s requires --cf-containers-token or CRABBOX_CF_CONTAINERS_TOKEN", providerName)
+		return nil, exit(2, "%s requires CRABBOX_CF_CONTAINERS_TOKEN or user-level config", providerName)
 	}
 	parsed, err := url.Parse(apiURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, exit(2, "%s url %q is invalid", providerName, apiURL)
 	}
+	if parsed.Scheme != "https" && !isLoopbackHTTPURL(parsed) {
+		return nil, exit(2, "%s url %q must use https unless it targets localhost", providerName, apiURL)
+	}
 	httpClient := rt.HTTP
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &cloudflareSandboxClient{
+	return &cfContainersClient{
 		baseURL: strings.TrimRight(apiURL, "/"),
 		token:   token,
 		http:    httpClient,
 	}, nil
 }
 
-func (c *cloudflareSandboxClient) createSandbox(ctx context.Context, req createSandboxRequest) (cloudflareSandbox, error) {
-	var sandbox cloudflareSandbox
+func isLoopbackHTTPURL(parsed *url.URL) bool {
+	if parsed.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func (c *cfContainersClient) createSandbox(ctx context.Context, req createSandboxRequest) (cfContainer, error) {
+	var sandbox cfContainer
 	err := c.doJSON(ctx, http.MethodPost, "/v1/sandboxes", req, &sandbox)
 	return sandbox, err
 }
 
-func (c *cloudflareSandboxClient) getSandbox(ctx context.Context, sandboxID string) (cloudflareSandbox, error) {
-	var sandbox cloudflareSandbox
+func (c *cfContainersClient) getSandbox(ctx context.Context, sandboxID string) (cfContainer, error) {
+	var sandbox cfContainer
 	err := c.doJSON(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(sandboxID), nil, &sandbox)
 	return sandbox, err
 }
 
-func (c *cloudflareSandboxClient) destroySandbox(ctx context.Context, sandboxID string) error {
+func (c *cfContainersClient) destroySandbox(ctx context.Context, sandboxID string) error {
 	return c.doJSON(ctx, http.MethodDelete, "/v1/sandboxes/"+url.PathEscape(sandboxID), nil, nil)
 }
 
-func (c *cloudflareSandboxClient) uploadFile(ctx context.Context, sandboxID, localPath, remotePath string) error {
+func (c *cfContainersClient) uploadFile(ctx context.Context, sandboxID, localPath, remotePath string) error {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open upload file: %w", err)
@@ -120,7 +131,7 @@ func (c *cloudflareSandboxClient) uploadFile(ctx context.Context, sandboxID, loc
 	return nil
 }
 
-func (c *cloudflareSandboxClient) execStream(ctx context.Context, sandboxID string, req execStreamRequest, stdout, stderr io.Writer) (int, error) {
+func (c *cfContainersClient) execStream(ctx context.Context, sandboxID string, req execStreamRequest, stdout, stderr io.Writer) (int, error) {
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(req); err != nil {
 		return 0, err
@@ -176,7 +187,7 @@ func (c *cloudflareSandboxClient) execStream(ctx context.Context, sandboxID stri
 				event.Error = "stream error"
 			}
 			return exitCode, errors.New(event.Error)
-		case "start":
+		case "start", "heartbeat":
 		default:
 			return exitCode, fmt.Errorf("unknown %s stream event %q", providerName, event.Type)
 		}
@@ -190,7 +201,7 @@ func (c *cloudflareSandboxClient) execStream(ctx context.Context, sandboxID stri
 	return exitCode, nil
 }
 
-func (c *cloudflareSandboxClient) doJSON(ctx context.Context, method, endpoint string, input any, output any) error {
+func (c *cfContainersClient) doJSON(ctx context.Context, method, endpoint string, input any, output any) error {
 	var body io.Reader
 	if input != nil {
 		var buf bytes.Buffer
@@ -221,7 +232,7 @@ func (c *cloudflareSandboxClient) doJSON(ctx context.Context, method, endpoint s
 	return json.NewDecoder(resp.Body).Decode(output)
 }
 
-func (c *cloudflareSandboxClient) responseError(resp *http.Response) error {
+func (c *cfContainersClient) responseError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	var payload struct {
 		Error string `json:"error"`

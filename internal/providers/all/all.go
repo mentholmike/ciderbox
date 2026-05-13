@@ -4,7 +4,7 @@ import (
 	_ "github.com/openclaw/crabbox/internal/providers/aws"
 	_ "github.com/openclaw/crabbox/internal/providers/azure"
 	_ "github.com/openclaw/crabbox/internal/providers/blacksmith"
-	_ "github.com/openclaw/crabbox/internal/providers/cloudflaresandbox"
+	_ "github.com/openclaw/crabbox/internal/providers/cloudflare"
 	_ "github.com/openclaw/crabbox/internal/providers/daytona"
 	_ "github.com/openclaw/crabbox/internal/providers/e2b"
 	_ "github.com/openclaw/crabbox/internal/providers/gcp"

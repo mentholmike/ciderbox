@@ -48,7 +48,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
 - Modal delegated backend and Python client wrapper: `internal/providers/modal`
 - Tensorlake delegated backend and `tensorlake` CLI wrapper: `internal/providers/tensorlake`
 - CF Containers delegated backend and Worker runner API client:
-  `internal/providers/cloudflaresandbox`
+  `internal/providers/cloudflare`
 - Provider backend interfaces, registry, and request/result types:
   `internal/cli/provider_backend.go`
 - Built-in provider registration packages:
@@ -58,7 +58,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
   `internal/providers/namespace`, `internal/providers/daytona`, `internal/providers/islo`,
   `internal/providers/semaphore`, `internal/providers/sprites`, `internal/providers/e2b`,
   `internal/providers/modal`, `internal/providers/tensorlake`,
-  `internal/providers/cloudflaresandbox`, `internal/providers/all`
+  `internal/providers/cloudflare`, `internal/providers/all`
 - Built-in provider backend implementations:
   `internal/providers/aws`, `internal/providers/azure`, `internal/providers/gcp`,
   `internal/providers/hetzner`, `internal/providers/proxmox`,
@@ -66,7 +66,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
   `internal/providers/namespace`, `internal/providers/daytona`, `internal/providers/islo`,
   `internal/providers/semaphore`, `internal/providers/sprites`, `internal/providers/e2b`,
   `internal/providers/modal`, `internal/providers/tensorlake`,
-  `internal/providers/cloudflaresandbox`, plus shared helpers in `internal/providers/shared`
+  `internal/providers/cloudflare`, plus shared helpers in `internal/providers/shared`
 - Worker Hetzner provider: `worker/src/hetzner.ts`
 - Worker AWS EC2 provider: `worker/src/aws.ts`
 - Worker AWS AMI create/read/promote routes: `worker/src/fleet.ts`, `worker/src/aws.ts`

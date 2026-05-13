@@ -272,12 +272,15 @@ workdir only; tokens do not belong in YAML or command-line flags.
 ```yaml
 provider: cf-containers
 cfContainers:
-  apiUrl: https://crabbox-cloudflare-sandbox-runner.example.workers.dev
+  apiUrl: https://crabbox-cloudflare-container-runner.example.workers.dev
   workdir: /workspace/crabbox
 ```
 
 Keep `CRABBOX_CF_CONTAINERS_TOKEN` in the shell or credential manager.
 Repo config should select the runner URL and workdir, not hold bearer tokens.
+Container capacity is selected in the deployed Worker config, not per repo
+run. Update `worker/wrangler.cloudflare-container.jsonc` and redeploy the runner
+when changing `instance_type` or `max_instances`.
 
 ### Semaphore
 

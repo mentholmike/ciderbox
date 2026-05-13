@@ -28,6 +28,20 @@ export class Sandbox extends Container {
     return super.fetch(request);
   }
 
+  override async onActivityExpired(): Promise<void> {
+    const meta = await this.leaseMeta();
+    if (!meta || meta.state !== "running") {
+      await this.stop();
+      return;
+    }
+
+    const expired = await this.expireIfNeeded(meta);
+    if (expired.state !== "running") return;
+
+    await this.scheduleCleanup(expired);
+    this.renewActivityTimeout();
+  }
+
   async expireIfIdle(): Promise<void> {
     const meta = await this.leaseMeta();
     if (!meta || meta.state !== "running") return;
@@ -141,17 +155,58 @@ export class Sandbox extends Container {
     const cwd = cleanAbsolutePath(stringField(body, "cwd") ?? "/workspace/crabbox");
     if (!cwd) return json({ error: "cwd must be an absolute path" }, 400);
 
-    const meta = await this.touchLease();
+    const meta = await this.beginExecution();
     if (meta.state !== "running") return expiredResponse(meta);
 
     await this.ensureReady();
-    const response = await this.execContainer({
-      command,
-      cwd,
-      env: sanitizeEnv(body["env"]),
-      timeoutMs: numberField(body, "timeoutMs"),
-    });
-    return this.touchLeaseWhenStreamCloses(response);
+    try {
+      const response = await this.execContainer({
+        command,
+        cwd,
+        env: sanitizeEnv(body["env"]),
+        timeoutMs: numberField(body, "timeoutMs"),
+      });
+      return this.finishExecutionWhenStreamCloses(response);
+    } catch (error) {
+      await this.finishExecution();
+      throw error;
+    }
+  }
+
+  private async beginExecution(): Promise<LeaseMetadata> {
+    const meta = await this.leaseMeta();
+    if (!meta) {
+      return emptyLeaseMeta("expired");
+    }
+    const expired = await this.expireIfNeeded(meta);
+    if (expired.state !== "running") return expired;
+
+    const active: LeaseMetadata = {
+      ...expired,
+      activeExecutions: (expired.activeExecutions ?? 0) + 1,
+      lastTouchedAt: new Date().toISOString(),
+    };
+    await this.ctx.storage.put(leaseMetaKey, active);
+    await this.scheduleCleanup(active);
+    return active;
+  }
+
+  private async finishExecution(): Promise<void> {
+    const meta = await this.leaseMeta();
+    if (!meta || meta.state !== "running") return;
+
+    const activeExecutions = Math.max((meta.activeExecutions ?? 0) - 1, 0);
+    const touched: LeaseMetadata = {
+      ...meta,
+      lastTouchedAt: new Date().toISOString(),
+    };
+    if (activeExecutions > 0) {
+      touched.activeExecutions = activeExecutions;
+    } else {
+      delete touched.activeExecutions;
+    }
+    await this.ctx.storage.put(leaseMetaKey, touched);
+    await this.scheduleCleanup(touched);
   }
 
   private async touchLease(): Promise<LeaseMetadata> {
@@ -220,9 +275,9 @@ export class Sandbox extends Container {
     });
   }
 
-  private touchLeaseWhenStreamCloses(response: Response): Response {
+  private finishExecutionWhenStreamCloses(response: Response): Response {
     if (!response.body) {
-      void this.touchLease();
+      void this.finishExecution();
       return response;
     }
     const reader = response.body.getReader();
@@ -231,14 +286,14 @@ export class Sandbox extends Container {
         const next = await reader.read();
         if (next.done) {
           controller.close();
-          void this.touchLease();
+          void this.finishExecution();
           return;
         }
         controller.enqueue(next.value);
       },
       cancel: async (reason) => {
         await reader.cancel(reason);
-        void this.touchLease();
+        void this.finishExecution();
       },
     });
     return new Response(clientBody, {
@@ -265,6 +320,7 @@ type LeaseMetadata = {
   lastTouchedAt: string;
   ttlSeconds?: number;
   idleTimeoutSeconds?: number;
+  activeExecutions?: number;
   expiredAt?: string;
   stoppedAt?: string;
 };
@@ -274,7 +330,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return json({ ok: true, runner: "cloudflare-container" });
+      return json({ ok: true, runner: "cf-containers" });
     }
 
     const auth = authorize(request, env);
@@ -347,20 +403,11 @@ async function uploadFile(
 ): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
-  const remotePath = cleanAbsolutePath(url.searchParams.get("path") ?? "");
-  if (!remotePath) return json({ error: "path must be absolute" }, 400);
-  if (!request.body) return json({ error: "request body is required" }, 400);
 
   const container = getContainer(env.Sandbox, id);
-  const uploadURL = new URL("http://container/v1/files");
-  uploadURL.searchParams.set("path", remotePath);
   return container.fetch(
-    internalRequest(`/__crabbox/files${uploadURL.search}`, request, {
+    internalRequest(`/__crabbox/files${url.search}`, request, {
       method: "POST",
-      body: request.body,
-      headers: {
-        "Content-Type": "application/octet-stream",
-      },
     }),
   );
 }
@@ -369,26 +416,10 @@ async function execStream(request: Request, env: Env, sandboxID: string): Promis
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
 
-  const body = await readObject(request);
-  const command = stringField(body, "command")?.trim() ?? "";
-  if (!command) return json({ error: "command is required" }, 400);
-
-  const cwd = cleanAbsolutePath(stringField(body, "cwd") ?? "/workspace/crabbox");
-  if (!cwd) return json({ error: "cwd must be an absolute path" }, 400);
-
   const container = getContainer(env.Sandbox, id);
   return container.fetch(
-    internalRequest("/__crabbox/exec-stream", undefined, {
+    internalRequest("/__crabbox/exec-stream", request, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        command,
-        cwd,
-        env: sanitizeEnv(body["env"]),
-        timeoutMs: numberField(body, "timeoutMs"),
-      }),
     }),
   );
 }
@@ -398,7 +429,7 @@ function authorize(request: Request, env: Env): Response | null {
   if (!expected) return json({ error: "runner token is not configured" }, 503);
   const header = request.headers.get("Authorization") ?? "";
   const actual = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-  if (actual !== expected) return json({ error: "unauthorized" }, 401);
+  if (!tokenEquals(actual, expected)) return json({ error: "unauthorized" }, 401);
   return null;
 }
 
@@ -471,6 +502,18 @@ function positiveIntegerField(value: Record<string, unknown>, key: string): numb
   return field !== undefined && Number.isInteger(field) && field > 0 ? field : undefined;
 }
 
+function tokenEquals(actual: string, expected: string): boolean {
+  const encoder = new TextEncoder();
+  const actualBytes = encoder.encode(actual);
+  const expectedBytes = encoder.encode(expected);
+  let diff = actualBytes.length ^ expectedBytes.length;
+  const length = Math.max(actualBytes.length, expectedBytes.length);
+  for (let i = 0; i < length; i += 1) {
+    diff |= (actualBytes[i] ?? 0) ^ (expectedBytes[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -486,7 +529,11 @@ function leaseExpiresAtMs(meta: LeaseMetadata): number | undefined {
   if (Number.isFinite(createdAt) && meta.ttlSeconds !== undefined) {
     candidates.push(createdAt + meta.ttlSeconds * 1000);
   }
-  if (Number.isFinite(lastTouchedAt) && meta.idleTimeoutSeconds !== undefined) {
+  if (
+    (meta.activeExecutions ?? 0) === 0 &&
+    Number.isFinite(lastTouchedAt) &&
+    meta.idleTimeoutSeconds !== undefined
+  ) {
     candidates.push(lastTouchedAt + meta.idleTimeoutSeconds * 1000);
   }
   return candidates.length > 0 ? Math.min(...candidates) : undefined;

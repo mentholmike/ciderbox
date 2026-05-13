@@ -18,6 +18,11 @@ import (
 	"time"
 )
 
+// Cloudflare can truncate the final NDJSON event when a response opens and
+// closes almost immediately, so keep very short exec streams alive briefly.
+const minStreamLifetime = 75 * time.Millisecond
+const streamHeartbeatInterval = 15 * time.Second
+
 type execRequest struct {
 	Command   string            `json:"command"`
 	Cwd       string            `json:"cwd,omitempty"`
@@ -105,6 +110,9 @@ func handleExec(w http.ResponseWriter, r *http.Request) {
 	flusher, _ := w.(http.Flusher)
 	writer := &eventWriter{w: w, flusher: flusher}
 	writer.write(streamEvent{Type: "start"})
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go streamHeartbeat(heartbeatDone, writer)
 
 	ctx := r.Context()
 	cancel := func() {}
@@ -115,12 +123,29 @@ func handleExec(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cancel()
 
+	started := time.Now()
 	exitCode, err := runCommand(ctx, req, cwd, writer)
 	if err != nil {
 		writer.write(streamEvent{Type: "error", Error: err.Error()})
 		return
 	}
+	if remaining := minStreamLifetime - time.Since(started); remaining > 0 {
+		time.Sleep(remaining)
+	}
 	writer.write(streamEvent{Type: "complete", ExitCode: &exitCode})
+}
+
+func streamHeartbeat(done <-chan struct{}, writer *eventWriter) {
+	ticker := time.NewTicker(streamHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			writer.write(streamEvent{Type: "heartbeat"})
+		}
+	}
 }
 
 func runCommand(ctx context.Context, req execRequest, cwd string, writer *eventWriter) (int, error) {

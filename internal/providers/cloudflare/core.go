@@ -1,4 +1,4 @@
-package cloudflaresandbox
+package cloudflare
 
 import (
 	"flag"
@@ -9,7 +9,7 @@ import (
 )
 
 type Config = core.Config
-type CloudflareSandboxConfig = core.CloudflareSandboxConfig
+type CFContainersConfig = core.CFContainersConfig
 type ProviderSpec = core.ProviderSpec
 type Runtime = core.Runtime
 type Backend = core.Backend
@@ -30,10 +30,10 @@ type timingReport = core.TimingReport
 type timingPhase = core.TimingPhase
 
 const (
-	providerName       = "cf-containers"
-	legacyProviderName = "cloudflare-sandbox"
-	targetLinux        = core.TargetLinux
-	networkPublic      = core.NetworkPublic
+	providerName            = "cf-containers"
+	cloudflareContainerName = "cloudflare-container"
+	targetLinux             = core.TargetLinux
+	networkPublic           = core.NetworkPublic
 )
 
 func exit(code int, format string, args ...any) core.ExitError {
