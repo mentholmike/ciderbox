@@ -267,6 +267,18 @@ Authenticate the local Modal Python client with `python3 -m modal setup` or
 `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`. Repo config should select app/image and
 workdir only; tokens do not belong in YAML or command-line flags.
 
+### Cloudflare Sandbox
+
+```yaml
+provider: cloudflare-sandbox
+cloudflareSandbox:
+  apiUrl: https://crabbox-cloudflare-sandbox-runner.example.workers.dev
+  workdir: /workspace/crabbox
+```
+
+Keep `CRABBOX_CLOUDFLARE_SANDBOX_TOKEN` in the shell or credential manager.
+Repo config should select the runner URL and workdir, not hold bearer tokens.
+
 ### Semaphore
 
 ```yaml

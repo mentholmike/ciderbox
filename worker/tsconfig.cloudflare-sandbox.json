@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "skipLibCheck": true
+  },
+  "include": ["src/cloudflare_sandbox_runner.ts", "src/cloudflare_sandbox_node_http_shim.d.ts"],
+  "exclude": []
+}

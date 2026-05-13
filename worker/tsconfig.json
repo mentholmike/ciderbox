@@ -15,5 +15,6 @@
     "useUnknownInCatchVariables": true,
     "skipLibCheck": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/cloudflare_sandbox_runner.ts", "src/cloudflare_sandbox_node_http_shim.d.ts"]
 }

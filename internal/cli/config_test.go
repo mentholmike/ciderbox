@@ -282,6 +282,10 @@ tensorlake:
   diskMB: 30000
   timeoutSecs: 1800
   noInternet: true
+cloudflareSandbox:
+  apiUrl: https://cf-sandbox.example.test
+  token: cf-sandbox-token
+  workdir: /workspace/cf-test
 proxmox:
   apiUrl: https://pve.example.test:8006
   tokenId: crabbox@pve!test
@@ -413,6 +417,9 @@ ssh:
 	}
 	if cfg.Tensorlake.APIURL != "https://api.tensorlake.example.test" || cfg.Tensorlake.CLIPath != "/usr/local/bin/tl" || cfg.Tensorlake.Image != "ubuntu-22.04" || cfg.Tensorlake.Snapshot != "snap-tl" || cfg.Tensorlake.OrganizationID != "org-tl" || cfg.Tensorlake.ProjectID != "proj-tl" || cfg.Tensorlake.Namespace != "ns-tl" || cfg.Tensorlake.Workdir != "/workspace/crabbox-test" || cfg.Tensorlake.CPUs != 4 || cfg.Tensorlake.MemoryMB != 8192 || cfg.Tensorlake.DiskMB != 30000 || cfg.Tensorlake.TimeoutSecs != 1800 || !cfg.Tensorlake.NoInternet {
 		t.Fatalf("tensorlake config not loaded: %#v", cfg.Tensorlake)
+	}
+	if cfg.CloudflareSandbox.APIURL != "https://cf-sandbox.example.test" || cfg.CloudflareSandbox.Token != "cf-sandbox-token" || cfg.CloudflareSandbox.Workdir != "/workspace/cf-test" {
+		t.Fatalf("cloudflare sandbox config not loaded: %#v", cfg.CloudflareSandbox)
 	}
 	if cfg.Proxmox.APIURL != "https://pve.example.test:8006" || cfg.Proxmox.TokenID != "crabbox@pve!test" || cfg.Proxmox.TokenSecret != "proxmox-secret" || cfg.Proxmox.Node != "pve1" || cfg.Proxmox.TemplateID != 9000 || cfg.Proxmox.Storage != "local-lvm" || cfg.Proxmox.Pool != "crabbox" || cfg.Proxmox.Bridge != "vmbr1" || cfg.Proxmox.User != "runner" || cfg.Proxmox.WorkRoot != "/work/proxmox" || cfg.Proxmox.FullClone || !cfg.Proxmox.InsecureTLS {
 		t.Fatalf("proxmox config not loaded: %#v", cfg.Proxmox)
@@ -567,6 +574,10 @@ func TestEnvOverridesConfig(t *testing.T) {
 	t.Setenv("CRABBOX_TENSORLAKE_DISK_MB", "20480")
 	t.Setenv("CRABBOX_TENSORLAKE_TIMEOUT_SECS", "900")
 	t.Setenv("CRABBOX_TENSORLAKE_NO_INTERNET", "true")
+	t.Setenv("CRABBOX_CLOUDFLARE_SANDBOX_URL", "https://cf-sandbox-file.example")
+	t.Setenv("CRABBOX_CLOUDFLARE_SANDBOX_API_URL", "https://cf-sandbox-env.example")
+	t.Setenv("CRABBOX_CLOUDFLARE_SANDBOX_TOKEN", "cf-sandbox-env-token")
+	t.Setenv("CRABBOX_CLOUDFLARE_SANDBOX_WORKDIR", "/workspace/cf-env")
 	t.Setenv("CRABBOX_PROXMOX_API_URL", "https://pve-env.example:8006")
 	t.Setenv("CRABBOX_PROXMOX_TOKEN_ID", "runner@pve!env")
 	t.Setenv("CRABBOX_PROXMOX_TOKEN_SECRET", "proxmox-env-secret")
@@ -683,6 +694,9 @@ func TestEnvOverridesConfig(t *testing.T) {
 	}
 	if cfg.Tensorlake.APIKey != "tl-api-env" || cfg.Tensorlake.APIURL != "https://api.tl-env.example" || cfg.Tensorlake.CLIPath != "/opt/tl/bin/tensorlake" || cfg.Tensorlake.Image != "ubuntu:tl-env" || cfg.Tensorlake.Snapshot != "snap-tl-env" || cfg.Tensorlake.OrganizationID != "org-tl-env" || cfg.Tensorlake.ProjectID != "proj-tl-env" || cfg.Tensorlake.Namespace != "ns-tl-env" || cfg.Tensorlake.Workdir != "/workspace/tl-env" || cfg.Tensorlake.CPUs != 2.5 || cfg.Tensorlake.MemoryMB != 4096 || cfg.Tensorlake.DiskMB != 20480 || cfg.Tensorlake.TimeoutSecs != 900 || !cfg.Tensorlake.NoInternet {
 		t.Fatalf("unexpected tensorlake env: %#v", cfg.Tensorlake)
+	}
+	if cfg.CloudflareSandbox.APIURL != "https://cf-sandbox-env.example" || cfg.CloudflareSandbox.Token != "cf-sandbox-env-token" || cfg.CloudflareSandbox.Workdir != "/workspace/cf-env" {
+		t.Fatalf("unexpected cloudflare sandbox env: %#v", cfg.CloudflareSandbox)
 	}
 	if cfg.Proxmox.APIURL != "https://pve-env.example:8006" || cfg.Proxmox.TokenID != "runner@pve!env" || cfg.Proxmox.TokenSecret != "proxmox-env-secret" || cfg.Proxmox.Node != "pve-env" || cfg.Proxmox.TemplateID != 9100 || cfg.Proxmox.Storage != "ceph-env" || cfg.Proxmox.Pool != "pool-env" || cfg.Proxmox.Bridge != "vmbr2" || cfg.Proxmox.User != "runner-env" || cfg.Proxmox.WorkRoot != "/work/proxmox-env" || cfg.Proxmox.FullClone || !cfg.Proxmox.InsecureTLS {
 		t.Fatalf("unexpected proxmox env: %#v", cfg.Proxmox)
