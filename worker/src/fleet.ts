@@ -70,6 +70,7 @@ const maxExternalRunnerSyncItems = 200;
 const webVNCTicketTTLSeconds = 120;
 const codeTicketTTLSeconds = 120;
 const egressTicketTTLSeconds = 120;
+const leaseCleanupRetryDelayMs = 5 * 60 * 1000;
 const maxPendingWebVNCBytes = 1024 * 1024;
 const maxCodeRequestBytes = 10 * 1024 * 1024;
 const maxCodeWebSocketFrameChunkBytes = 15 * 1024;
@@ -1042,6 +1043,7 @@ export class FleetDurableObject implements DurableObject {
     lease.updatedAt = now.toISOString();
     lease.lastTouchedAt = now.toISOString();
     lease.expiresAt = recomputeLeaseExpiresAt(lease, now).toISOString();
+    clearLeaseCleanupMetadata(lease);
     await this.putLease(lease);
     await this.scheduleAlarm();
   }
@@ -2972,11 +2974,29 @@ export class FleetDurableObject implements DurableObject {
     );
     await Promise.all(
       expired.map(async (lease) => {
-        await this.deleteLeaseServer(lease).catch(() => undefined);
+        const retryAt = Date.parse(lease.cleanupRetryAt ?? "");
+        if (Number.isFinite(retryAt) && retryAt > now) {
+          return;
+        }
         const nowISO = new Date().toISOString();
+        try {
+          await this.deleteLeaseServer(lease);
+        } catch (error) {
+          lease.cleanupAttempts = (lease.cleanupAttempts ?? 0) + 1;
+          lease.cleanupError = errorMessage(error);
+          lease.cleanupFailedAt = nowISO;
+          lease.cleanupRetryAt = new Date(now + leaseCleanupRetryDelayMs).toISOString();
+          lease.updatedAt = nowISO;
+          await this.putLease(lease);
+          console.warn(
+            `lease cleanup failed lease=${lease.id} provider=${lease.provider} cloud=${lease.cloudID}: ${lease.cleanupError}`,
+          );
+          return;
+        }
         lease.state = "expired";
         lease.updatedAt = nowISO;
         lease.endedAt = nowISO;
+        clearLeaseCleanupMetadata(lease);
         await this.putLease(lease);
       }),
     );
@@ -2986,7 +3006,7 @@ export class FleetDurableObject implements DurableObject {
     const leases = await this.state.storage.list<LeaseRecord>({ prefix: "lease:" });
     const activeExpiries = [...leases.values()]
       .filter((lease) => lease.state === "active")
-      .map((lease) => Date.parse(lease.expiresAt))
+      .map((lease) => nextLeaseAlarmTime(lease))
       .filter((time) => Number.isFinite(time));
     if (activeExpiries.length === 0) {
       await this.state.storage.deleteAlarm();
@@ -3279,6 +3299,7 @@ export class FleetDurableObject implements DurableObject {
     lease.updatedAt = now;
     lease.releasedAt = now;
     lease.endedAt = now;
+    clearLeaseCleanupMetadata(lease);
     if (options.keep !== undefined) {
       lease.keep = options.keep;
     }
@@ -4501,6 +4522,26 @@ function activeSlugCollision(
       lease.org === org &&
       normalizeLeaseSlug(lease.slug) === slug,
   );
+}
+
+function nextLeaseAlarmTime(lease: LeaseRecord): number {
+  const now = Date.now();
+  const expiresAt = Date.parse(lease.expiresAt);
+  const cleanupRetryAt = Date.parse(lease.cleanupRetryAt ?? "");
+  if (Number.isFinite(cleanupRetryAt) && cleanupRetryAt > now) {
+    if (Number.isFinite(expiresAt) && expiresAt <= now) {
+      return cleanupRetryAt;
+    }
+    return Math.min(expiresAt, cleanupRetryAt);
+  }
+  return expiresAt;
+}
+
+function clearLeaseCleanupMetadata(lease: LeaseRecord): void {
+  delete lease.cleanupAttempts;
+  delete lease.cleanupError;
+  delete lease.cleanupFailedAt;
+  delete lease.cleanupRetryAt;
 }
 
 function normalizeShareUser(value: string | undefined): string {

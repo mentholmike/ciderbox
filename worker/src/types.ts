@@ -207,6 +207,10 @@ export interface LeaseRecord {
   expiresAt: string;
   telemetry?: LeaseTelemetry;
   telemetryHistory?: LeaseTelemetry[];
+  cleanupAttempts?: number;
+  cleanupError?: string;
+  cleanupFailedAt?: string;
+  cleanupRetryAt?: string;
   releasedAt?: string;
   endedAt?: string;
 }
