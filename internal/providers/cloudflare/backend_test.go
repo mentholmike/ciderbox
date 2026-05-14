@@ -252,6 +252,33 @@ func TestDurationCeil(t *testing.T) {
 	}
 }
 
+func TestCloudflareResolveClaimRequiresReclaimForOtherRepo(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+	if err := claimLeaseForRepoProvider("cbx_claimed", "blue-lobster", providerName, repoA, time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	backend := cloudflareBackend{}
+	if _, _, _, err := backend.resolveSandboxID("blue-lobster", repoB, false); err == nil || !strings.Contains(err.Error(), "use --reclaim") {
+		t.Fatalf("resolve without reclaim err=%v, want reclaim guard", err)
+	}
+	leaseID, sandboxID, slug, err := backend.resolveSandboxID("blue-lobster", repoB, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaseID != "cbx_claimed" || sandboxID != "cbx_claimed" || slug != "blue-lobster" {
+		t.Fatalf("resolved lease=%q sandbox=%q slug=%q", leaseID, sandboxID, slug)
+	}
+	claim, ok, err := resolveLeaseClaimForProvider("blue-lobster", providerName)
+	if err != nil || !ok {
+		t.Fatalf("resolve claim after reclaim ok=%t err=%v", ok, err)
+	}
+	if claim.RepoRoot != repoB {
+		t.Fatalf("claim repo = %q, want %q", claim.RepoRoot, repoB)
+	}
+}
+
 func containsString(values []string, needle string) bool {
 	for _, value := range values {
 		if value == needle {

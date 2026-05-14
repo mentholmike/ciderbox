@@ -78,7 +78,7 @@ func (b *cloudflareBackend) Run(ctx context.Context, req RunRequest) (RunResult,
 		fmt.Fprintf(b.rt.Stderr, "leased %s slug=%s provider=%s sandbox=%s\n", leaseID, slug, providerName, sandboxID)
 		acquired = true
 	} else {
-		leaseID, sandboxID, slug, err = b.resolveSandboxID(req.ID)
+		leaseID, sandboxID, slug, err = b.resolveSandboxID(req.ID, req.Repo.Root, req.Reclaim)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -200,7 +200,7 @@ func (b *cloudflareBackend) Status(ctx context.Context, req StatusRequest) (Stat
 	if err != nil {
 		return StatusView{}, err
 	}
-	leaseID, sandboxID, slug, err := b.resolveSandboxID(req.ID)
+	leaseID, sandboxID, slug, err := b.resolveSandboxID(req.ID, "", false)
 	if err != nil {
 		return StatusView{}, err
 	}
@@ -236,7 +236,7 @@ func (b *cloudflareBackend) Stop(ctx context.Context, req StopRequest) error {
 	if err != nil {
 		return err
 	}
-	leaseID, sandboxID, _, err := b.resolveSandboxID(req.ID)
+	leaseID, sandboxID, _, err := b.resolveSandboxID(req.ID, "", false)
 	if err != nil {
 		return err
 	}
@@ -325,12 +325,17 @@ func (b *cloudflareBackend) createSandbox(ctx context.Context, client *cloudflar
 	return leaseID, sandbox, slug, nil
 }
 
-func (b *cloudflareBackend) resolveSandboxID(identifier string) (string, string, string, error) {
+func (b *cloudflareBackend) resolveSandboxID(identifier, repoRoot string, reclaim bool) (string, string, string, error) {
 	claim, ok, err := resolveLeaseClaimForProvider(identifier, providerName)
 	if err != nil {
 		return "", "", "", err
 	}
 	if ok {
+		if repoRoot != "" {
+			if err := claimLeaseForRepoProvider(claim.LeaseID, claim.Slug, providerName, repoRoot, time.Duration(claim.IdleTimeoutSeconds)*time.Second, reclaim); err != nil {
+				return "", "", "", err
+			}
+		}
 		return claim.LeaseID, claim.LeaseID, blank(claim.Slug, newLeaseSlug(claim.LeaseID)), nil
 	}
 	value := strings.TrimSpace(identifier)
