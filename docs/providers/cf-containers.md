@@ -19,7 +19,7 @@ execution, and teardown.
 - A deployed Crabbox CF Containers runner with `CRABBOX_RUNNER_TOKEN` set
   as a Worker secret.
 
-The Worker coordinator lives in `worker/src/cloudflare_container_runner.ts`. The
+The Worker coordinator lives in `worker/src/cloudflare-container-runner.ts`. The
 container image is built from `worker/cloudflare-container.Dockerfile` and starts
 the HTTP runner in `worker/cloudflare-container-runner`. The deploy config is
 `worker/wrangler.cloudflare-container.jsonc`.

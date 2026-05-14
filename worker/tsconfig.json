@@ -16,5 +16,5 @@
     "skipLibCheck": false
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/cloudflare_container_runner.ts"]
+  "exclude": ["src/cloudflare-container-runner.ts"]
 }

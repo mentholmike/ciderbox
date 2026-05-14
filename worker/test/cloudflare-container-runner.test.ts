@@ -85,7 +85,7 @@ vi.mock("@cloudflare/containers", () => ({
   getContainer: (namespace: { get(id: string): unknown }, id: string) => namespace.get(id),
 }));
 
-const { Sandbox } = await import("../src/cloudflare_container_runner");
+const { Sandbox } = await import("../src/cloudflare-container-runner");
 
 describe("CF Containers runner lifecycle", () => {
   beforeEach(() => {

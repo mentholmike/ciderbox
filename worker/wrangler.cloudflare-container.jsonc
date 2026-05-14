@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "crabbox-cloudflare-container-runner",
-  "main": "src/cloudflare_container_runner.ts",
+  "main": "src/cloudflare-container-runner.ts",
   "compatibility_date": "2026-05-13",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
