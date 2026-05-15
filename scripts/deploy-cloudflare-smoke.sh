@@ -85,16 +85,23 @@ trap cleanup EXIT
     'set -eu; echo CRABBOX_CF_NO_SYNC_OK; pwd; uname -s; command -v go; command -v node; command -v gh; command -v rg'
 )
 
+keep_status=0
+set +e
 keep_out="$(
   cd "$repo"
   "$CRABBOX_BIN" run --provider cloudflare --type lite --keep --no-sync --timing-json --shell -- \
     'set -eu; echo CRABBOX_CF_KEEP_OK; sleep 1' 2>&1
 )"
+keep_status=$?
+set -e
 printf '%s\n' "$keep_out"
 lease_id="$(printf '%s\n' "$keep_out" | awk '/^leased / {print $2; exit}')"
 if [[ -z "$lease_id" ]]; then
   printf 'could not parse kept Cloudflare lease id\n' >&2
   exit 3
+fi
+if [[ "$keep_status" -ne 0 ]]; then
+  exit "$keep_status"
 fi
 
 (
