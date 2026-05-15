@@ -496,7 +496,7 @@ export class EC2SpotClient {
         availabilityZone,
         instanceType: serverType,
         ok: message.includes("DryRunOperation"),
-        message,
+        message: conciseAWSMacHostDryRunMessage(message),
       };
     }
   }
@@ -1499,6 +1499,23 @@ function conciseAWSProvisioningMessage(message: string): string {
   const detail = /<Message>([^<]+)<\/Message>/.exec(message)?.[1] ?? "";
   if (code && detail) {
     return `${code}: ${detail}`;
+  }
+  return trimBody(message).replace(/\s+/g, " ");
+}
+
+function conciseAWSMacHostDryRunMessage(message: string): string {
+  const code = /<Code>([^<]+)<\/Code>/.exec(message)?.[1] ?? "";
+  if (code === "DryRunOperation" || message.includes("DryRunOperation")) {
+    return "DryRunOperation: request would have succeeded";
+  }
+  if (code === "UnauthorizedOperation" || message.includes("UnauthorizedOperation")) {
+    return "UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags";
+  }
+  if (code) {
+    return code;
+  }
+  if (message.includes("Encoded authorization failure") || message.includes("arn:aws:iam::")) {
+    return "AWS authorization failure: details omitted";
   }
   return trimBody(message).replace(/\s+/g, " ");
 }

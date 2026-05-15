@@ -193,6 +193,7 @@ func (a App) adminMacHostsAllocate(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		checks = sanitizeMacHostDryRunChecks(checks)
 		if *jsonOut {
 			return json.NewEncoder(a.Stdout).Encode(checks)
 		}
@@ -218,6 +219,15 @@ func (a App) adminMacHostsAllocate(ctx context.Context, args []string) error {
 			host.ID, host.Region, host.AvailabilityZone, host.InstanceType, host.State)
 	}
 	return nil
+}
+
+func sanitizeMacHostDryRunChecks(checks []CoordinatorMacHostAllocationDryRun) []CoordinatorMacHostAllocationDryRun {
+	sanitized := make([]CoordinatorMacHostAllocationDryRun, len(checks))
+	for i, check := range checks {
+		check.Message = summarizeMacHostDryRunMessage(check.Message)
+		sanitized[i] = check
+	}
+	return sanitized
 }
 
 func summarizeMacHostDryRunMessage(message string) string {

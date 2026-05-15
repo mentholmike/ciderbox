@@ -2496,8 +2496,82 @@ describe("fleet lease identity and idle", () => {
     });
     await expect(response.json()).resolves.toMatchObject({
       dryRun: true,
-      checks: [{ availabilityZone: "eu-west-1a", ok: true, instanceType: "mac2.metal" }],
+      checks: [
+        {
+          availabilityZone: "eu-west-1a",
+          ok: true,
+          instanceType: "mac2.metal",
+          message: "DryRunOperation: request would have succeeded",
+        },
+      ],
     });
+  });
+
+  it("redacts AWS EC2 Mac host dry-run authorization failures", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const params = new URLSearchParams(await requestBodyForTest(input, init));
+        const action = params.get("Action") ?? "";
+        if (action === "DescribeInstanceTypeOfferings") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+          <DescribeInstanceTypeOfferingsResponse>
+            <instanceTypeOfferingSet>
+              <item>
+                <instanceType>mac2.metal</instanceType>
+                <location>eu-west-1a</location>
+                <locationType>availability-zone</locationType>
+              </item>
+            </instanceTypeOfferingSet>
+          </DescribeInstanceTypeOfferingsResponse>`);
+        }
+        if (action === "AllocateHosts") {
+          return ec2XMLResponse(
+            `<?xml version="1.0" encoding="UTF-8"?>
+          <Response>
+            <Errors>
+              <Error>
+                <Code>UnauthorizedOperation</Code>
+                <Message>User: arn:aws:iam::123456789012:user/example is not authorized. Encoded authorization failure message: secret</Message>
+              </Error>
+            </Errors>
+          </Response>`,
+            403,
+          );
+        }
+        return ec2XMLResponse("<ErrorResponse />", 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/admin/mac-hosts/dry-run?region=eu-west-1", {
+        headers: { "x-crabbox-admin": "true" },
+        body: { type: "mac2.metal" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.checks).toMatchObject([
+      {
+        availabilityZone: "eu-west-1a",
+        ok: false,
+        instanceType: "mac2.metal",
+        message:
+          "UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags",
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("123456789012");
+    expect(JSON.stringify(body)).not.toContain("Encoded authorization");
   });
 
   it("discovers an availability zone before allocating an AWS EC2 Mac Dedicated Host", async () => {

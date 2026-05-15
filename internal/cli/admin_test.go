@@ -68,3 +68,24 @@ func TestSummarizeMacHostDryRunMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeMacHostDryRunChecks(t *testing.T) {
+	checks := sanitizeMacHostDryRunChecks([]CoordinatorMacHostAllocationDryRun{
+		{
+			Region:           "eu-west-1",
+			AvailabilityZone: "eu-west-1b",
+			InstanceType:     "mac2.metal",
+			Message:          `<Error><Code>UnauthorizedOperation</Code><Message>User: arn:aws:iam::123456789012:user/example is not authorized. Encoded authorization failure message: secret</Message></Error>`,
+		},
+	})
+	if len(checks) != 1 {
+		t.Fatalf("checks=%#v", checks)
+	}
+	got := checks[0].Message
+	if !strings.Contains(got, "UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions") {
+		t.Fatalf("message=%q", got)
+	}
+	if strings.Contains(got, "123456789012") || strings.Contains(got, "Encoded authorization") {
+		t.Fatalf("message leaked provider details: %q", got)
+	}
+}
