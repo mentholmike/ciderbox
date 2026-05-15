@@ -137,6 +137,7 @@ export class EC2SpotClient {
         continue;
       }
       try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- macOS fallback must resolve the AMI for the current instance architecture.
         const imageID = defaultImageID || (await this.resolveAMI({ ...config, serverType }));
         // oxlint-disable-next-line eslint/no-await-in-loop -- instance-type fallback must stay sequential.
         const server = await this.createServer(
@@ -182,6 +183,7 @@ export class EC2SpotClient {
           continue;
         }
         try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- macOS fallback must resolve the AMI for the current instance architecture.
           const imageID = defaultImageID || (await this.resolveAMI({ ...config, serverType }));
           // oxlint-disable-next-line eslint/no-await-in-loop -- on-demand fallback must stay sequential.
           const server = await this.createServer(
