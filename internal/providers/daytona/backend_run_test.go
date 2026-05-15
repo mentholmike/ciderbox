@@ -76,7 +76,7 @@ func TestDaytonaExtractArchiveCommandCleansArchiveOnFailure(t *testing.T) {
 	for _, want := range []string{
 		"rm -rf '/workspace/repo' && mkdir -p '/workspace/repo'",
 		"tar -xzf '/tmp/crabbox-archive.tgz' -C '/workspace/repo'",
-		"; status=$?; rm -f '/tmp/crabbox-archive.tgz'; exit $status",
+		"; crabbox_status=$?; rm -f '/tmp/crabbox-archive.tgz'; exit $crabbox_status",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("command missing %q: %s", want, cmd)

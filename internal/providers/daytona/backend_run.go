@@ -379,7 +379,7 @@ func daytonaExtractArchiveCommand(workdir, archivePath, deletePrefix string) str
 	return deletePrefix +
 		"mkdir -p " + shellQuote(workdir) +
 		" && tar -xzf " + shellQuote(archivePath) + " -C " + shellQuote(workdir) +
-		"; status=$?; rm -f " + shellQuote(archivePath) + "; exit $status"
+		"; crabbox_status=$?; rm -f " + shellQuote(archivePath) + "; exit $crabbox_status"
 }
 
 func createDaytonaSyncArchive(ctx context.Context, repo Repo, manifest SyncManifest, stderr io.Writer) (*os.File, error) {
