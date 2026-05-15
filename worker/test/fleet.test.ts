@@ -2253,6 +2253,154 @@ describe("fleet lease identity and idle", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("lists AWS EC2 Mac Dedicated Hosts through an admin route", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const params = new URLSearchParams(await requestBodyForTest(input, init));
+        expect(params.get("Action")).toBe("DescribeHosts");
+        expect(params.get("Filter.1.Name")).toBe("instance-type");
+        expect(params.get("Filter.1.Value.1")).toBe("mac2.metal");
+        expect(params.get("Filter.2.Name")).toBe("state");
+        expect(params.get("Filter.2.Value.1")).toBe("available");
+        return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+        <DescribeHostsResponse>
+          <hostSet>
+            <item>
+              <hostId>h-000000000001</hostId>
+              <hostState>available</hostState>
+              <availabilityZone>eu-west-1a</availabilityZone>
+              <autoPlacement>off</autoPlacement>
+              <allocationTime>2026-05-15T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+              <tagSet><item><key>crabbox</key><value>true</value></item></tagSet>
+            </item>
+          </hostSet>
+        </DescribeHostsResponse>`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("GET", "/v1/admin/mac-hosts?region=eu-west-1&type=mac2.metal&state=available", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      hosts: [
+        {
+          id: "h-000000000001",
+          state: "available",
+          region: "eu-west-1",
+          availabilityZone: "eu-west-1a",
+          instanceType: "mac2.metal",
+          autoPlacement: "off",
+          tags: { crabbox: "true" },
+        },
+      ],
+    });
+  });
+
+  it("allocates AWS EC2 Mac Dedicated Hosts through an admin route", async () => {
+    const actions: string[] = [];
+    const seenParams: Record<string, string>[] = [];
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const params = new URLSearchParams(await requestBodyForTest(input, init));
+        const action = params.get("Action") ?? "";
+        actions.push(action);
+        seenParams.push(Object.fromEntries(params));
+        if (action === "AllocateHosts") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+          <AllocateHostsResponse>
+            <hostIdSet><item><hostId>h-000000000001</hostId></item></hostIdSet>
+          </AllocateHostsResponse>`);
+        }
+        if (action === "DescribeHosts") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+          <DescribeHostsResponse>
+            <hostSet>
+              <item>
+                <hostId>h-000000000001</hostId>
+                <hostState>available</hostState>
+                <availabilityZone>eu-west-1a</availabilityZone>
+                <autoPlacement>off</autoPlacement>
+                <hostProperties><instanceType>mac1.metal</instanceType></hostProperties>
+              </item>
+            </hostSet>
+          </DescribeHostsResponse>`);
+        }
+        return ec2XMLResponse("<ErrorResponse />", 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/admin/mac-hosts?region=eu-west-1", {
+        headers: { "x-crabbox-admin": "true" },
+        body: { type: "mac1.metal", availabilityZone: "eu-west-1a" },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(actions).toEqual(["AllocateHosts", "DescribeHosts"]);
+    expect(seenParams[0]).toMatchObject({
+      Action: "AllocateHosts",
+      AutoPlacement: "off",
+      AvailabilityZone: "eu-west-1a",
+      InstanceType: "mac1.metal",
+      Quantity: "1",
+    });
+    expect(seenParams[1]).toMatchObject({
+      Action: "DescribeHosts",
+      "HostId.1": "h-000000000001",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      hosts: [{ id: "h-000000000001", instanceType: "mac1.metal" }],
+    });
+  });
+
+  it("requires an availability zone before allocating an AWS EC2 Mac Dedicated Host", async () => {
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/admin/mac-hosts?region=eu-west-1", {
+        headers: { "x-crabbox-admin": "true" },
+        body: { type: "mac2.metal" },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "invalid_availability_zone" });
+  });
+
   it("creates, waits, and promotes AWS images through admin routes", async () => {
     const storage = new MemoryStorage();
     const fleet = testFleet(storage, {
@@ -3227,6 +3375,8 @@ describe("fleet identity", () => {
     const fleet = testFleet();
     const response = await fleet.fetch(request("GET", "/v1/admin/leases"));
     expect(response.status).toBe(403);
+    const macHosts = await fleet.fetch(request("GET", "/v1/admin/mac-hosts"));
+    expect(macHosts.status).toBe(403);
   });
 
   it("audits expired AWS leases against cloud state", async () => {
@@ -3675,6 +3825,20 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function ec2XMLResponse(body: string, status = 200): Response {
+  return new Response(body, { status, headers: { "content-type": "application/xml" } });
+}
+
+async function requestBodyForTest(input: RequestInfo | URL, init?: RequestInit): Promise<string> {
+  if (init?.body !== undefined) {
+    return String(init.body);
+  }
+  if (input instanceof Request) {
+    return await input.clone().text();
+  }
+  return "";
 }
 
 function testFleet(

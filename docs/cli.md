@@ -85,6 +85,9 @@ crabbox unshare --id <lease-id-or-slug> [--user <email>] [--org] [--all] [--json
 crabbox usage [--scope user|org|all] [--user <email>] [--org <name>] [--month YYYY-MM] [--json]
 crabbox admin leases [--state active|released|expired|failed] [--owner <email>] [--org <name>] [--json]
 crabbox admin lease-audit [--state expired] [--provider aws] [--fail-on-live] [--json]
+crabbox admin mac-hosts list [--region <region>] [--type <mac-type>] [--state <state>] [--json]
+crabbox admin mac-hosts allocate --availability-zone <az> [--region <region>] [--type mac2.metal] --force
+crabbox admin mac-hosts release <host-id> [--region <region>] --force
 crabbox admin release <lease-id-or-slug> [--delete]
 crabbox admin delete <lease-id-or-slug> --force
 crabbox ssh --id <lease-id-or-slug> [--network auto|tailscale|public]
@@ -280,6 +283,7 @@ Trusted operator lease controls:
 ```sh
 crabbox admin leases --state active
 crabbox admin lease-audit --state expired --provider aws --fail-on-live
+crabbox admin mac-hosts list --region eu-west-1
 crabbox admin release blue-lobster
 crabbox admin delete cbx_abcdef123456 --force
 ```

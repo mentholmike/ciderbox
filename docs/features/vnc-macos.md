@@ -44,8 +44,15 @@ non-interactive SSH sessions.
 
 AWS EC2 Mac has a provider-level lifecycle constraint: Mac instances run on
 allocated Dedicated Hosts with a 24-hour minimum host allocation period.
-Crabbox launches onto an available host or the host id you provide; it does not
-allocate, scrub, or retire Mac hosts for you.
+Crabbox launches onto an available host or the host id you provide. Warmup does
+not allocate a host implicitly, but trusted operators can manage hosts
+explicitly:
+
+```sh
+crabbox admin mac-hosts list --region eu-west-1
+crabbox admin mac-hosts allocate --region eu-west-1 --availability-zone eu-west-1a --type mac2.metal --force
+crabbox admin mac-hosts release h-0123456789abcdef0 --region eu-west-1 --force
+```
 
 Promoted AWS images are scoped by target, architecture, and region. Use
 `crabbox image promote <ami-id> --target macos --region <aws-region>` when
@@ -83,7 +90,8 @@ Missing host capacity
 
 Use `--market on-demand` and verify an available EC2 Mac Dedicated Host is
 allocated in the selected AWS region. Set `CRABBOX_AWS_MAC_HOST_ID` or
-`aws.macHostId` only when you want to pin to a specific host.
+`aws.macHostId` only when you want to pin to a specific host. Trusted operators
+can check availability with `crabbox admin mac-hosts list --region <region>`.
 
 VNC prompt asks for host credentials
 

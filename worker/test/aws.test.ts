@@ -6,6 +6,7 @@ import {
   applyAWSRunInstanceTargetOptions,
   awsAvailabilityZoneForRegion,
   awsInstanceTypeVCPUs,
+  awsHostIDsFromSet,
   awsLaunchCandidates,
   awsMacHostIDFromDescribeHosts,
   awsProvisioningErrorCategory,
@@ -189,6 +190,15 @@ describe("aws provider", () => {
         "h-stale",
       ),
     ).toBe("h-usable");
+  });
+
+  it("parses EC2 host id sets from AllocateHosts and ReleaseHosts responses", () => {
+    expect(awsHostIDsFromSet({ item: "h-000000000001" })).toEqual(["h-000000000001"]);
+    expect(
+      awsHostIDsFromSet({
+        item: [{ hostId: "h-000000000001" }, { hostId: "h-000000000002" }],
+      }),
+    ).toEqual(["h-000000000001", "h-000000000002"]);
   });
 
   it("treats missing stale AWS instance cleanup as cleaned", () => {

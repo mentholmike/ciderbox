@@ -159,8 +159,9 @@ host's VNC or Screen Sharing prompt.
 
 AWS EC2 Mac has an important cost and lifecycle constraint: Mac instances run on
 allocated EC2 Mac Dedicated Hosts, are On-Demand only, and the Dedicated Host
-has a 24-hour minimum allocation period. Crabbox launches onto a host id you
-provide; it does not allocate or scrub EC2 Mac hosts for you.
+has a 24-hour minimum allocation period. Crabbox warmup launches onto an
+available host or a host id you provide. It does not allocate a host implicitly;
+trusted operators can use `crabbox admin mac-hosts list|allocate|release`.
 
 ## Security Model
 

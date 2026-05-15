@@ -337,6 +337,9 @@ export class FleetDurableObject implements DurableObject {
       if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
         return await this.adminLeaseAudit(request);
       }
+      if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "mac-hosts") {
+        return await this.adminMacHostsRoute(request, parts[3]);
+      }
       if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && parts[3]) {
         return await this.adminLeaseRoute(request, parts[3], parts[4]);
       }
@@ -2579,6 +2582,58 @@ export class FleetDurableObject implements DurableObject {
     return json({ audits });
   }
 
+  private async adminMacHostsRoute(request: Request, hostID?: string): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const url = new URL(request.url);
+    const queryRegion = url.searchParams.get("region") ?? this.env.CRABBOX_AWS_REGION ?? "";
+    const region = sanitizeAWSRegion(queryRegion || "eu-west-1");
+    if (!region) {
+      return json(
+        { error: "invalid_region", message: "region must be an AWS region name" },
+        { status: 400 },
+      );
+    }
+    const client = new EC2SpotClient(this.env, region);
+    if (method === "GET" && !hostID) {
+      const serverType = (url.searchParams.get("type") ?? "").trim();
+      const state = (url.searchParams.get("state") ?? "").trim();
+      const hosts = await client.listMacHosts(serverType, state);
+      return json({ hosts });
+    }
+    if (method === "POST" && !hostID) {
+      const input = await readJson<{
+        type?: string;
+        availabilityZone?: string;
+        clientToken?: string;
+      }>(request);
+      const serverType = (input.type ?? "mac2.metal").trim();
+      if (!serverType.startsWith("mac") || !serverType.endsWith(".metal")) {
+        return json(
+          { error: "invalid_type", message: "type must be an EC2 Mac metal instance type" },
+          { status: 400 },
+        );
+      }
+      const availabilityZone = input.availabilityZone?.trim().toLowerCase() ?? "";
+      if (!availabilityZone || !availabilityZone.startsWith(region)) {
+        return json(
+          {
+            error: "invalid_availability_zone",
+            message: "availabilityZone must be an AWS availability zone in the selected region",
+          },
+          { status: 400 },
+        );
+      }
+      const clientToken = input.clientToken?.trim() || `crabbox-mac-host-${newLeaseID().slice(4)}`;
+      const hosts = await client.allocateMacHost(serverType, availabilityZone, clientToken);
+      return json({ hosts }, { status: 201 });
+    }
+    if (method === "DELETE" && hostID) {
+      const released = await client.releaseMacHost(hostID);
+      return json({ hostID, released });
+    }
+    return json({ error: "not_found" }, { status: 404 });
+  }
+
   private async auditAWSLeaseCloud(lease: LeaseRecord): Promise<LeaseCloudAudit> {
     const audit: LeaseCloudAudit = {
       leaseID: lease.id,
@@ -3911,6 +3966,9 @@ function isAdminRoute(method: string, parts: string[]): boolean {
     return true;
   }
   if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
+    return true;
+  }
+  if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "mac-hosts") {
     return true;
   }
   if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && Boolean(parts[3])) {

@@ -253,6 +253,72 @@ func TestCoordinatorAdminLeaseAudit(t *testing.T) {
 	}
 }
 
+func TestCoordinatorAdminMacHosts(t *testing.T) {
+	var allocateBody map[string]string
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.String())
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/mac-hosts":
+			if got := r.URL.Query().Get("region"); got != "eu-west-1" {
+				t.Fatalf("region query=%q", got)
+			}
+			if got := r.URL.Query().Get("type"); got != "mac2.metal" {
+				t.Fatalf("type query=%q", got)
+			}
+			if got := r.URL.Query().Get("state"); got != "available" {
+				t.Fatalf("state query=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"hosts":[{"id":"h-000000000001","state":"available","region":"eu-west-1","availabilityZone":"eu-west-1a","instanceType":"mac2.metal","autoPlacement":"off"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/mac-hosts":
+			if got := r.URL.Query().Get("region"); got != "eu-west-1" {
+				t.Fatalf("allocate region query=%q", got)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&allocateBody); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"hosts":[{"id":"h-000000000002","state":"available","region":"eu-west-1","availabilityZone":"eu-west-1b","instanceType":"mac1.metal","autoPlacement":"off"}]}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/admin/mac-hosts/h-000000000002":
+			if got := r.URL.Query().Get("region"); got != "eu-west-1" {
+				t.Fatalf("release region query=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"released":["h-000000000002"]}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	client := &CoordinatorClient{BaseURL: server.URL, Token: "admin-token", Client: server.Client()}
+
+	hosts, err := client.AdminMacHosts(context.Background(), "eu-west-1", "mac2.metal", "available")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 || hosts[0].ID != "h-000000000001" || hosts[0].InstanceType != "mac2.metal" {
+		t.Fatalf("hosts=%#v", hosts)
+	}
+	allocated, err := client.AdminAllocateMacHost(context.Background(), "eu-west-1", "mac1.metal", "eu-west-1b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allocateBody["type"] != "mac1.metal" || allocateBody["availabilityZone"] != "eu-west-1b" {
+		t.Fatalf("allocateBody=%#v", allocateBody)
+	}
+	if len(allocated) != 1 || allocated[0].ID != "h-000000000002" {
+		t.Fatalf("allocated=%#v", allocated)
+	}
+	released, err := client.AdminReleaseMacHost(context.Background(), "eu-west-1", "h-000000000002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(released, []string{"h-000000000002"}) {
+		t.Fatalf("released=%#v", released)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("seen=%#v", seen)
+	}
+}
+
 func TestHeartbeatRequestBodyOmitsIdleTimeoutForTouch(t *testing.T) {
 	if body := heartbeatRequestBody(nil, nil); len(body) != 0 {
 		t.Fatalf("touch heartbeat body=%v, want empty", body)

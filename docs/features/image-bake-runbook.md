@@ -178,6 +178,20 @@ macOS images use the same `image create` command, but the source lease must be
 an AWS EC2 Mac lease on an allocated Dedicated Host:
 
 ```bash
+crabbox admin mac-hosts list --region eu-west-1
+```
+
+If no suitable host is available, allocate one explicitly before warmup:
+
+```bash
+crabbox admin mac-hosts allocate \
+  --region eu-west-1 \
+  --availability-zone eu-west-1a \
+  --type mac2.metal \
+  --force
+```
+
+```bash
 crabbox warmup \
   --provider aws \
   --target macos \

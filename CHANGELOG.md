@@ -5,6 +5,7 @@
 ### Added
 
 - Added `crabbox admin lease-audit` so operators can compare expired brokered AWS lease records against live cloud instance state and fail automation when a record still maps to a live instance.
+- Added `crabbox admin mac-hosts` to list, explicitly allocate, and release AWS EC2 Mac Dedicated Hosts through the coordinator admin token.
 - Added `crabbox checkpoint` to create VM-level AWS AMI checkpoints for brokered Linux leases, fall back to local workspace archives on generic POSIX SSH leases, inspect/list/delete them, restore archives, or fork checkpoints into fresh leases.
 - Added brokered AWS AMI deletion, including deregistering the image and deleting referenced EBS snapshots.
 

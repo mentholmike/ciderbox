@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 func (a App) adminLeases(ctx context.Context, args []string) error {
@@ -82,6 +83,134 @@ func leaseAuditCleanupSummary(audit CoordinatorLeaseCloudAudit) string {
 		return fmt.Sprintf("attempts=%d", audit.CleanupAttempts)
 	}
 	return fmt.Sprintf("attempts=%d error=%s", audit.CleanupAttempts, audit.CleanupError)
+}
+
+func (a App) adminMacHosts(ctx context.Context, args []string) error {
+	args = stripKongCommandPath(args, "admin", "mac-hosts")
+	if len(args) == 0 || isHelpArg(args[0]) {
+		return exit(2, "usage: crabbox admin mac-hosts <list|allocate|release> [flags]")
+	}
+	switch args[0] {
+	case "list":
+		return a.adminMacHostsList(ctx, args[1:])
+	case "allocate":
+		return a.adminMacHostsAllocate(ctx, args[1:])
+	case "release":
+		return a.adminMacHostsRelease(ctx, args[1:])
+	default:
+		return exit(2, "usage: crabbox admin mac-hosts <list|allocate|release> [flags]")
+	}
+}
+
+func (a App) adminMacHostsList(ctx context.Context, args []string) error {
+	fs := newFlagSet("admin mac-hosts list", a.Stderr)
+	region := fs.String("region", "", "AWS region")
+	serverType := fs.String("type", "", "filter by EC2 Mac instance type")
+	state := fs.String("state", "", "filter by host state")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	coord, err := configuredAdminCoordinator()
+	if err != nil {
+		return err
+	}
+	hosts, err := coord.AdminMacHosts(ctx, *region, *serverType, *state)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return json.NewEncoder(a.Stdout).Encode(hosts)
+	}
+	for _, host := range hosts {
+		fmt.Fprintf(a.Stdout, "%-18s %-12s %-14s %-12s %-10s auto=%s allocated=%s\n",
+			host.ID, host.Region, host.AvailabilityZone, host.InstanceType, host.State,
+			blank(host.AutoPlacement, "-"), blank(host.AllocationTime, "-"))
+	}
+	return nil
+}
+
+func (a App) adminMacHostsAllocate(ctx context.Context, args []string) error {
+	args, forceAnywhere := extractBoolFlag(args, "force")
+	args, jsonAnywhere := extractBoolFlag(args, "json")
+	fs := newFlagSet("admin mac-hosts allocate", a.Stderr)
+	region := fs.String("region", "", "AWS region")
+	serverType := fs.String("type", "mac2.metal", "EC2 Mac instance type")
+	availabilityZone := fs.String("availability-zone", "", "AWS availability zone")
+	force := fs.Bool("force", false, "confirm host allocation")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if forceAnywhere {
+		*force = true
+	}
+	if jsonAnywhere {
+		*jsonOut = true
+	}
+	if !*force {
+		return exit(2, "admin mac-hosts allocate requires --force")
+	}
+	if strings.TrimSpace(*availabilityZone) == "" {
+		return exit(2, "usage: crabbox admin mac-hosts allocate --availability-zone <az> [--region <region>] [--type mac2.metal] --force")
+	}
+	coord, err := configuredAdminCoordinator()
+	if err != nil {
+		return err
+	}
+	hosts, err := coord.AdminAllocateMacHost(ctx, *region, *serverType, *availabilityZone)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return json.NewEncoder(a.Stdout).Encode(hosts)
+	}
+	for _, host := range hosts {
+		fmt.Fprintf(a.Stdout, "allocated host=%s region=%s az=%s type=%s state=%s\n",
+			host.ID, host.Region, host.AvailabilityZone, host.InstanceType, host.State)
+	}
+	return nil
+}
+
+func (a App) adminMacHostsRelease(ctx context.Context, args []string) error {
+	args, forceAnywhere := extractBoolFlag(args, "force")
+	args, jsonAnywhere := extractBoolFlag(args, "json")
+	fs := newFlagSet("admin mac-hosts release", a.Stderr)
+	id := fs.String("id", "", "EC2 Mac Dedicated Host id")
+	region := fs.String("region", "", "AWS region")
+	force := fs.Bool("force", false, "confirm host release")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *id == "" && fs.NArg() > 0 {
+		*id = fs.Arg(0)
+	}
+	if forceAnywhere {
+		*force = true
+	}
+	if jsonAnywhere {
+		*jsonOut = true
+	}
+	if *id == "" {
+		return exit(2, "usage: crabbox admin mac-hosts release <host-id> [--region <region>] --force")
+	}
+	if !*force {
+		return exit(2, "admin mac-hosts release requires --force")
+	}
+	coord, err := configuredAdminCoordinator()
+	if err != nil {
+		return err
+	}
+	released, err := coord.AdminReleaseMacHost(ctx, *region, *id)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return json.NewEncoder(a.Stdout).Encode(released)
+	}
+	fmt.Fprintf(a.Stdout, "released host=%s region=%s released=%s\n", *id, blank(*region, "-"), strings.Join(released, ","))
+	return nil
 }
 
 func (a App) adminRelease(ctx context.Context, args []string) error {

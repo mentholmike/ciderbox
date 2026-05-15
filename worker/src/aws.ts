@@ -18,6 +18,18 @@ const awsSpotQuotaCode = "L-34B43A08";
 const awsOnDemandQuotaCode = "L-1216C47A";
 const snapshotDeleteBackoffMs = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 
+export interface AWSMacHost {
+  id: string;
+  state: string;
+  region: string;
+  availabilityZone: string;
+  instanceType: string;
+  autoPlacement: string;
+  allocationTime?: string;
+  releaseTime?: string;
+  tags: Record<string, string>;
+}
+
 export function createSecurityGroupParams(name: string, vpcID: string): Record<string, string> {
   return {
     GroupDescription: "Crabbox ephemeral test runners",
@@ -322,6 +334,68 @@ export class EC2SpotClient {
     }
   }
 
+  async listMacHosts(serverType = "", state = ""): Promise<AWSMacHost[]> {
+    const params: Record<string, string> = {};
+    let filter = 1;
+    if (serverType) {
+      params[`Filter.${filter}.Name`] = "instance-type";
+      params[`Filter.${filter}.Value.1`] = serverType;
+      filter++;
+    }
+    if (state) {
+      params[`Filter.${filter}.Name`] = "state";
+      params[`Filter.${filter}.Value.1`] = state;
+    }
+    const root = await this.ec2("DescribeHosts", params);
+    return items(record(root["hostSet"])["item"])
+      .map((host) => this.macHostFromDescribeHost(host))
+      .filter((host) => host.instanceType.startsWith("mac"));
+  }
+
+  async allocateMacHost(
+    serverType: string,
+    availabilityZone: string,
+    clientToken: string,
+  ): Promise<AWSMacHost[]> {
+    const params: Record<string, string> = {
+      AutoPlacement: "off",
+      ClientToken: clientToken,
+      InstanceType: serverType,
+      Quantity: "1",
+      "TagSpecification.1.ResourceType": "dedicated-host",
+      "TagSpecification.1.Tag.1.Key": "crabbox",
+      "TagSpecification.1.Tag.1.Value": "true",
+      "TagSpecification.1.Tag.2.Key": "created_by",
+      "TagSpecification.1.Tag.2.Value": "crabbox",
+    };
+    if (availabilityZone) {
+      params["AvailabilityZone"] = availabilityZone;
+    }
+    const root = await this.ec2("AllocateHosts", params);
+    const hostIDs = awsHostIDsFromSet(root["hostIdSet"]);
+    if (hostIDs.length === 0) {
+      return [];
+    }
+    const hosts = await this.describeMacHostsByID(hostIDs);
+    return hosts.length > 0
+      ? hosts
+      : hostIDs.map((id) => ({
+          id,
+          state: "available",
+          region: this.region,
+          availabilityZone,
+          instanceType: serverType,
+          autoPlacement: "off",
+          tags: {},
+        }));
+  }
+
+  async releaseMacHost(hostID: string): Promise<string[]> {
+    const root = await this.ec2("ReleaseHosts", { "HostId.1": hostID });
+    const released = awsHostIDsFromSet(root["hostIdSet"]);
+    return released.length > 0 ? released : [hostID];
+  }
+
   private async deleteSnapshotWithRetry(snapshotID: string): Promise<void> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= snapshotDeleteBackoffMs.length; attempt++) {
@@ -583,6 +657,38 @@ export class EC2SpotClient {
     return hostID;
   }
 
+  private async describeMacHostsByID(hostIDs: string[]): Promise<AWSMacHost[]> {
+    const params: Record<string, string> = {};
+    hostIDs.forEach((hostID, index) => {
+      params[`HostId.${index + 1}`] = hostID;
+    });
+    const root = await this.ec2("DescribeHosts", params);
+    return items(record(root["hostSet"])["item"]).map((host) => this.macHostFromDescribeHost(host));
+  }
+
+  private macHostFromDescribeHost(input: unknown): AWSMacHost {
+    const host = record(input);
+    const properties = record(host["hostProperties"]);
+    const macHost: AWSMacHost = {
+      id: asString(host["hostId"]),
+      state: asString(host["hostState"]),
+      region: this.region,
+      availabilityZone: asString(host["availabilityZone"]),
+      instanceType: asString(properties["instanceType"] ?? host["instanceType"]),
+      autoPlacement: asString(host["autoPlacement"]),
+      tags: tagMap(host["tagSet"]),
+    };
+    const allocationTime = asString(host["allocationTime"]);
+    if (allocationTime) {
+      macHost.allocationTime = allocationTime;
+    }
+    const releaseTime = asString(host["releaseTime"]);
+    if (releaseTime) {
+      macHost.releaseTime = releaseTime;
+    }
+    return macHost;
+  }
+
   private async pruneStaleSSHIngress(
     groupID: string,
     group: unknown,
@@ -759,6 +865,12 @@ export function awsMacHostIDFromDescribeHosts(
     });
   const available = hosts.find((host) => asString(host["hostState"]) === "available");
   return asString((available ?? hosts[0] ?? {})["hostId"]);
+}
+
+export function awsHostIDsFromSet(input: unknown): string[] {
+  return items(record(input)["item"])
+    .map((item) => asString(record(item)["hostId"]) || asString(item))
+    .filter(Boolean);
 }
 
 function tagMap(input: unknown): Record<string, string> {

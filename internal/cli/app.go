@@ -205,6 +205,7 @@ Common Flows:
   crabbox usage --scope org
   crabbox admin leases --state active
   crabbox admin lease-audit --state expired --provider aws
+  crabbox admin mac-hosts list --region eu-west-1
   crabbox warmup --actions-runner
   crabbox actions hydrate --id blue-lobster
   crabbox actions dispatch -f testbox_id=cbx_abcdef123456

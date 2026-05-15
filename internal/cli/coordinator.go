@@ -176,6 +176,18 @@ type CoordinatorImage struct {
 	PromotedAt   string `json:"promotedAt,omitempty"`
 }
 
+type CoordinatorMacHost struct {
+	ID               string            `json:"id"`
+	State            string            `json:"state"`
+	Region           string            `json:"region"`
+	AvailabilityZone string            `json:"availabilityZone"`
+	InstanceType     string            `json:"instanceType"`
+	AutoPlacement    string            `json:"autoPlacement"`
+	AllocationTime   string            `json:"allocationTime,omitempty"`
+	ReleaseTime      string            `json:"releaseTime,omitempty"`
+	Tags             map[string]string `json:"tags,omitempty"`
+}
+
 type CoordinatorGitHubLoginStart struct {
 	LoginID   string `json:"loginID"`
 	URL       string `json:"url"`
@@ -896,6 +908,63 @@ func (c *CoordinatorClient) AdminDeleteLease(ctx context.Context, id string) (Co
 	}
 	err := c.do(ctx, http.MethodPost, "/v1/admin/leases/"+url.PathEscape(id)+"/delete", map[string]any{}, &res)
 	return res.Lease, err
+}
+
+func (c *CoordinatorClient) AdminMacHosts(ctx context.Context, region, serverType, state string) ([]CoordinatorMacHost, error) {
+	var res struct {
+		Hosts []CoordinatorMacHost `json:"hosts"`
+	}
+	values := url.Values{}
+	if region != "" {
+		values.Set("region", region)
+	}
+	if serverType != "" {
+		values.Set("type", serverType)
+	}
+	if state != "" {
+		values.Set("state", state)
+	}
+	path := "/v1/admin/mac-hosts"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &res)
+	return res.Hosts, err
+}
+
+func (c *CoordinatorClient) AdminAllocateMacHost(ctx context.Context, region, serverType, availabilityZone string) ([]CoordinatorMacHost, error) {
+	var res struct {
+		Hosts []CoordinatorMacHost `json:"hosts"`
+	}
+	values := url.Values{}
+	if region != "" {
+		values.Set("region", region)
+	}
+	path := "/v1/admin/mac-hosts"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.do(ctx, http.MethodPost, path, map[string]any{
+		"type":             serverType,
+		"availabilityZone": availabilityZone,
+	}, &res)
+	return res.Hosts, err
+}
+
+func (c *CoordinatorClient) AdminReleaseMacHost(ctx context.Context, region, hostID string) ([]string, error) {
+	var res struct {
+		Released []string `json:"released"`
+	}
+	values := url.Values{}
+	if region != "" {
+		values.Set("region", region)
+	}
+	path := "/v1/admin/mac-hosts/" + url.PathEscape(hostID)
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.do(ctx, http.MethodDelete, path, nil, &res)
+	return res.Released, err
 }
 
 func (c *CoordinatorClient) CreateImage(ctx context.Context, leaseID, name string, noReboot bool) (CoordinatorImage, error) {
