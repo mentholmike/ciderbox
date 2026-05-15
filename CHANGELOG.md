@@ -28,6 +28,7 @@
 - Fixed native provider checkpoint creation so AWS, Azure, and GCP snapshot/image checkpoints flush source filesystem writes before calling the provider API.
 - Fixed Tensorlake timing JSON so delegated runs include the lease slug and reused sandboxes preserve the stored claim slug. Thanks @stainlu.
 - Fixed Tensorlake workdir validation so broad sandbox paths are rejected before sync or command execution. Thanks @stainlu.
+
 ## 0.13.0 - 2026-05-13
 
 ### Added
