@@ -12,6 +12,8 @@ idle_timeout="${CRABBOX_MACOS_IDLE_TIMEOUT:-30m}"
 image_wait_timeout="${CRABBOX_MACOS_IMAGE_WAIT_TIMEOUT:-60m}"
 host_wait_timeout="${CRABBOX_MACOS_HOST_WAIT_TIMEOUT:-5h}"
 host_wait_interval="${CRABBOX_MACOS_HOST_WAIT_INTERVAL:-2m}"
+webvnc_wait_timeout="${CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT:-2m}"
+webvnc_wait_interval="${CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL:-5s}"
 allocate="${CRABBOX_MACOS_ALLOCATE:-0}"
 run_existing="${CRABBOX_MACOS_RUN:-0}"
 create_image="${CRABBOX_MACOS_CREATE_IMAGE:-1}"
@@ -125,6 +127,29 @@ wait_for_host_available() {
   done
 }
 
+require_webvnc_connected() {
+  local lease="$1"
+  local timeout_seconds interval_seconds deadline log
+  log="$(mktemp)"
+  timeout_seconds="$(duration_seconds "$webvnc_wait_timeout")"
+  interval_seconds="$(duration_seconds "$webvnc_wait_interval")"
+  deadline="$(($(date +%s) + timeout_seconds))"
+  printf 'waiting for WebVNC portal bridge for lease %s; timeout=%s interval=%s\n' "$lease" "$webvnc_wait_timeout" "$webvnc_wait_interval"
+  while true; do
+    run "$CRABBOX_BIN" webvnc status --provider aws --target macos --id "$lease" | tee "$log"
+    if grep -q '^portal bridge: connected=true' "$log"; then
+      printf 'WebVNC portal bridge connected for lease %s\n' "$lease"
+      return 0
+    fi
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      printf 'timed out waiting for WebVNC portal bridge for lease %s\n' "$lease" >&2
+      return 1
+    fi
+    printf 'WebVNC portal bridge is not connected for lease %s; sleeping %ss\n' "$lease" "$interval_seconds"
+    sleep "$interval_seconds"
+  done
+}
+
 warmup_macos() {
   local label="$1"
   shift
@@ -176,7 +201,7 @@ smoke_macos_lease() {
     run "$CRABBOX_BIN" webvnc daemon start --provider aws --target macos --id "$lease"
   fi
   sleep 3
-  run "$CRABBOX_BIN" webvnc status --provider aws --target macos --id "$lease"
+  require_webvnc_connected "$lease"
   run "$CRABBOX_BIN" artifacts collect \
     --provider aws \
     --target macos \
