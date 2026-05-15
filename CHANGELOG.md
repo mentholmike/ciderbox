@@ -8,6 +8,7 @@
 - Added `crabbox checkpoint` native disk-snapshot checkpoints for brokered AWS, Azure, and GCP Linux leases, optional provider image checkpoints via `--strategy image`, local workspace archives for generic POSIX SSH leases, inspect/list/delete flows, archive restore, and checkpoint forks into fresh leases.
 - Added `provider: cloudflare` delegated runs for Cloudflare Containers through a Worker runner, including archive sync, warm containers, local claim cleanup, and deployment docs. Thanks @altaywtf.
 - Added Cloudflare runner deploy-smoke tooling, CI coverage for the container runner Go module, and redacted `crabbox config show` output for Cloudflare runner auth.
+- Added `crabbox list --refresh` so local Cloudflare claims can be checked against live runner state on demand.
 - Added brokered provider snapshot/image deletion for AWS EBS snapshots and AMIs, Azure managed disk snapshots and managed images, and GCP disk snapshots and machine images.
 
 ### Changed

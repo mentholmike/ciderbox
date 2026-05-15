@@ -207,6 +207,7 @@ type TouchRequest struct {
 type ListRequest struct {
 	Options LeaseOptions
 	All     bool
+	Refresh bool
 }
 
 type RunRequest struct {

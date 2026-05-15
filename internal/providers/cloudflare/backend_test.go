@@ -149,6 +149,44 @@ func TestCloudflareCreateSandboxSendsInstanceType(t *testing.T) {
 	}
 }
 
+func TestCloudflareListRefreshChecksClaimState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := claimLeaseForRepoProvider("cbx_live", "blue-lobster", providerName, t.TempDir(), time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := claimLeaseForRepoProvider("cbx_missing", "red-lobster", providerName, t.TempDir(), time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/sandboxes/cbx_live":
+			_, _ = io.WriteString(w, `{"id":"cbx_live","state":"healthy","instanceType":"lite","labels":{"slug":"blue-lobster"}}`)
+		case "/v1/sandboxes/cbx_missing":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := Config{}
+	cfg.Cloudflare.APIURL = server.URL
+	cfg.Cloudflare.Token = "token"
+	cfg.ServerType = "lite"
+	backend := cloudflareBackend{cfg: cfg, rt: Runtime{HTTP: server.Client(), Stderr: io.Discard}}
+	servers, err := backend.List(context.Background(), ListRequest{Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, server := range servers {
+		states[server.Labels["slug"]] = server.Status
+	}
+	if states["blue-lobster"] != "healthy" || states["red-lobster"] != "missing" {
+		t.Fatalf("states = %#v, want refreshed healthy and missing", states)
+	}
+}
+
 func TestCloudflarePrepareWorkspacePreservesWhenRequested(t *testing.T) {
 	for _, tc := range []struct {
 		name           string

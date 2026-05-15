@@ -15,10 +15,10 @@
   },
   "scripts": {
     "cloudflare:deploy-smoke": "scripts/deploy-cloudflare-smoke.sh",
-    "check": "node --check index.js && node --test index.test.js",
+    "check": "node --check index.js && node --test index.test.js scripts/*.test.js",
     "docs:check": "node scripts/check-command-docs.mjs && node scripts/check-docs-links.mjs && node scripts/build-docs-site.mjs",
     "live:auth": "CRABBOX_LIVE=1 scripts/live-auth-smoke.sh",
-    "test": "node --test index.test.js"
+    "test": "node --test index.test.js scripts/*.test.js"
   },
   "files": [
     "index.js",

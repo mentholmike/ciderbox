@@ -194,15 +194,41 @@ func (b *cloudflareBackend) Run(ctx context.Context, req RunRequest) (RunResult,
 }
 
 func (b *cloudflareBackend) List(ctx context.Context, req ListRequest) ([]LeaseView, error) {
-	_ = ctx
-	_ = req
 	claims, err := localCloudflareClaims()
+	if err != nil {
+		return nil, err
+	}
+	if req.Refresh {
+		if len(claims) == 0 {
+			return []LeaseView{}, nil
+		}
+		return b.listRefreshed(ctx, claims)
+	}
+	servers := make([]Server, 0, len(claims))
+	for _, claim := range claims {
+		servers = append(servers, claimToServer(claim, "unknown"))
+	}
+	return servers, nil
+}
+
+func (b *cloudflareBackend) listRefreshed(ctx context.Context, claims []localClaim) ([]LeaseView, error) {
+	client, err := newCloudflareClient(b.cfg, b.rt)
 	if err != nil {
 		return nil, err
 	}
 	servers := make([]Server, 0, len(claims))
 	for _, claim := range claims {
-		servers = append(servers, claimToServer(claim, "unknown"))
+		sandbox, err := client.getSandbox(ctx, claim.LeaseID)
+		if err != nil {
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				servers = append(servers, claimToServer(claim, "missing"))
+				continue
+			}
+			fmt.Fprintf(b.rt.Stderr, "warning: %s status failed for %s: %v\n", providerName, claim.LeaseID, err)
+			servers = append(servers, claimToServer(claim, "unknown"))
+			continue
+		}
+		servers = append(servers, sandboxToServer(claim.LeaseID, claim.Slug, sandbox))
 	}
 	return servers, nil
 }

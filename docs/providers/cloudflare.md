@@ -179,8 +179,9 @@ crabbox run \
 - `warmup` starts a container and leaves it alive until `crabbox stop` or the
   configured TTL/idle deadline expires.
 - `status` and `stop` resolve local Crabbox claims, then call the runner.
-- `list` reports local Cloudflare claims. The runner intentionally does not
-  expose a global container enumeration API.
+- `list` reports local Cloudflare claims. Add `--refresh` to check runner state
+  for those claims. The runner intentionally does not expose a global container
+  enumeration API.
 - The default image includes Git, GitHub CLI, `jq`, `ripgrep`, Go, Node, and
   `pnpm`; repo-specific dependencies still belong to the repo setup command.
 - npm and pnpm caches live under `/var/cache/crabbox`, and the container

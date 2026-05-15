@@ -110,6 +110,23 @@ test("crabbox_status includes optional flags", async () => {
   ]);
 });
 
+test("crabbox_list can refresh Cloudflare state", async () => {
+  const fake = createFakeCrabbox();
+  const tools = registerWithConfig({ binary: fake.file });
+  const result = await getTool(tools, "crabbox_list").execute("call-1", {
+    provider: "cloudflare",
+    json: true,
+    refresh: true,
+  });
+  assert.deepEqual(JSON.parse(result.details.stdout).argv, [
+    "list",
+    "--provider",
+    "cloudflare",
+    "--json",
+    "--refresh",
+  ]);
+});
+
 test("disabled run tool fails before invoking crabbox", async () => {
   const fake = createFakeCrabbox();
   const tools = registerWithConfig({ binary: fake.file, allowRun: false });
