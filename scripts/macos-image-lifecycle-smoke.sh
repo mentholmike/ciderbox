@@ -22,12 +22,21 @@ open_webvnc="${CRABBOX_MACOS_OPEN_WEBVNC:-0}"
 keep_lease="${CRABBOX_MACOS_KEEP_LEASE:-0}"
 release_host="${CRABBOX_MACOS_RELEASE_HOST:-0}"
 artifact_root="${CRABBOX_MACOS_ARTIFACT_DIR:-$ROOT/.crabbox/macos-image-smoke/$image_name}"
+summary_file="$artifact_root/summary.json"
 
 source_lease=""
 candidate_lease=""
 promoted_lease=""
+source_lease_id=""
+candidate_lease_id=""
+promoted_lease_id=""
 allocated_host=""
+host_id=""
 host_allocated_by_script=0
+host_released=0
+ami_id=""
+summary_result=""
+summary_phase="init"
 
 run() {
   printf '+'
@@ -67,13 +76,81 @@ cleanup() {
   stop_lease "$candidate_lease"
   stop_lease "$source_lease"
 }
-trap cleanup EXIT
+
+write_summary() {
+  local result="$1"
+  local phase="$2"
+  summary_result="$result"
+  summary_phase="$phase"
+  mkdir -p "$artifact_root"
+  jq -n \
+    --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg result "$result" \
+    --arg phase "$phase" \
+    --arg region "$region" \
+    --arg instanceType "$instance_type" \
+    --arg imageName "$image_name" \
+    --arg artifactRoot "$artifact_root" \
+    --arg sourceLease "$source_lease_id" \
+    --arg candidateLease "$candidate_lease_id" \
+    --arg promotedLease "$promoted_lease_id" \
+    --arg hostID "$host_id" \
+    --arg hostAllocatedByScript "$host_allocated_by_script" \
+    --arg hostReleaseRequested "$release_host" \
+    --arg hostReleased "$host_released" \
+    --arg keepLease "$keep_lease" \
+    --arg createImage "$create_image" \
+    --arg promote "$promote" \
+    --arg amiID "$ami_id" \
+    '{
+      generatedAt: $generatedAt,
+      result: $result,
+      phase: $phase,
+      region: $region,
+      instanceType: $instanceType,
+      imageName: $imageName,
+      artifactRoot: $artifactRoot,
+      host: {
+        id: $hostID,
+        allocatedByScript: ($hostAllocatedByScript == "1"),
+        releaseRequested: ($hostReleaseRequested == "1"),
+        released: ($hostReleased == "1")
+      },
+      leases: {
+        source: $sourceLease,
+        candidate: $candidateLease,
+        promoted: $promotedLease,
+        keepRequested: ($keepLease == "1")
+      },
+      image: {
+        createRequested: ($createImage == "1"),
+        promoteRequested: ($promote == "1"),
+        amiId: $amiID
+      },
+      artifacts: {
+        source: ($artifactRoot + "/source"),
+        candidate: ($artifactRoot + "/candidate"),
+        promoted: ($artifactRoot + "/promoted")
+      }
+    }' >"$summary_file"
+  printf 'macOS lifecycle summary: %s\n' "$summary_file"
+}
+
+on_exit() {
+  local status=$?
+  if [[ "$status" -ne 0 && "$summary_result" != "blocked" ]]; then
+    write_summary failed "$summary_phase" || true
+  fi
+  cleanup
+}
+trap on_exit EXIT
 
 release_host_if_requested() {
   local label="$1"
   [[ "$release_host" == "1" && -n "$allocated_host" ]] || return 0
   wait_for_host_available "$allocated_host" "$label"
   run "$CRABBOX_BIN" admin mac-hosts release "$allocated_host" --region "$region" --force
+  host_released=1
   allocated_host=""
 }
 
@@ -237,6 +314,7 @@ if [[ ! -x "$CRABBOX_BIN" ]]; then
   exit 2
 fi
 
+write_summary running preflight
 printf 'macOS lifecycle smoke region=%s type=%s image=%s host-wait=%s\n' "$region" "$instance_type" "$image_name" "$host_wait_timeout"
 run "$CRABBOX_BIN" admin mac-hosts offerings --region "$region" --type "$instance_type"
 hosts_json="$("$CRABBOX_BIN" admin mac-hosts list --region "$region" --type "$instance_type" --json)"
@@ -251,23 +329,31 @@ if [[ -n "$existing_host" ]]; then
   if [[ "$run_existing" != "1" && "$allocate" != "1" ]]; then
     printf 'available EC2 Mac Dedicated Host found: %s\n' "$existing_host"
     printf 'set CRABBOX_MACOS_RUN=1 to use the existing host and continue.\n'
+    allocated_host="$existing_host"
+    host_id="$existing_host"
+    write_summary ready existing-host
     exit 0
   fi
   printf 'using existing EC2 Mac Dedicated Host: %s\n' "$existing_host"
   allocated_host="$existing_host"
+  host_id="$existing_host"
 else
+  summary_phase="host-dry-run"
   dry_log="$(mktemp)"
   run_tee "$dry_log" "$CRABBOX_BIN" admin mac-hosts allocate --region "$region" --type "$instance_type" --dry-run --json
   if ! jq -e 'any(.[]; .ok == true)' "$dry_log" >/dev/null; then
     printf 'macOS lifecycle blocked before paid work: EC2 Mac host dry-run did not succeed.\n' >&2
+    write_summary blocked host-dry-run
     exit 1
   fi
 
   if [[ "$allocate" != "1" ]]; then
     printf 'dry-run passed; set CRABBOX_MACOS_ALLOCATE=1 to allocate a paid EC2 Mac Dedicated Host and continue.\n'
+    write_summary ready allocation
     exit 0
   fi
 
+  summary_phase="host-allocation"
   allocate_log="$(mktemp)"
   run_tee "$allocate_log" "$CRABBOX_BIN" admin mac-hosts allocate --region "$region" --type "$instance_type" --force --json
   allocated_host="$(jq -r '.[0].id // empty' "$allocate_log")"
@@ -276,6 +362,7 @@ else
     exit 1
   fi
   host_allocated_by_script=1
+  host_id="$allocated_host"
 fi
 
 if [[ -n "$allocated_host" ]]; then
@@ -288,7 +375,10 @@ if [[ "$release_host" == "1" && -n "$allocated_host" && "$host_allocated_by_scri
   exit 1
 fi
 
+write_summary running source-warmup
 source_lease="$(warmup_macos source)"
+source_lease_id="$source_lease"
+write_summary running source-smoke
 smoke_macos_lease "$source_lease" source
 
 if [[ "$create_image" != "1" ]]; then
@@ -298,9 +388,11 @@ if [[ "$create_image" != "1" ]]; then
   fi
   release_host_if_requested source
   printf 'source lease smoke passed; set CRABBOX_MACOS_CREATE_IMAGE=1 to create the AMI.\n'
+  write_summary passed source
   exit 0
 fi
 
+summary_phase="image-create"
 image_json="$("$CRABBOX_BIN" image create --id "$source_lease" --name "$image_name" --no-reboot=false --wait --wait-timeout "$image_wait_timeout" --json)"
 printf '%s\n' "$image_json" | jq .
 ami_id="$(printf '%s\n' "$image_json" | jq -r '.id // .image.id // empty')"
@@ -313,7 +405,10 @@ stop_lease "$source_lease"
 source_lease=""
 wait_for_host_available "$allocated_host" source
 
+write_summary running candidate-warmup
 candidate_lease="$(CRABBOX_AWS_AMI="$ami_id" warmup_macos candidate)"
+candidate_lease_id="$candidate_lease"
+write_summary running candidate-smoke
 smoke_macos_lease "$candidate_lease" candidate
 
 if [[ "$promote" != "1" ]]; then
@@ -324,15 +419,20 @@ if [[ "$promote" != "1" ]]; then
   release_host_if_requested candidate
   printf 'candidate AMI smoke passed: %s\n' "$ami_id"
   printf 'set CRABBOX_MACOS_PROMOTE=1 to promote it and run the promoted-image smoke.\n'
+  write_summary passed candidate
   exit 0
 fi
 
+summary_phase="image-promote"
 run "$CRABBOX_BIN" image promote "$ami_id" --target macos --region "$region" --json
 stop_lease "$candidate_lease"
 candidate_lease=""
 wait_for_host_available "$allocated_host" candidate
 
+write_summary running promoted-warmup
 promoted_lease="$(warmup_macos promoted)"
+promoted_lease_id="$promoted_lease"
+write_summary running promoted-smoke
 smoke_macos_lease "$promoted_lease" promoted
 printf 'promoted macOS image lifecycle passed: %s\n' "$ami_id"
 
@@ -341,3 +441,5 @@ if [[ "$release_host" == "1" ]]; then
   promoted_lease=""
   release_host_if_requested promoted
 fi
+
+write_summary passed promoted

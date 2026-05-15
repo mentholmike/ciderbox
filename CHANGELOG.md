@@ -12,6 +12,7 @@
 - Hardened the macOS image lifecycle smoke so WebVNC must report an active portal bridge before artifacts are collected.
 - Fixed the macOS image lifecycle smoke so structured dry-run and allocation JSON are not polluted by command tracing before `jq` parses them.
 - Fixed the macOS image lifecycle smoke so `CRABBOX_MACOS_RELEASE_HOST=1` releases a script-allocated host after source-only and candidate-only runs too.
+- Added a macOS image lifecycle `summary.json` artifact with the run phase, host id, lease ids, AMI id, and artifact paths for blocked, partial, and completed runs.
 - Added `crabbox checkpoint` native disk-snapshot checkpoints for brokered AWS, Azure, and GCP Linux leases, optional provider image checkpoints via `--strategy image`, local workspace archives for generic POSIX SSH leases, inspect/list/delete flows, archive restore, and checkpoint forks into fresh leases.
 - Added brokered provider snapshot/image deletion for AWS EBS snapshots and AMIs, Azure managed disk snapshots and managed images, and GCP disk snapshots and machine images.
 
