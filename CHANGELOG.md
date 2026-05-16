@@ -2,6 +2,10 @@
 
 ## 0.14.1 - Unreleased
 
+### Added
+
+- Added an AWS orphan-audit script for trusted operators to find Crabbox-tagged EC2 instances left behind in old provider accounts after credential or account rotation.
+
 ## 0.14.0 - 2026-05-15
 
 ### Added

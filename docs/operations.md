@@ -230,6 +230,18 @@ bin/crabbox stop blue-lobster
 
 Trusted operators can use `crabbox admin release` or `crabbox admin delete --force` for stuck leases.
 
+After AWS credential or account rotation, scan old provider accounts directly for
+Crabbox-tagged EC2 instances that the current coordinator cannot see:
+
+```sh
+scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account
+scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account --terminate
+```
+
+The audit is read-only by default. It prints `crabbox=true` EC2 instances whose
+lease tag is not active in the coordinator or whose `expires_at` tag is in the
+past.
+
 Direct-provider cleanup is only for debug mode without a coordinator:
 
 ```sh
