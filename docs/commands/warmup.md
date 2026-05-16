@@ -91,11 +91,12 @@ browser/code.
 
 With `--provider aws --target macos --desktop`, Crabbox launches an EC2 Mac
 instance on an already allocated Dedicated Host. Crabbox can discover an
-available host in the selected region, or you can set `CRABBOX_AWS_MAC_HOST_ID`
-/ `aws.macHostId` to pin a specific host. Use `--market on-demand`, and expect
+available host in the selected region, or you can set `CRABBOX_HOST_ID`
+/ `hostId` to pin a specific host. `CRABBOX_AWS_MAC_HOST_ID` and
+`aws.macHostId` remain AWS compatibility aliases. Use `--market on-demand`, and expect
 EC2 Mac host lifecycle rules to dominate cleanup and cost. Warmup does not
 allocate a Dedicated Host implicitly; trusted operators can use
-`crabbox admin mac-hosts offerings|quota|list|allocate|release` for the host lifecycle. The
+`crabbox admin hosts offerings|quota|list|allocate|release --provider aws --target macos` for the host lifecycle. The
 default SSH user is `ec2-user`; the VNC password printed by `crabbox vnc` is the
 per-lease macOS account password set by bootstrap.
 

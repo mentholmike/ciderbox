@@ -85,14 +85,14 @@ crabbox unshare --id <lease-id-or-slug> [--user <email>] [--org] [--all] [--json
 crabbox usage [--scope user|org|all] [--user <email>] [--org <name>] [--month YYYY-MM] [--json]
 crabbox admin leases [--state active|released|expired|failed] [--owner <email>] [--org <name>] [--json]
 crabbox admin lease-audit [--state expired] [--provider aws] [--fail-on-live] [--json]
-crabbox admin aws-identity [--region <region>] [--json]
-crabbox admin aws-policy [--mac-hosts]
-crabbox admin mac-hosts policy
-crabbox admin mac-hosts offerings [--region <region>] [--type mac2.metal] [--json]
-crabbox admin mac-hosts quota [--region <region>] [--type mac2.metal] [--json]
-crabbox admin mac-hosts list [--region <region>] [--type <mac-type>] [--state <state>] [--json]
-crabbox admin mac-hosts allocate [--availability-zone <az>] [--region <region>] [--type mac2.metal] (--dry-run|--force)
-crabbox admin mac-hosts release <host-id> [--region <region>] --force
+crabbox admin providers identity --provider aws [--region <region>] [--json]
+crabbox admin providers policy --provider aws [--target macos]
+crabbox admin hosts policy --provider aws --target macos
+crabbox admin hosts offerings --provider aws --target macos [--region <region>] [--type mac2.metal] [--json]
+crabbox admin hosts quota --provider aws --target macos [--region <region>] [--type mac2.metal] [--json]
+crabbox admin hosts list --provider aws --target macos [--region <region>] [--type <mac-type>] [--state <state>] [--json]
+crabbox admin hosts allocate --provider aws --target macos [--availability-zone <az>] [--region <region>] [--type mac2.metal] (--dry-run|--force)
+crabbox admin hosts release <host-id> --provider aws --target macos [--region <region>] --force
 crabbox admin release <lease-id-or-slug> [--delete]
 crabbox admin delete <lease-id-or-slug> --force
 crabbox ssh --id <lease-id-or-slug> [--network auto|tailscale|public]
@@ -212,7 +212,8 @@ Managed provider targets are intentionally narrow:
   a Windows host.
 - AWS also supports EC2 Mac (`--target macos`) when an available Mac Dedicated
   Host exists in the selected region. Brokered mode can discover an available
-  host; direct mode requires `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`.
+  host; direct mode requires `CRABBOX_HOST_ID` or `hostId`.
+  `CRABBOX_AWS_MAC_HOST_ID` and `aws.macHostId` remain AWS compatibility aliases.
   Azure does not have a managed macOS target.
 - Existing macOS and Windows machines belong on `provider=ssh`.
 
@@ -288,11 +289,11 @@ Trusted operator lease controls:
 ```sh
 crabbox admin leases --state active
 crabbox admin lease-audit --state expired --provider aws --fail-on-live
-crabbox admin aws-identity --region eu-west-1
-crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts quota --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts list --region eu-west-1
-crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run
+crabbox admin providers identity --provider aws --region eu-west-1
+crabbox admin hosts offerings --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts list --provider aws --target macos --region eu-west-1
+crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2.metal --dry-run
 crabbox admin release blue-lobster
 crabbox admin delete cbx_abcdef123456 --force
 ```
@@ -533,8 +534,8 @@ AWS EC2 Mac target:
 ```yaml
 provider: aws
 target: macos
+hostId: h-0123456789abcdef0
 aws:
-  macHostId: h-0123456789abcdef0
 capacity:
   market: on-demand
 ```
@@ -702,7 +703,8 @@ CRABBOX_AWS_SUBNET_ID
 CRABBOX_AWS_INSTANCE_PROFILE
 CRABBOX_AWS_ROOT_GB
 CRABBOX_AWS_SSH_CIDRS
-CRABBOX_AWS_MAC_HOST_ID
+CRABBOX_HOST_ID
+CRABBOX_AWS_MAC_HOST_ID legacy AWS alias
 CRABBOX_CAPACITY_MARKET
 CRABBOX_CAPACITY_STRATEGY
 CRABBOX_CAPACITY_FALLBACK

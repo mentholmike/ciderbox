@@ -178,38 +178,41 @@ macOS images use the same `image create` command, but the source lease must be
 an AWS EC2 Mac lease on an allocated Dedicated Host:
 
 ```bash
-crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts quota --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts list --region eu-west-1
+crabbox admin hosts offerings --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts list --provider aws --target macos --region eu-west-1
 ```
 
 If no suitable host is available, allocate one explicitly before warmup:
 
 ```bash
-crabbox admin mac-hosts allocate \
+crabbox admin hosts allocate \
+  --provider aws \
+  --target macos \
   --region eu-west-1 \
   --type mac2.metal \
   --dry-run
 ```
 
 If dry-run reports `UnauthorizedOperation`, update the coordinator AWS identity
-with the EC2 Mac host lifecycle policy in [admin](../commands/admin.md#mac-hosts)
+with the EC2 Mac host lifecycle policy in [admin](../commands/admin.md#hosts)
 before doing the real allocation. Confirm the caller identity and print the
-copy-pasteable policy with:
+copy-pasteable combined policy with:
 
 ```bash
-crabbox admin aws-identity --region eu-west-1 --json
-crabbox admin aws-policy --mac-hosts > /tmp/crabbox-macos-image-policy.json
-crabbox admin mac-hosts policy
+crabbox admin providers identity --provider aws --region eu-west-1 --json
+crabbox admin providers policy --provider aws --target macos > /tmp/crabbox-macos-image-policy.json
+crabbox admin hosts policy --provider aws --target macos
 
-coordinator_account=$(crabbox admin aws-identity --region eu-west-1 --json | jq -r .account)
+coordinator_account=$(crabbox admin providers identity --provider aws --region eu-west-1 --json | jq -r .account)
 local_account=$(aws sts get-caller-identity --query Account --output text)
 test "$local_account" = "$coordinator_account"
 ```
 
 Apply the combined policy to the coordinator AWS principal before rerunning the
-preflight. If `admin aws-identity --json` returns an IAM role ARN, attach it to
-that role. If it returns an IAM user ARN, attach it to that user:
+preflight. If `admin providers identity --provider aws --json` returns an IAM
+role ARN, attach it to that role. If it returns an IAM user ARN, attach it to
+that user:
 
 ```bash
 aws iam put-role-policy \
@@ -224,22 +227,23 @@ aws iam put-user-policy \
 ```
 
 For assumed-role identities, attach the policy to the underlying role name from
-the ARN rather than to the session name. `admin aws-identity --json` includes
+the ARN rather than to the session name. `admin providers identity --provider aws --json` includes
 `policyTarget.type` and `policyTarget.name` when Crabbox can derive the IAM
 attachment target from the ARN.
 
-If dry-run succeeds, run `crabbox admin mac-hosts quota --region eu-west-1
---type mac2.metal` before real allocation. It prints the selected EC2 Mac
-Dedicated Host quota from AWS Service Quotas, which is the next useful
-no-spend blocker after IAM.
+If dry-run succeeds, run
+`crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal`
+before real allocation. It prints the selected EC2 Mac Dedicated Host quota
+from AWS Service Quotas, which is the next useful no-spend blocker after IAM.
 
 Do not treat that host policy as the whole image bake policy. It only unblocks
 Dedicated Host allocation and release. The full paid lifecycle also needs the
 normal AWS provider permissions in [Infrastructure](../infrastructure.md#aws-ec2)
 for key pairs, security groups, macOS `RunInstances`, AMI creation, candidate
 boot, promotion, snapshot cleanup, and lease termination. Print the baseline
-provider policy with `crabbox admin aws-policy`, or the combined provider plus
-Dedicated Host policy with `crabbox admin aws-policy --mac-hosts`.
+provider policy with `crabbox admin providers policy --provider aws`, or the
+combined provider plus Dedicated Host policy with
+`crabbox admin providers policy --provider aws --target macos`.
 
 For an end-to-end guarded run, use the repository smoke script:
 
@@ -295,7 +299,9 @@ interval. If the host existed before the script started, `CRABBOX_MACOS_RELEASE_
 will not release it unless `CRABBOX_MACOS_RELEASE_EXISTING_HOST=1` is also set.
 
 ```bash
-crabbox admin mac-hosts allocate \
+crabbox admin hosts allocate \
+  --provider aws \
+  --target macos \
   --region eu-west-1 \
   --type mac2.metal \
   --force

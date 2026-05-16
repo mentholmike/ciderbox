@@ -77,7 +77,8 @@ tensorlake Tensorlake Firecracker sandboxes with delegated command execution
   data, OpenSSH, Git for Windows, TightVNC, and first-network flyout
   suppression when `target=windows`;
 - launches EC2 Mac leases on available Dedicated Hosts with On-Demand capacity,
-  optionally pinned by `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`;
+  optionally pinned by `CRABBOX_HOST_ID` or `hostId`; `CRABBOX_AWS_MAC_HOST_ID`
+  and `aws.macHostId` remain AWS compatibility aliases;
 - tags instances, volumes, and Spot requests;
 - falls back across broad C/M/R instance families for class requests, including account policy and capacity rejections;
 - can fall back to a small burstable type when account policy rejects the high-core class candidates;

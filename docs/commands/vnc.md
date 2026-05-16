@@ -151,7 +151,7 @@ host's VNC or Screen Sharing prompt.
 | Azure Linux | Yes | Requires `--desktop`; same Linux desktop profile. |
 | AWS Windows | Yes | Requires `--target windows --desktop`; installs Git for Windows and TightVNC after EC2Launch enables OpenSSH. Spot or On-Demand follows the AWS capacity config. |
 | Azure Windows | Yes | Requires `--target windows --desktop`; installs Git for Windows and TightVNC after Custom Script Extension enables OpenSSH. Capacity follows the Azure class/SKU config. |
-| AWS macOS | Yes | Requires `--target macos --desktop --market on-demand` plus an available EC2 Mac Dedicated Host. Brokered mode can discover a host; direct mode requires `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`. |
+| AWS macOS | Yes | Requires `--target macos --desktop --market on-demand` plus an available EC2 Mac Dedicated Host. Brokered mode can discover a host; direct mode requires `CRABBOX_HOST_ID` or `hostId`; `CRABBOX_AWS_MAC_HOST_ID` and `aws.macHostId` remain AWS compatibility aliases. |
 | Static Linux | Host-managed | Requires an existing loopback VNC service on the host. |
 | Static macOS | Host-managed | Uses existing Screen Sharing or VNC. |
 | Static Windows | Host-managed | Uses an existing VNC server. |
@@ -161,7 +161,7 @@ AWS EC2 Mac has an important cost and lifecycle constraint: Mac instances run on
 allocated EC2 Mac Dedicated Hosts, are On-Demand only, and the Dedicated Host
 has a 24-hour minimum allocation period. Crabbox warmup launches onto an
 available host or a host id you provide. It does not allocate a host implicitly;
-trusted operators can use `crabbox admin mac-hosts offerings|quota|list|allocate|release`.
+trusted operators can use `crabbox admin hosts offerings|quota|list|allocate|release --provider aws --target macos`.
 
 ## Security Model
 
@@ -230,9 +230,9 @@ The command captures from the logged-in console session using a scheduled task.
 macOS launch fails with missing host id
 
 Use `--market on-demand` and make sure an available EC2 Mac Dedicated Host is
-allocated in the selected AWS region. Set `CRABBOX_AWS_MAC_HOST_ID` or
-`aws.macHostId` only when you want to pin a specific host, or when running the
-direct AWS provider.
+allocated in the selected AWS region. Set `CRABBOX_HOST_ID` or `hostId` only
+when you want to pin a specific host, or when running the direct AWS provider.
+`CRABBOX_AWS_MAC_HOST_ID` and `aws.macHostId` remain AWS compatibility aliases.
 
 ## Flags
 

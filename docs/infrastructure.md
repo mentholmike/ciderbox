@@ -202,7 +202,8 @@ Brokered AWS credentials live as Worker secrets:
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
+CRABBOX_HOST_ID optional; pins a brokered host such as an EC2 Mac Dedicated Host
+CRABBOX_AWS_MAC_HOST_ID optional legacy AWS alias for CRABBOX_HOST_ID
 ```
 
 Direct fallback env is whatever the AWS SDK can resolve, such as:
@@ -224,7 +225,8 @@ CRABBOX_AWS_SUBNET_ID            optional subnet override
 CRABBOX_AWS_INSTANCE_PROFILE     optional IAM instance profile name
 CRABBOX_AWS_ROOT_GB              default 400
 CRABBOX_AWS_SSH_CIDRS            optional comma-separated SSH source CIDRs
-CRABBOX_AWS_MAC_HOST_ID          optional EC2 Mac Dedicated Host id for target=macos; required for direct AWS
+CRABBOX_HOST_ID                  optional provider host id for target=macos; required for direct AWS macOS
+CRABBOX_AWS_MAC_HOST_ID          optional legacy AWS alias for CRABBOX_HOST_ID
 CRABBOX_SSH_FALLBACK_PORTS       optional comma-separated SSH fallback ports, or none
 ```
 
@@ -239,10 +241,11 @@ Service Quotas access is best-effort: when it is available, Crabbox can skip
 known quota-impossible instance types before calling `RunInstances`; when it
 is missing, EC2 launch errors are still classified after the failed call.
 EC2 Mac image bakes also need the separate Dedicated Host lifecycle grant
-printed by `crabbox admin mac-hosts policy`, including
+printed by `crabbox admin hosts policy --provider aws --target macos`, including
 `servicequotas:ListServiceQuotas` for the Mac host quota preflight. Print the baseline provider
-policy with `crabbox admin aws-policy`, or the combined provider plus Dedicated
-Host policy with `crabbox admin aws-policy --mac-hosts`.
+policy with `crabbox admin providers policy --provider aws`, or the combined
+provider plus Dedicated Host policy with
+`crabbox admin providers policy --provider aws --target macos`.
 
 Before approving paid EC2 Mac host allocation, run the no-spend region
 preflight against the coordinator you intend to use:
@@ -408,7 +411,8 @@ HETZNER_TOKEN
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
+CRABBOX_HOST_ID optional; pins a brokered host such as an EC2 Mac Dedicated Host
+CRABBOX_AWS_MAC_HOST_ID optional legacy AWS alias for CRABBOX_HOST_ID
 CRABBOX_SHARED_TOKEN
 CRABBOX_ADMIN_TOKEN optional; required for admin routes and image promotion
 CRABBOX_GITHUB_CLIENT_ID

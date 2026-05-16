@@ -22,8 +22,9 @@ crabbox screenshot --id silver-squid --output macos.png
 EC2 Mac requirements:
 
 - an allocated EC2 Mac Dedicated Host in the selected region;
-- an optional `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId` when you want to pin
-  the lease to a specific Dedicated Host;
+- an optional `CRABBOX_HOST_ID` or `hostId` when you want to pin the lease to a
+  specific Dedicated Host; `CRABBOX_AWS_MAC_HOST_ID` and `aws.macHostId` remain
+  AWS compatibility aliases;
 - On-Demand capacity;
 - default `mac2.metal`, then `mac1.metal` fallback unless `--type` is set.
 
@@ -49,11 +50,11 @@ not allocate a host implicitly, but trusted operators can manage hosts
 explicitly:
 
 ```sh
-crabbox admin mac-hosts list --region eu-west-1
-crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run
-crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --force
-crabbox admin mac-hosts release h-0123456789abcdef0 --region eu-west-1 --force
+crabbox admin hosts list --provider aws --target macos --region eu-west-1
+crabbox admin hosts offerings --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2.metal --dry-run
+crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2.metal --force
+crabbox admin hosts release h-0123456789abcdef0 --provider aws --target macos --region eu-west-1 --force
 ```
 
 Promoted AWS images are scoped by target, architecture, and region. Use
@@ -91,11 +92,11 @@ Static Macs work well over Tailscale: put the MagicDNS name or 100.x address in
 Missing host capacity
 
 Use `--market on-demand` and verify an available EC2 Mac Dedicated Host is
-allocated in the selected AWS region. Set `CRABBOX_AWS_MAC_HOST_ID` or
-`aws.macHostId` only when you want to pin to a specific host. Trusted operators
-can check host offerings with `crabbox admin mac-hosts offerings --region <region>`,
-quota with `crabbox admin mac-hosts quota --region <region>`, and allocated
-hosts with `crabbox admin mac-hosts list --region <region>`.
+allocated in the selected AWS region. Set `CRABBOX_HOST_ID` or `hostId` only
+when you want to pin to a specific host. Trusted operators can check host
+offerings with `crabbox admin hosts offerings --provider aws --target macos --region <region>`,
+quota with `crabbox admin hosts quota --provider aws --target macos --region <region>`,
+and allocated hosts with `crabbox admin hosts list --provider aws --target macos --region <region>`.
 
 VNC prompt asks for host credentials
 

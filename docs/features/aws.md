@@ -102,36 +102,39 @@ Worker secrets:
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
+CRABBOX_HOST_ID optional; pins a brokered host such as an EC2 Mac Dedicated Host
+CRABBOX_AWS_MAC_HOST_ID optional legacy AWS alias for CRABBOX_HOST_ID
 ```
 
 EC2 Mac host lifecycle is explicit operator work:
 
 ```sh
-crabbox admin mac-hosts policy
-crabbox admin aws-identity --region eu-west-1
-crabbox admin aws-policy --mac-hosts
-crabbox admin mac-hosts list --region eu-west-1
-crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts quota --region eu-west-1 --type mac2.metal
-crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run
-crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --force
-crabbox admin mac-hosts release h-0123456789abcdef0 --region eu-west-1 --force
+crabbox admin hosts policy --provider aws --target macos
+crabbox admin providers identity --provider aws --region eu-west-1
+crabbox admin providers policy --provider aws --target macos
+crabbox admin hosts list --provider aws --target macos --region eu-west-1
+crabbox admin hosts offerings --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
+crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2.metal --dry-run
+crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2.metal --force
+crabbox admin hosts release h-0123456789abcdef0 --provider aws --target macos --region eu-west-1 --force
 ```
 
 The coordinator AWS identity needs `ec2:DescribeInstanceTypeOfferings`,
 `ec2:DescribeHosts`, `ec2:AllocateHosts`, `ec2:ReleaseHosts`, and
 `ec2:CreateTags` for host lifecycle work, plus
-`servicequotas:ListServiceQuotas` for `mac-hosts quota`. The `CreateTags` grant
+`servicequotas:ListServiceQuotas` for `hosts quota`. The `CreateTags` grant
 is needed because Crabbox tags hosts during `AllocateHosts`; scope it with
 `ec2:CreateAction=AllocateHosts`. Use `allocate --dry-run` first; it validates
-the request path without creating a Dedicated Host. Use `admin aws-identity` to
-confirm which coordinator AWS principal needs the policy.
+the request path without creating a Dedicated Host. Use
+`admin providers identity --provider aws` to confirm which coordinator AWS
+principal needs the policy.
 
 IAM is not the only preflight. AWS tracks Dedicated Mac host capacity through
 separate EC2 Service Quotas such as
 [Running Dedicated mac2 Hosts](https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-quotas.html),
-which `mac-hosts quota` can now inspect through the coordinator. If
+which `hosts quota --provider aws --target macos` can inspect through the
+coordinator. If
 `allocate --dry-run` succeeds, check quota before treating a real allocation
 failure as a Crabbox runtime bug.
 
@@ -141,8 +144,9 @@ need the normal brokered AWS provider permissions documented in
 [Infrastructure](../infrastructure.md#aws-ec2), including launch/list/tag/terminate,
 key pair, security group, image, snapshot, and baseline Service Quotas access.
 Print the combined provider plus Dedicated Host policy with
-`crabbox admin aws-policy --mac-hosts`, or print the two grants separately with
-`crabbox admin aws-policy` and `crabbox admin mac-hosts policy`.
+`crabbox admin providers policy --provider aws --target macos`, or print the
+two grants separately with `crabbox admin providers policy --provider aws` and
+`crabbox admin hosts policy --provider aws --target macos`.
 
 CLI/direct env and config:
 
@@ -158,7 +162,8 @@ CRABBOX_AWS_SUBNET_ID
 CRABBOX_AWS_INSTANCE_PROFILE
 CRABBOX_AWS_ROOT_GB
 CRABBOX_AWS_SSH_CIDRS
-CRABBOX_AWS_MAC_HOST_ID
+CRABBOX_HOST_ID
+CRABBOX_AWS_MAC_HOST_ID legacy AWS alias
 CRABBOX_CAPACITY_REGIONS
 CRABBOX_CAPACITY_AVAILABILITY_ZONES
 CRABBOX_CAPACITY_HINTS
