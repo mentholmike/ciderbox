@@ -3,6 +3,7 @@ import { XMLParser } from "fast-xml-parser";
 
 import { awsUserData } from "./bootstrap";
 import {
+  awsPromotedAMIConfigKey,
   awsInstanceTypeCandidatesForTargetClass,
   sshPorts,
   validCIDRs,
@@ -276,6 +277,13 @@ export class EC2SpotClient {
         }
         if (pinnedMacOSImageID && candidateConfig.serverType === config.serverType) {
           return pinnedMacOSImageID;
+        }
+        const promotedImageID =
+          config.awsPromotedAMIs[
+            awsPromotedAMIConfigKey(this.region, candidateConfig.serverType)
+          ] ?? "";
+        if (promotedImageID) {
+          return promotedImageID;
         }
         const query = awsMacOSAMIQuery(candidateConfig.serverType);
         const cacheKey = `${query.name}\0${query.architecture}`;

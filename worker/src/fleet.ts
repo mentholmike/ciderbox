@@ -2,13 +2,20 @@ import { artifactUploadResponse, type ArtifactUploadRequest } from "./artifacts"
 import { isAdminRequest } from "./auth";
 import {
   EC2SpotClient,
+  awsLaunchCandidates,
   awsProvisioningErrorCategory,
   awsRegionCandidates,
   isAWSInstanceCleanedAfterReadinessFailure,
   isRetryableAWSProvisioningError,
 } from "./aws";
 import { AzureClient } from "./azure";
-import { azureLocationFor, leaseConfig, validCIDRs, type LeaseConfig } from "./config";
+import {
+  awsPromotedAMIConfigKey,
+  azureLocationFor,
+  leaseConfig,
+  validCIDRs,
+  type LeaseConfig,
+} from "./config";
 import { GCPClient } from "./gcp";
 import { HetznerClient } from "./hetzner";
 import { errorMessage, json, pathParts, readJson, requestOwner } from "./http";
@@ -937,10 +944,17 @@ export class FleetDurableObject implements DurableObject {
       config.awsSSHCIDRs = requestSourceCIDRs(request);
     }
     if (config.provider === "aws" && !config.awsAMI && !config.awsSnapshot) {
-      const promoted = await this.promotedAWSImage(config);
-      config.awsAMI = promoted?.id ?? "";
-      if (promoted?.region) {
-        config.awsRegion = promoted.region;
+      if (config.target === "macos") {
+        config.awsPromotedAMIs = await this.promotedAWSImagesForFallback(config);
+        config.awsAMI =
+          config.awsPromotedAMIs[awsPromotedAMIConfigKey(config.awsRegion, config.serverType)] ??
+          "";
+      } else {
+        const promoted = await this.promotedAWSImage(config);
+        config.awsAMI = promoted?.id ?? "";
+        if (promoted?.region) {
+          config.awsRegion = promoted.region;
+        }
       }
     }
     if (config.provider === "azure" && !config.azureLocation) {
@@ -3604,6 +3618,24 @@ export class FleetDurableObject implements DurableObject {
       return scoped;
     }
     return this.state.storage.get<PromotedImageRecord>(legacyPromotedAWSImageKey());
+  }
+
+  private async promotedAWSImagesForFallback(config: LeaseConfig): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const region of awsRegionCandidates(config, this.env, config.awsRegion)) {
+      for (const serverType of awsLaunchCandidates(config)) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- storage reads preserve deterministic fallback key construction.
+        const promoted = await this.promotedAWSImage({
+          target: config.target,
+          serverType,
+          awsRegion: region,
+        });
+        if (promoted?.id) {
+          out[awsPromotedAMIConfigKey(region, serverType)] = promoted.id;
+        }
+      }
+    }
+    return out;
   }
 
   private async promotedAWSImageByID(imageID: string): Promise<PromotedImageRecord | undefined> {

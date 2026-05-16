@@ -34,6 +34,7 @@ export interface LeaseConfig {
   image: string;
   awsRegion: string;
   awsAMI: string;
+  awsPromotedAMIs: Record<string, string>;
   awsSnapshot: string;
   awsSGID: string;
   awsSubnetID: string;
@@ -160,6 +161,7 @@ export function leaseConfig(input: LeaseRequest, defaults: LeaseConfigDefaults =
     image: input.image ?? "ubuntu-24.04",
     awsRegion: input.awsRegion ?? "eu-west-1",
     awsAMI: input.awsAMI ?? "",
+    awsPromotedAMIs: {},
     awsSnapshot: input.awsSnapshot ?? "",
     awsSGID: input.awsSGID ?? "",
     awsSubnetID: input.awsSubnetID ?? "",
@@ -198,6 +200,10 @@ export function leaseConfig(input: LeaseRequest, defaults: LeaseConfigDefaults =
     keep: input.keep ?? false,
     sshPublicKey,
   };
+}
+
+export function awsPromotedAMIConfigKey(region: string, serverType: string): string {
+  return `${region.trim().toLowerCase()}\0${serverType.trim().toLowerCase()}`;
 }
 
 export function normalizeAzureOSDiskMode(value: string | undefined): AzureOSDiskMode {

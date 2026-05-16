@@ -23,7 +23,11 @@ import {
   isRetryableAWSProvisioningError,
   staleCrabboxSSHIngressRules,
 } from "../src/aws";
-import { awsMacOSInstanceTypeCandidates, leaseConfig } from "../src/config";
+import {
+  awsMacOSInstanceTypeCandidates,
+  awsPromotedAMIConfigKey,
+  leaseConfig,
+} from "../src/config";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -566,6 +570,101 @@ describe("aws provider", () => {
 
     expect(imageQueries).toContain("amzn-ec2-macos-14.*:x86_64_mac");
     expect(runImages).toEqual(["ami-x86-mac"]);
+    expect(result.serverType).toBe("mac1.metal");
+  });
+
+  it("uses scoped promoted macOS AMIs for fallback host families", async () => {
+    const runImages: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (new URL(request.url).hostname.startsWith("servicequotas.")) {
+          return new Response(JSON.stringify({ Quota: { Value: 999 } }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const body = await request.clone().text();
+        const params = new URLSearchParams(body);
+        const action = params.get("Action") ?? "";
+        if (action === "DescribeKeyPairs") {
+          return ec2XMLResponse("<DescribeKeyPairsResponse />");
+        }
+        if (action === "DescribeImages") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<DescribeImagesResponse>
+  <imagesSet>
+    <item>
+      <imageId>ami-stock-mac</imageId>
+      <name>macos</name>
+      <imageState>available</imageState>
+      <creationDate>2026-05-01T00:00:00.000Z</creationDate>
+    </item>
+  </imagesSet>
+</DescribeImagesResponse>`);
+        }
+        if (action === "DescribeHosts") {
+          const serverType = params.get("Filter.1.Value.1") ?? "";
+          if (serverType === "mac1.metal") {
+            return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<DescribeHostsResponse>
+  <hostSet>
+    <item>
+      <hostId>h-mac1</hostId>
+      <hostState>available</hostState>
+    </item>
+  </hostSet>
+</DescribeHostsResponse>`);
+          }
+          return ec2XMLResponse("<DescribeHostsResponse><hostSet /></DescribeHostsResponse>");
+        }
+        if (action === "RunInstances") {
+          runImages.push(params.get("ImageId") ?? "");
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<RunInstancesResponse>
+  <instancesSet>
+    <item>
+      <instanceId>i-mac1</instanceId>
+      <instanceType>mac1.metal</instanceType>
+      <placement><hostId>h-mac1</hostId></placement>
+      <ipAddress>203.0.113.44</ipAddress>
+      <instanceState><name>pending</name></instanceState>
+    </item>
+  </instancesSet>
+</RunInstancesResponse>`);
+        }
+        return ec2XMLResponse(
+          `<Response><Errors><Error><Code>Unexpected</Code><Message>${action}</Message></Error></Errors></Response>`,
+          500,
+        );
+      }),
+    );
+
+    const client = new EC2SpotClient(
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_SECURITY_GROUP_ID: "sg-123",
+      } as never,
+      "eu-west-1",
+    );
+    const config = leaseConfig({
+      provider: "aws",
+      target: "macos",
+      capacity: { market: "on-demand" },
+      serverType: "mac2.metal",
+      sshPublicKey: "ssh-ed25519 test",
+    });
+    config.awsPromotedAMIs[awsPromotedAMIConfigKey("eu-west-1", "mac1.metal")] =
+      "ami-promoted-mac1";
+    const result = await client.createServerWithFallback(
+      config,
+      "cbx_abcdef123456",
+      "violet-prawn",
+      "alice@example.com",
+    );
+
+    expect(runImages).toEqual(["ami-promoted-mac1"]);
     expect(result.serverType).toBe("mac1.metal");
   });
 

@@ -2,7 +2,7 @@ import { Script, createContext } from "node:vm";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { LeaseConfig } from "../src/config";
+import { awsPromotedAMIConfigKey, type LeaseConfig } from "../src/config";
 import {
   FleetDurableObject,
   bridgeTicketFromRequest,
@@ -1055,6 +1055,49 @@ describe("fleet lease identity and idle", () => {
     expect(mac2.status).toBe(201);
     expect(m4.status).toBe(201);
     expect(seenAMI).toEqual(["ami-mac2", "ami-m4"]);
+  });
+
+  it("passes promoted AWS macOS images for fallback candidates", async () => {
+    const storage = new MemoryStorage();
+    storage.seed("image:aws:promoted:macos:x86_64_mac:mac1.metal:eu-west-1", {
+      id: "ami-mac1",
+      name: "crabbox-mac1",
+      state: "available",
+      region: "eu-west-1",
+      target: "macos",
+      serverType: "mac1.metal",
+      architecture: "x86_64_mac",
+      promotedAt: "2026-05-01T12:46:00Z",
+    });
+    let seenConfig: LeaseConfig | undefined;
+    const fleet = testFleet(storage, {
+      aws: fakeProvider((config) => {
+        seenConfig = config;
+      }),
+    });
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/leases", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "cf-connecting-ip": "203.0.113.7",
+          "x-crabbox-org": "example-org",
+        },
+        body: {
+          provider: "aws",
+          target: "macos",
+          capacity: { market: "on-demand" },
+          serverType: "mac2.metal",
+          sshPublicKey: "ssh-ed25519 test",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(seenConfig?.awsAMI).toBe("");
+    expect(seenConfig?.awsPromotedAMIs).toMatchObject({
+      [awsPromotedAMIConfigKey("eu-west-1", "mac1.metal")]: "ami-mac1",
+    });
   });
 
   it("honors requested AWS SSH ingress CIDRs over request source IP", async () => {
