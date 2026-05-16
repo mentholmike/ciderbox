@@ -34,6 +34,14 @@ func TestAdminMacHostsRejectsMissingSubcommand(t *testing.T) {
 	}
 }
 
+func TestAdminHostsRejectsUnsupportedScope(t *testing.T) {
+	app := App{Stdout: io.Discard, Stderr: io.Discard}
+	err := app.adminHosts(context.Background(), []string{"policy", "--provider", "azure", "--target", "macos"})
+	if err == nil || !strings.Contains(err.Error(), "currently supports --provider aws --target macos") {
+		t.Fatalf("err=%v, want unsupported scope", err)
+	}
+}
+
 func TestAdminMacHostsPolicyPrintsLifecyclePermissions(t *testing.T) {
 	var stdout bytes.Buffer
 	app := App{Stdout: &stdout, Stderr: io.Discard}
@@ -53,6 +61,17 @@ func TestAdminMacHostsPolicyPrintsLifecyclePermissions(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("policy missing %s:\n%s", want, out)
 		}
+	}
+}
+
+func TestAdminHostsPolicyPrintsLifecyclePermissions(t *testing.T) {
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.adminHosts(context.Background(), []string{"policy", "--provider", "aws", "--target", "macos"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ec2:AllocateHosts"`) {
+		t.Fatalf("policy missing host lifecycle permission:\n%s", stdout.String())
 	}
 }
 
@@ -102,6 +121,20 @@ func TestAdminAWSPolicyCanIncludeMacHostPermissions(t *testing.T) {
 	}
 	if len(doc.Statement) < 6 {
 		t.Fatalf("combined policy statements=%d, want provider plus mac-host statements", len(doc.Statement))
+	}
+}
+
+func TestAdminProvidersPolicyCanSelectMacOSHostPermissions(t *testing.T) {
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.adminProviders(context.Background(), []string{"policy", "--provider", "aws", "--target", "macos"}); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{`"ec2:RunInstances"`, `"ec2:AllocateHosts"`, `"servicequotas:ListServiceQuotas"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("combined provider policy missing %s:\n%s", want, out)
+		}
 	}
 }
 

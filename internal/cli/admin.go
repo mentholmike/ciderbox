@@ -86,11 +86,37 @@ func leaseAuditCleanupSummary(audit CoordinatorLeaseCloudAudit) string {
 }
 
 func (a App) adminAWSIdentity(ctx context.Context, args []string) error {
+	return a.adminProviderIdentity(ctx, "admin aws-identity", "aws", args)
+}
+
+func (a App) adminProviders(ctx context.Context, args []string) error {
+	args = stripKongCommandPath(args, "admin", "providers")
+	if len(args) == 0 || isHelpArg(args[0]) {
+		return exit(2, "usage: crabbox admin providers <identity|policy> --provider <provider> [flags]")
+	}
+	switch args[0] {
+	case "identity":
+		return a.adminProviderIdentity(ctx, "admin providers identity", "", args[1:])
+	case "policy":
+		return a.adminProviderPolicy("admin providers policy", "", args[1:])
+	default:
+		return exit(2, "usage: crabbox admin providers <identity|policy> --provider <provider> [flags]")
+	}
+}
+
+func (a App) adminProviderIdentity(ctx context.Context, commandName, defaultProvider string, args []string) error {
 	fs := newFlagSet("admin aws-identity", a.Stderr)
+	provider := fs.String("provider", defaultProvider, "provider")
 	region := fs.String("region", "", "AWS region used for the STS endpoint")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if fs.NArg() > 0 {
+		return exit(2, "usage: crabbox %s --provider aws [--region <region>] [--json]", commandName)
+	}
+	if strings.ToLower(strings.TrimSpace(*provider)) != "aws" {
+		return exit(2, "admin provider identity currently supports --provider aws")
 	}
 	coord, err := configuredAdminCoordinator()
 	if err != nil {
@@ -157,16 +183,29 @@ const awsProviderPolicyJSON = `{
 }`
 
 func (a App) adminAWSPolicy(args []string) error {
-	fs := newFlagSet("admin aws-policy", a.Stderr)
+	return a.adminProviderPolicy("admin aws-policy", "aws", args)
+}
+
+func (a App) adminProviderPolicy(commandName, defaultProvider string, args []string) error {
+	fs := newFlagSet(commandName, a.Stderr)
+	provider := fs.String("provider", defaultProvider, "provider")
+	target := fs.String("target", "", "target operating system")
 	includeMacHosts := fs.Bool("mac-hosts", false, "include EC2 Mac Dedicated Host lifecycle permissions")
+	hostLifecycle := fs.Bool("host-lifecycle", false, "include provider host lifecycle permissions")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return exit(2, "usage: crabbox admin aws-policy [--mac-hosts]")
+		return exit(2, "usage: crabbox %s --provider aws [--target macos|--host-lifecycle|--mac-hosts]", commandName)
+	}
+	if strings.ToLower(strings.TrimSpace(*provider)) != "aws" {
+		return exit(2, "admin provider policy currently supports --provider aws")
+	}
+	if strings.EqualFold(strings.TrimSpace(*target), targetMacOS) {
+		*hostLifecycle = true
 	}
 	policy := awsProviderPolicyJSON
-	if *includeMacHosts {
+	if *includeMacHosts || *hostLifecycle {
 		combined, err := combineIAMPolicyJSON(awsProviderPolicyJSON, macHostLifecyclePolicyJSON)
 		if err != nil {
 			return err
@@ -203,8 +242,17 @@ func combineIAMPolicyJSON(policies ...string) (string, error) {
 
 func (a App) adminMacHosts(ctx context.Context, args []string) error {
 	args = stripKongCommandPath(args, "admin", "mac-hosts")
+	return a.adminHostsWithCommand(ctx, "admin mac-hosts", args)
+}
+
+func (a App) adminHosts(ctx context.Context, args []string) error {
+	args = stripKongCommandPath(args, "admin", "hosts")
+	return a.adminHostsWithCommand(ctx, "admin hosts", args)
+}
+
+func (a App) adminHostsWithCommand(ctx context.Context, commandName string, args []string) error {
 	if len(args) == 0 || isHelpArg(args[0]) {
-		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|quota|allocate|release|policy> [flags]")
+		return exit(2, "usage: crabbox %s <list|offerings|quota|allocate|release|policy> [--provider aws] [--target macos] [flags]", commandName)
 	}
 	switch args[0] {
 	case "list":
@@ -220,8 +268,33 @@ func (a App) adminMacHosts(ctx context.Context, args []string) error {
 	case "policy":
 		return a.adminMacHostsPolicy(args[1:])
 	default:
-		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|quota|allocate|release|policy> [flags]")
+		return exit(2, "usage: crabbox %s <list|offerings|quota|allocate|release|policy> [--provider aws] [--target macos] [flags]", commandName)
 	}
+}
+
+func adminHostScopeFlags(fs flagSetLike) (*string, *string) {
+	provider := fs.String("provider", "aws", "host provider")
+	target := fs.String("target", targetMacOS, "host target operating system")
+	return provider, target
+}
+
+type flagSetLike interface {
+	String(name, value, usage string) *string
+}
+
+func validateAdminHostScope(provider, target string) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	target = strings.ToLower(strings.TrimSpace(target))
+	if provider == "" {
+		provider = "aws"
+	}
+	if target == "" {
+		target = targetMacOS
+	}
+	if provider != "aws" || target != targetMacOS {
+		return exit(2, "admin hosts currently supports --provider aws --target macos")
+	}
+	return nil
 }
 
 const macHostLifecyclePolicyJSON = `{
@@ -263,11 +336,15 @@ const macHostLifecyclePolicyJSON = `{
 
 func (a App) adminMacHostsPolicy(args []string) error {
 	fs := newFlagSet("admin mac-hosts policy", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return exit(2, "usage: crabbox admin mac-hosts policy")
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
+		return err
 	}
 	fmt.Fprintln(a.Stdout, macHostLifecyclePolicyJSON)
 	return nil
@@ -275,11 +352,15 @@ func (a App) adminMacHostsPolicy(args []string) error {
 
 func (a App) adminMacHostsList(ctx context.Context, args []string) error {
 	fs := newFlagSet("admin mac-hosts list", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	region := fs.String("region", "", "AWS region")
 	serverType := fs.String("type", "", "filter by EC2 Mac instance type")
 	state := fs.String("state", "", "filter by host state")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
 		return err
 	}
 	coord, err := configuredAdminCoordinator()
@@ -303,10 +384,14 @@ func (a App) adminMacHostsList(ctx context.Context, args []string) error {
 
 func (a App) adminMacHostOfferings(ctx context.Context, args []string) error {
 	fs := newFlagSet("admin mac-hosts offerings", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	region := fs.String("region", "", "AWS region")
 	serverType := fs.String("type", "mac2.metal", "EC2 Mac instance type")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
 		return err
 	}
 	coord, err := configuredAdminCoordinator()
@@ -329,10 +414,14 @@ func (a App) adminMacHostOfferings(ctx context.Context, args []string) error {
 
 func (a App) adminMacHostQuota(ctx context.Context, args []string) error {
 	fs := newFlagSet("admin mac-hosts quota", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	region := fs.String("region", "", "AWS region")
 	serverType := fs.String("type", "mac2.metal", "EC2 Mac instance type")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
 		return err
 	}
 	coord, err := configuredAdminCoordinator()
@@ -362,6 +451,7 @@ func (a App) adminMacHostsAllocate(ctx context.Context, args []string) error {
 	args, jsonAnywhere := extractBoolFlag(args, "json")
 	args, dryRunAnywhere := extractBoolFlag(args, "dry-run")
 	fs := newFlagSet("admin mac-hosts allocate", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	region := fs.String("region", "", "AWS region")
 	serverType := fs.String("type", "mac2.metal", "EC2 Mac instance type")
 	availabilityZone := fs.String("availability-zone", "", "AWS availability zone")
@@ -369,6 +459,9 @@ func (a App) adminMacHostsAllocate(ctx context.Context, args []string) error {
 	force := fs.Bool("force", false, "confirm host allocation")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
 		return err
 	}
 	if forceAnywhere {
@@ -470,11 +563,15 @@ func (a App) adminMacHostsRelease(ctx context.Context, args []string) error {
 	args, forceAnywhere := extractBoolFlag(args, "force")
 	args, jsonAnywhere := extractBoolFlag(args, "json")
 	fs := newFlagSet("admin mac-hosts release", a.Stderr)
+	provider, target := adminHostScopeFlags(fs)
 	id := fs.String("id", "", "EC2 Mac Dedicated Host id")
 	region := fs.String("region", "", "AWS region")
 	force := fs.Bool("force", false, "confirm host release")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateAdminHostScope(*provider, *target); err != nil {
 		return err
 	}
 	if *id == "" && fs.NArg() > 0 {

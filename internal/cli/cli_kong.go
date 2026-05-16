@@ -323,6 +323,8 @@ type imageDeleteKongCmd struct {
 type adminKongCmd struct {
 	Leases      adminLeasesKongCmd      `cmd:"" passthrough:"" help:"List coordinator lease records."`
 	LeaseAudit  adminLeaseAuditKongCmd  `cmd:"" name:"lease-audit" passthrough:"" help:"Check expired coordinator leases against cloud provider state."`
+	Providers   adminProvidersKongCmd   `cmd:"" passthrough:"" help:"Inspect provider identities and policies."`
+	Hosts       adminHostsKongCmd       `cmd:"" passthrough:"" help:"List, allocate, or release provider hosts."`
 	AWSIdentity adminAWSIdentityKongCmd `cmd:"" name:"aws-identity" passthrough:"" help:"Show the coordinator AWS caller identity."`
 	AWSPolicy   adminAWSPolicyKongCmd   `cmd:"" name:"aws-policy" passthrough:"" help:"Print the baseline brokered AWS IAM policy."`
 	MacHosts    adminMacHostsKongCmd    `cmd:"" name:"mac-hosts" passthrough:"" help:"List, allocate, or release AWS EC2 Mac Dedicated Hosts."`
@@ -333,6 +335,12 @@ type adminLeasesKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type adminLeaseAuditKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type adminProvidersKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type adminHostsKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type adminAWSIdentityKongCmd struct {
@@ -540,6 +548,12 @@ func (c *adminLeasesKongCmd) Run(ctx context.Context, app App) error {
 }
 func (c *adminLeaseAuditKongCmd) Run(ctx context.Context, app App) error {
 	return app.adminLeaseAudit(ctx, c.Args)
+}
+func (c *adminProvidersKongCmd) Run(ctx context.Context, app App) error {
+	return app.adminProviders(ctx, c.Args)
+}
+func (c *adminHostsKongCmd) Run(ctx context.Context, app App) error {
+	return app.adminHosts(ctx, c.Args)
 }
 func (c *adminAWSIdentityKongCmd) Run(ctx context.Context, app App) error {
 	return app.adminAWSIdentity(ctx, c.Args)
