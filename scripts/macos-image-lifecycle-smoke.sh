@@ -324,6 +324,7 @@ write_summary() {
         amiId: $amiID
       },
       blocker: {
+        reason: $blockerMessage,
         message: $blockerMessage,
         remediation: $blockerRemediation,
         commands: ($blockerCommands | split("\n") | map(select(length > 0)))

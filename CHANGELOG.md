@@ -15,6 +15,7 @@
 - Changed the macOS host preflight and image lifecycle smoke to use the provider-neutral admin host/provider commands and `CRABBOX_HOST_ID` when pinning leases to an allocated host.
 - Changed the macOS image lifecycle smoke artifact to include the coordinator provider identity used for IAM remediation.
 - Changed macOS image lifecycle smoke blocker commands to use the guarded IAM apply helper for coordinator permission remediation.
+- Changed macOS image lifecycle blocked summaries to include a `blocker.reason` alias for automation that expects a short blocker reason.
 
 ### Fixed
 

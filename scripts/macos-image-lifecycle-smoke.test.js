@@ -242,6 +242,7 @@ test("macOS lifecycle smoke writes a blocked IAM summary before paid work", asyn
   const summary = await readJSON(path.join(run.artifacts, "summary.json"));
   assert.equal(summary.result, "blocked");
   assert.equal(summary.phase, "host-dry-run");
+  assert.match(summary.blocker.reason, /ec2:AllocateHosts/);
   assert.match(summary.blocker.message, /ec2:AllocateHosts/);
   assert.match(summary.blocker.message, /ec2:CreateTags/);
   assert.match(summary.blocker.remediation, /Apply the EC2 Mac host lifecycle policy/);
@@ -294,6 +295,7 @@ test("macOS lifecycle smoke preserves quota IAM evidence when dry-run is also bl
   const summary = await readJSON(path.join(run.artifacts, "summary.json"));
   assert.equal(summary.result, "blocked");
   assert.equal(summary.phase, "host-dry-run");
+  assert.match(summary.blocker.reason, /quota preflight also failed/);
   assert.match(summary.blocker.message, /ec2:AllocateHosts/);
   assert.match(summary.blocker.message, /quota preflight also failed/);
   assert.match(summary.blocker.remediation, /servicequotas:ListServiceQuotas/);
