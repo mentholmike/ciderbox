@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 )
@@ -155,6 +157,34 @@ func printCoordinatorShare(out interface{ Write([]byte) (int, error) }, share Co
 	}
 	for _, user := range users {
 		fmt.Fprintf(out, "user=%s role=%s\n", user, share.Users[user])
+	}
+	return nil
+}
+
+func ensureOpenWebVNCPortalAccess(ctx context.Context, coord *CoordinatorClient, id string, openPortal bool, out interface{ Write([]byte) (int, error) }) error {
+	if !openPortal {
+		return nil
+	}
+	current, err := coord.LeaseShare(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current.Org == CoordinatorShareUse || current.Org == CoordinatorShareManage {
+		return nil
+	}
+	current.Org = CoordinatorShareUse
+	if _, err := coord.UpdateLeaseShare(ctx, id, current); err != nil {
+		var httpErr CoordinatorHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden {
+			if out != nil {
+				fmt.Fprintln(out, "portal share: skipped (lease manage access required)")
+			}
+			return nil
+		}
+		return err
+	}
+	if out != nil {
+		fmt.Fprintln(out, "portal share: org=use")
 	}
 	return nil
 }

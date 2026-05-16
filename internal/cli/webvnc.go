@@ -104,6 +104,9 @@ func (a App) webvnc(ctx context.Context, args []string) error {
 	if err := a.claimAndTouchLeaseTarget(ctx, cfg, server, leaseID, *reclaim); err != nil {
 		return err
 	}
+	if err := ensureOpenWebVNCPortalAccess(ctx, coord, leaseID, *openPortal, a.Stdout); err != nil {
+		return err
+	}
 	fmt.Fprintf(a.Stdout, "lease: %s slug=%s provider=%s target=%s\n", leaseID, blank(serverSlug(server), "-"), blank(server.Provider, cfg.Provider), blank(target.TargetOS, cfg.TargetOS))
 	fmt.Fprintln(a.Stdout, "bridge: probing VNC on target loopback 127.0.0.1:5900 over SSH")
 	endpoint, err := resolveVNCEndpoint(ctx, cfg, &target)
@@ -538,6 +541,9 @@ func (a App) webVNCResetCommand(ctx context.Context, args []string) error {
 	}
 	if _, err := coord.ResetWebVNC(ctx, leaseID); err != nil {
 		fmt.Fprintf(a.Stdout, "portal reset: skipped (%v)\n", err)
+	}
+	if err := ensureOpenWebVNCPortalAccess(ctx, coord, leaseID, *openPortal, a.Stdout); err != nil {
+		return err
 	}
 	if leaseID != *id {
 		_, _ = a.stopWebVNCDaemonIfRunning(*id)

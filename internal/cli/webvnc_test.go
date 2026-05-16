@@ -316,6 +316,92 @@ func TestWebVNCBridgeArgsCarriesNetworkOverride(t *testing.T) {
 	}
 }
 
+func TestEnsureOpenWebVNCPortalAccessSharesOrgUse(t *testing.T) {
+	var putBody CoordinatorShare
+	var gotPut bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/leases/cbx_abcdef123456/share":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"share": CoordinatorShare{
+					Users: map[string]CoordinatorShareRole{"friend@example.com": CoordinatorShareUse},
+				},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/leases/cbx_abcdef123456/share":
+			gotPut = true
+			if err := json.NewDecoder(r.Body).Decode(&putBody); err != nil {
+				t.Fatal(err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"share": putBody})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	coord := &CoordinatorClient{BaseURL: server.URL, Token: "test-token", Client: server.Client()}
+	if err := ensureOpenWebVNCPortalAccess(context.Background(), coord, "cbx_abcdef123456", true, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if !gotPut {
+		t.Fatal("expected org share update")
+	}
+	if putBody.Org != CoordinatorShareUse {
+		t.Fatalf("org role=%q", putBody.Org)
+	}
+	if putBody.Users["friend@example.com"] != CoordinatorShareUse {
+		t.Fatalf("existing user share not preserved: %#v", putBody.Users)
+	}
+	if !strings.Contains(stdout.String(), "portal share: org=use") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestEnsureOpenWebVNCPortalAccessSkipsWhenNotOpening(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	coord := &CoordinatorClient{BaseURL: server.URL, Token: "test-token", Client: server.Client()}
+	if err := ensureOpenWebVNCPortalAccess(context.Background(), coord, "cbx_abcdef123456", false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("closed portal flow should not touch sharing")
+	}
+}
+
+func TestEnsureOpenWebVNCPortalAccessAllowsUseOnlyCallers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/leases/cbx_abcdef123456/share":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"share": CoordinatorShare{
+					Users: map[string]CoordinatorShareRole{"operator@example.com": CoordinatorShareUse},
+				},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/leases/cbx_abcdef123456/share":
+			http.Error(w, `{"error":"forbidden","message":"lease manage access required"}`, http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	coord := &CoordinatorClient{BaseURL: server.URL, Token: "test-token", Client: server.Client()}
+	if err := ensureOpenWebVNCPortalAccess(context.Background(), coord, "cbx_abcdef123456", true, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "portal share: skipped") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
 func TestStripLegacyWebVNCDaemonFlags(t *testing.T) {
 	got := strings.Join(stripLegacyWebVNCDaemonFlags([]string{
 		"--provider",
