@@ -37,7 +37,13 @@ interface AzureVM {
   properties?: {
     provisioningState?: string;
     hardwareProfile?: { vmSize?: string };
-    storageProfile?: { osDisk?: { managedDisk?: { id?: string }; osType?: string } };
+    storageProfile?: {
+      osDisk?: {
+        managedDisk?: { id?: string };
+        osType?: string;
+        diffDiskSettings?: { option?: string; placement?: string };
+      };
+    };
   };
 }
 
@@ -432,7 +438,7 @@ export class AzureClient {
         name: `${name}-osdisk`,
         createOption: "FromImage",
       };
-      if (await this.supportsEphemeralOS(config.serverType, location)) {
+      if (await this.useEphemeralOSDisk(config, location)) {
         osDisk["caching"] = "ReadOnly";
         osDisk["diffDiskSettings"] = { option: "Local" };
       } else {
@@ -585,7 +591,19 @@ export class AzureClient {
       vmPath(this.resourceGroup, vmName),
       API_VERSIONS.compute,
     );
-    const sourceDiskID = vm.properties?.storageProfile?.osDisk?.managedDisk?.id;
+    const osDisk = vm.properties?.storageProfile?.osDisk;
+    // Azure ARM accepts snapshot requests against the phantom managed-disk identity of
+    // an ephemeral OS disk and reports Succeeded, but the resulting snapshot captures
+    // the base image rather than live state - any fork silently loses the source workdir.
+    // Azure documents "Local" as the only diffDiskSettings.option value; treat unknown
+    // values as snapshottable so a schema addition does not break managed-disk leases.
+    if (osDisk?.diffDiskSettings?.option === "Local") {
+      throw new Error(
+        `azure ephemeral OS disk on vm ${vmName} cannot be snapshotted; ` +
+          `use --mode archive or relaunch the lease with a managed Azure OS disk`,
+      );
+    }
+    const sourceDiskID = osDisk?.managedDisk?.id;
     if (!sourceDiskID) {
       throw new Error(`azure os disk not found for vm ${vmName}`);
     }
@@ -785,6 +803,18 @@ export class AzureClient {
       }
     }
     return this.ephemeralOSSupport.get(vmSize) ?? azureSupportsEphemeralOS(vmSize);
+  }
+
+  private async useEphemeralOSDisk(config: LeaseConfig, location: string): Promise<boolean> {
+    const mode = config.azureOSDisk;
+    if (mode !== "ephemeral") return false;
+    const supported = await this.supportsEphemeralOS(config.serverType, location);
+    if (!supported) {
+      throw new Error(
+        `azureOSDisk=ephemeral requires an Azure VM size with ephemeral OS disk support; ${config.serverType} is not supported`,
+      );
+    }
+    return supported;
   }
 
   private async loadEphemeralOSSupport(location: string): Promise<Map<string, boolean>> {

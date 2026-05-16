@@ -212,9 +212,11 @@ done
 The brokered coordinator can also sweep AWS orphans itself. When
 `CRABBOX_AWS_ORPHAN_SWEEP_ENABLED` is not disabled and AWS broker credentials are
 present, the Durable Object alarm periodically scans `CRABBOX_AWS_REGION` plus
-`CRABBOX_CAPACITY_REGIONS` for Crabbox-tagged EC2 instances. It only terminates
-confirmed orphan candidates when `CRABBOX_AWS_ORPHAN_SWEEP_DELETE=1`; otherwise
-it stores the latest report for admin inspection.
+`CRABBOX_CAPACITY_REGIONS` for Crabbox-tagged EC2 instances. The Worker cron
+handler bootstraps the alarm for idle fleets after deploy or config changes. It
+only terminates confirmed orphan candidates when
+`CRABBOX_AWS_ORPHAN_SWEEP_DELETE=1`; otherwise it stores the latest report for
+admin inspection.
 
 ## Images
 

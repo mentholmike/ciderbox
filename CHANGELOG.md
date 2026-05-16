@@ -54,6 +54,7 @@
 - Fixed remote macOS screenshots so `crabbox screenshot` captures the Screen Sharing/VNC framebuffer instead of relying on `screencapture` from non-interactive SSH sessions.
 - Fixed brokered AWS macOS launches so stale host ids, missing Mac hosts, regional AMI gaps, and unavailable default Mac capacity can fall back to usable host, region, image, or alternate Mac host family candidates.
 - Fixed AWS image deletion so scoped promoted macOS images cannot be deleted until another image is promoted.
+- Fixed brokered Azure leases so the CLI only sends `azureOSDisk` when the user explicitly configures it, preserving the coordinator default while keeping new Azure leases checkpointable by default. Thanks @jwmoss.
 - Fixed WebVNC `--take-control` handoff links so the portal keeps retrying the automatic control claim until the opened viewer is registered as an observer.
 - Fixed WebVNC portal click forwarding so controller clicks reach the remote desktop while preserving focus and browser context-menu suppression.
 

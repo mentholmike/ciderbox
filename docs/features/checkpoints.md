@@ -41,6 +41,12 @@ Native checkpoints use two provider primitives:
 - AWS macOS forks still require EC2 Mac Dedicated Host capacity; brokered mode can
   discover a host, and host-pinned checkpoints reuse the recorded `hostId`
 
+Azure disk-snapshot checkpoints require managed OS disks, which are the default
+for new Azure leases. Crabbox refuses native checkpoint creation from Azure
+ephemeral OS disk leases because Azure reports a successful snapshot but does
+not capture the live OS disk state. Use `--azure-os-disk ephemeral` only for
+stateless Azure leases where native checkpoint/fork support is not needed.
+
 **Image Strategy (opt-in with `--strategy image`)**
 - AWS: AMI (`aws-ami`)
 - Azure: Managed image (`azure-managed-image`) — read-only, not created from active VMs

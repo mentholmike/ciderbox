@@ -26,6 +26,9 @@ export default {
       const id = env.FLEET.idFromName("default");
       return env.FLEET.get(id).fetch(request);
     }
+    if (url.pathname.startsWith("/v1/internal/")) {
+      return json({ error: "not_found" }, { status: 404 });
+    }
     if (
       isWebVNCAgentUpgrade(request, url) ||
       isCodeAgentUpgrade(request, url) ||
@@ -50,6 +53,20 @@ export default {
     }
     const id = env.FLEET.idFromName("default");
     return env.FLEET.get(id).fetch(requestWithAuthContext(authRequest, auth));
+  },
+
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    const id = env.FLEET.idFromName("default");
+    ctx.waitUntil(
+      env.FLEET.get(id).fetch("https://crabbox.internal/v1/internal/scheduled", {
+        method: "POST",
+        headers: { "x-crabbox-internal": "scheduled" },
+      }),
+    );
   },
 };
 

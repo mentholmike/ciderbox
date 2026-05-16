@@ -11,6 +11,9 @@ func init() {
 }
 
 type Provider struct{}
+type flagValues struct {
+	OSDisk *string
+}
 
 func (Provider) Name() string      { return "azure" }
 func (Provider) Aliases() []string { return nil }
@@ -27,8 +30,29 @@ func (Provider) Spec() core.ProviderSpec {
 		Coordinator: core.CoordinatorSupported,
 	}
 }
-func (Provider) RegisterFlags(*flag.FlagSet, core.Config) any { return core.NoProviderFlags() }
-func (Provider) ApplyFlags(*core.Config, *flag.FlagSet, any) error {
+func (Provider) RegisterFlags(fs *flag.FlagSet, defaults core.Config) any {
+	return flagValues{
+		OSDisk: fs.String("azure-os-disk", defaults.AzureOSDisk, "Azure OS disk mode: managed, ephemeral, or auto"),
+	}
+}
+func (Provider) ApplyFlags(cfg *core.Config, fs *flag.FlagSet, values any) error {
+	flags, _ := values.(flagValues)
+	if core.FlagWasSet(fs, "azure-os-disk") && flags.OSDisk != nil {
+		mode, err := core.NormalizeAzureOSDiskMode(*flags.OSDisk)
+		if err != nil {
+			return err
+		}
+		cfg.AzureOSDisk = mode
+		cfg.AzureOSDiskExplicit = true
+		return nil
+	}
+	if cfg.AzureOSDisk != "" {
+		mode, err := core.NormalizeAzureOSDiskMode(cfg.AzureOSDisk)
+		if err != nil {
+			return err
+		}
+		cfg.AzureOSDisk = mode
+	}
 	return nil
 }
 func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, error) {

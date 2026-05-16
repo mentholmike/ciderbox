@@ -243,9 +243,10 @@ scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account
 scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account --terminate
 ```
 
-The audit is read-only by default. It prints `crabbox=true` EC2 instances whose
-lease tag is not active in the coordinator or whose `expires_at` tag is in the
-past.
+The audit is read-only by default. It skips `keep=true` instances, protects
+active coordinator leases by lease tag or EC2 instance ID, and applies the same
+grace window as the broker sweep before reporting stale labels. `--terminate`
+refuses to run if active coordinator leases cannot be loaded or may be truncated.
 
 Direct-provider cleanup is only for debug mode without a coordinator:
 
@@ -255,7 +256,9 @@ bin/crabbox cleanup
 ```
 
 The coordinator also runs an AWS orphan sweep from the Durable Object alarm when
-AWS broker credentials are configured. It scans `CRABBOX_AWS_REGION` plus
+AWS broker credentials are configured. The Worker cron route bootstraps the same
+maintenance loop for idle fleets, so cleanup does not depend on new lease
+traffic after deploy. It scans `CRABBOX_AWS_REGION` plus
 `CRABBOX_CAPACITY_REGIONS` for `crabbox=true` EC2 instances and compares their
 lease tags with active coordinator leases. Active matching leases always win,
 because provider `expires_at` tags are written at launch and can be older than a
@@ -272,10 +275,10 @@ Trusted admins can inspect or trigger the sweep:
 
 ```sh
 curl -H "Authorization: Bearer $CRABBOX_COORDINATOR_ADMIN_TOKEN" \
-  https://crabbox.openclaw.ai/v1/admin/aws-orphan-sweep
+  https://crabbox.example.com/v1/admin/aws-orphan-sweep
 
 curl -X POST -H "Authorization: Bearer $CRABBOX_COORDINATOR_ADMIN_TOKEN" \
-  https://crabbox.openclaw.ai/v1/admin/aws-orphan-sweep
+  https://crabbox.example.com/v1/admin/aws-orphan-sweep
 ```
 
 ## AWS Security Guardrails

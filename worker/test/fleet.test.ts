@@ -228,6 +228,82 @@ describe("fleet lease identity and idle", () => {
     expect(storage.alarm()).toBe(Date.parse(lease.expiresAt));
   });
 
+  it("does not postpone the first AWS orphan sweep alarm on repeated scheduling", async () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        owner: "alice@example.com",
+        org: "example-org",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+      },
+    );
+
+    const first = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "x-crabbox-org": "example-org",
+        },
+        body: { idleTimeoutSeconds: 3600 },
+      }),
+    );
+    const firstAlarm = storage.alarm();
+    const second = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "x-crabbox-org": "example-org",
+        },
+        body: { idleTimeoutSeconds: 3600 },
+      }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(storage.alarm()).toBe(firstAlarm);
+  });
+
+  it("bootstraps AWS orphan sweep maintenance from the Worker cron route", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(
+      storage,
+      { aws: fakeProvider(undefined, { provider: "aws", servers: [] }) },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_ENABLED: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS: "3600",
+      },
+    );
+
+    const unauthorized = await fleet.fetch(request("POST", "/v1/internal/scheduled"));
+    expect(unauthorized.status).toBe(401);
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/internal/scheduled", {
+        headers: { "x-crabbox-internal": "scheduled" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(storage.value("aws-orphan-sweep:last")).toMatchObject({
+      trigger: "alarm",
+      scanned: 0,
+      candidates: [],
+    });
+    expect(storage.alarm()).toBeGreaterThan(Date.now());
+  });
+
   it("reports AWS orphan sweep candidates from the coordinator alarm without delete enabled", async () => {
     const storage = new MemoryStorage();
     const deleted: string[] = [];
@@ -360,6 +436,59 @@ describe("fleet lease identity and idle", () => {
                 labels: {
                   crabbox: "true",
                   lease: "cbx_000000000001",
+                  created_at: oldSeconds,
+                  expires_at: oldSeconds,
+                },
+              }),
+            ],
+          },
+          async (id) => {
+            deleted.push(id);
+          },
+        ),
+      },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_DELETE: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS: "1",
+      },
+    );
+
+    await fleet.alarm();
+
+    const sweep = storage.value<{ candidates: unknown[] }>("aws-orphan-sweep:last");
+    expect(deleted).toEqual([]);
+    expect(sweep?.candidates).toEqual([]);
+  });
+
+  it("does not terminate an active AWS lease when the provider lease tag is stale", async () => {
+    const storage = new MemoryStorage();
+    const deleted: string[] = [];
+    const oldSeconds = String(Math.trunc((Date.now() - 60 * 60 * 1000) / 1000));
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        provider: "aws",
+        cloudID: "i-active",
+        region: "eu-west-1",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {
+        aws: fakeProvider(
+          undefined,
+          {
+            provider: "aws",
+            servers: [
+              testMachine({
+                cloudID: "i-active",
+                labels: {
+                  crabbox: "true",
+                  lease: "cbx_stale",
                   created_at: oldSeconds,
                   expires_at: oldSeconds,
                 },

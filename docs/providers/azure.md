@@ -26,6 +26,7 @@ Azure service principal configured on the Worker.
 
 ```sh
 crabbox warmup --provider azure --class beast
+crabbox warmup --provider azure --class beast --azure-os-disk ephemeral
 crabbox run --provider azure --class standard -- pnpm test
 crabbox warmup --provider azure --target windows --class standard
 crabbox warmup --provider azure --target windows --desktop --class standard
@@ -37,7 +38,9 @@ crabbox cleanup --provider azure
 ```
 
 `--type` is exact (e.g. `--type Standard_D32ads_v6`). Use `--class` when SKU
-fallback is desired.
+fallback is desired. Azure leases use managed OS disks by default so native
+checkpoint/fork works without extra flags. Use `--azure-os-disk ephemeral` only
+for stateless leases that do not need native checkpoint/fork support.
 
 ## Config
 
@@ -52,6 +55,7 @@ azure:
   location: eastus
   resourceGroup: crabbox-leases
   image: Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest
+  osDisk: managed
   vnet: crabbox-vnet
   subnet: crabbox-subnet
   nsg: crabbox-nsg
@@ -76,6 +80,7 @@ CRABBOX_AZURE_CLIENT_ID
 CRABBOX_AZURE_LOCATION
 CRABBOX_AZURE_RESOURCE_GROUP
 CRABBOX_AZURE_IMAGE
+CRABBOX_AZURE_OS_DISK
 CRABBOX_AZURE_VNET
 CRABBOX_AZURE_SUBNET
 CRABBOX_AZURE_NSG
@@ -87,14 +92,22 @@ CRABBOX_AZURE_NETWORK
 the VM public IP, `private` uses the NIC private IP from the vnet. Use
 `private` when connecting through a VPN to the Azure virtual network.
 
+`azure.osDisk` / `CRABBOX_AZURE_OS_DISK` accepts `managed`, `ephemeral`, or
+`auto`. `managed` is the default and provisions a managed `StandardSSD_LRS` OS
+disk so Azure native disk-snapshot checkpoints work. `ephemeral` requires a SKU
+with ephemeral OS disk support, fails during provisioning when the selected SKU
+cannot support it, and disables native Azure checkpoint/fork support. `auto` is
+accepted for compatibility and resolves to managed.
+
 `AZURE_*` are the standard service principal env vars consumed by
 `DefaultAzureCredential`. Crabbox does not read or print the client secret.
 
 Brokered mode uses the same Azure service-principal secrets on the Worker:
 `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, and
 `AZURE_SUBSCRIPTION_ID`. Operators own the resource group, vnet, subnet,
-NSG, and SSH CIDR defaults through `CRABBOX_AZURE_*` env vars. A lease
-request may override only `azureLocation` and `azureImage`.
+NSG, OS disk mode, and SSH CIDR defaults through `CRABBOX_AZURE_*` env vars. A
+lease request may override only `azureLocation`, `azureImage`, and
+`azureOSDisk`.
 
 Run `crabbox doctor --provider azure --target windows` before leasing through
 the broker. The coordinator readiness check reports missing Worker secret names
@@ -158,9 +171,10 @@ See [Authenticate Go apps to Azure services with service principals](https://lea
    (`adminPassword`, `computerName`, and `windowsConfiguration`), and a
    non-rebooting Custom Script Extension that runs the initial Crabbox SSH
    bootstrap saved in `C:\AzureData\CustomData.bin`.
-6. Query Azure Resource SKUs for the VM size. If Azure reports ephemeral OS
-   disk support, use a local ephemeral OS disk. Otherwise use a managed
-   `StandardSSD_LRS` OS disk.
+6. Choose the OS disk mode. `azure.osDisk: managed` is the default and uses a
+   managed `StandardSSD_LRS` OS disk. `azure.osDisk: ephemeral` opts into a
+   local OS disk and fails if the selected SKU cannot support it.
+   `azure.osDisk: auto` is accepted for compatibility and resolves to managed.
 7. Tag the VM, NIC, and public IP with Crabbox lease metadata.
 8. Wait for the public IP to allocate, then for SSH readiness.
 9. When `--desktop` is requested on native Windows, run the shared Windows

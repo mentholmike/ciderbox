@@ -5,6 +5,9 @@
   "compatibility_date": "2026-04-30",
   "workers_dev": true,
   "preview_urls": true,
+  "triggers": {
+    "crons": ["*/15 * * * *"],
+  },
   "assets": {
     "directory": "./public",
   },

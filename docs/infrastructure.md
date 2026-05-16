@@ -234,6 +234,9 @@ CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS default 900
 CRABBOX_SSH_FALLBACK_PORTS       optional comma-separated SSH fallback ports, or none
 ```
 
+The deployed Worker includes a cron trigger that wakes the fleet Durable Object
+every 15 minutes to bootstrap scheduled cleanup even when no leases are active.
+
 The AWS provider imports the local SSH public key as an EC2 key pair when needed, creates or reuses a `crabbox-runners` security group when no security group is supplied, launches one-time EC2 instances, tags instances and volumes with Crabbox lease metadata, and terminates non-kept instances after the command.
 
 Grant the Worker AWS principal EC2 launch/list/tag/terminate permissions for

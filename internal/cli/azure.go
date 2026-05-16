@@ -22,6 +22,9 @@ const (
 	azureAddressSpace        = "10.42.0.0/16"
 	azureSubnetCIDR          = "10.42.0.0/24"
 	azureProviderTag         = "crabbox"
+	AzureOSDiskAuto          = "auto"
+	AzureOSDiskEphemeral     = "ephemeral"
+	AzureOSDiskManaged       = "managed"
 	defaultAzureLinuxImage   = "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
 	defaultAzureWindowsImage = "MicrosoftWindowsServer:windowsserver2022:2022-datacenter-smalldisk-g2:latest"
 	azureDeleteRetryDelay    = 15 * time.Second
@@ -204,6 +207,36 @@ func azureSupportsEphemeralOS(vmSize string) bool {
 		return true
 	}
 	return false
+}
+
+func NormalizeAzureOSDiskMode(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return AzureOSDiskManaged, nil
+	case AzureOSDiskAuto:
+		return AzureOSDiskManaged, nil
+	case AzureOSDiskEphemeral:
+		return AzureOSDiskEphemeral, nil
+	case AzureOSDiskManaged:
+		return AzureOSDiskManaged, nil
+	default:
+		return "", exit(2, "azure.osDisk must be auto, managed, or ephemeral")
+	}
+}
+
+func (c *AzureClient) useEphemeralOSDisk(ctx context.Context, cfg Config) (bool, error) {
+	mode, err := NormalizeAzureOSDiskMode(cfg.AzureOSDisk)
+	if err != nil {
+		return false, err
+	}
+	if mode != AzureOSDiskEphemeral {
+		return false, nil
+	}
+	supported := c.supportsEphemeralOS(ctx, cfg.ServerType)
+	if !supported {
+		return false, exit(2, "azure.osDisk=ephemeral requires an Azure VM size with ephemeral OS disk support; %s is not supported", cfg.ServerType)
+	}
+	return supported, nil
 }
 
 func (c *AzureClient) supportsEphemeralOS(ctx context.Context, vmSize string) bool {
@@ -556,7 +589,11 @@ func (c *AzureClient) createServerSteps(ctx context.Context, cfg Config, publicK
 		Name:         to.Ptr(diskName),
 		CreateOption: to.Ptr(armcompute.DiskCreateOptionTypesFromImage),
 	}
-	if c.supportsEphemeralOS(ctx, cfg.ServerType) {
+	useEphemeralOSDisk, err := c.useEphemeralOSDisk(ctx, cfg)
+	if err != nil {
+		return Server{}, err
+	}
+	if useEphemeralOSDisk {
 		osDisk.Caching = to.Ptr(armcompute.CachingTypesReadOnly)
 		osDisk.DiffDiskSettings = &armcompute.DiffDiskSettings{
 			Option: to.Ptr(armcompute.DiffDiskOptionsLocal),

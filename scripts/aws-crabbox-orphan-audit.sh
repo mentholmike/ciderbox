@@ -8,7 +8,7 @@ Usage: scripts/aws-crabbox-orphan-audit.sh --profile <aws-profile> [--profile <a
 Audits AWS accounts for Crabbox-tagged EC2 instances that look orphaned:
   - tag crabbox=true
   - non-terminated EC2 state
-  - lease tag is not active in the coordinator, or expires_at is in the past
+  - no active coordinator lease by lease tag or instance id after grace, or expires_at is past grace
 
 The default mode is read-only and prints JSON lines. Add --terminate to terminate
 the matching EC2 instances after printing them.
@@ -16,6 +16,8 @@ the matching EC2 instances after printing them.
 Environment:
   CRABBOX_BIN                 crabbox binary to query active leases; default bin/crabbox or crabbox
   CRABBOX_LEASE_AUDIT_LIMIT   active lease query limit; default 1000
+  CRABBOX_AWS_ORPHAN_AUDIT_GRACE_SECONDS
+                             grace period for stale tags; default CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS or 900
 USAGE
 }
 
@@ -96,6 +98,19 @@ if [[ -z "$crabbox_bin" ]]; then
   fi
 fi
 lease_limit="${CRABBOX_LEASE_AUDIT_LIMIT:-1000}"
+if [[ ! "$lease_limit" =~ ^[0-9]+$ || "$lease_limit" -eq 0 ]]; then
+  echo "CRABBOX_LEASE_AUDIT_LIMIT must be a positive integer" >&2
+  exit 2
+fi
+effective_lease_limit="$lease_limit"
+if [[ "$effective_lease_limit" -gt 500 ]]; then
+  effective_lease_limit=500
+fi
+grace_seconds="${CRABBOX_AWS_ORPHAN_AUDIT_GRACE_SECONDS:-${CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS:-900}}"
+if [[ ! "$grace_seconds" =~ ^[0-9]+$ ]]; then
+  echo "CRABBOX_AWS_ORPHAN_AUDIT_GRACE_SECONDS must be a non-negative integer" >&2
+  exit 2
+fi
 
 tmpdir="$(mktemp -d)"
 cleanup() {
@@ -105,13 +120,32 @@ trap cleanup EXIT
 
 active_json="$tmpdir/active-leases.json"
 active_loaded=false
+active_truncated=false
 if "$crabbox_bin" admin leases --json -state active -limit "$lease_limit" >"$active_json" 2>"$tmpdir/active-leases.err"; then
   jq -r '.[].id' "$active_json" | jq -R -s 'split("\n") | map(select(length > 0))' >"$tmpdir/active-ids.json"
+  jq -r '.[].cloudID // empty' "$active_json" | jq -R -s 'split("\n") | map(select(length > 0))' >"$tmpdir/active-cloud-ids.json"
+  jq '[.[] | select(.id != null) | {key: .id, value: (.cloudID // "")}] | from_entries' "$active_json" >"$tmpdir/active-cloud-by-id.json"
   active_loaded=true
+  active_count="$(jq 'length' "$active_json")"
+  if [[ "$active_count" -ge "$effective_lease_limit" ]]; then
+    active_truncated=true
+    echo "warning: active coordinator lease list reached limit $effective_lease_limit; destructive audit disabled" >&2
+  fi
 else
   jq -n '[]' >"$tmpdir/active-ids.json"
+  jq -n '[]' >"$tmpdir/active-cloud-ids.json"
+  jq -n '{}' >"$tmpdir/active-cloud-by-id.json"
   echo "warning: could not load active coordinator leases; falling back to expires_at-only detection" >&2
   sed 's/^/warning: /' "$tmpdir/active-leases.err" >&2
+fi
+
+if [[ "$terminate" == 1 && "$active_loaded" != true ]]; then
+  echo "refusing --terminate because active coordinator leases could not be loaded" >&2
+  exit 1
+fi
+if [[ "$terminate" == 1 && "$active_truncated" == true ]]; then
+  echo "refusing --terminate because active coordinator leases may be truncated" >&2
+  exit 1
 fi
 
 now="$(date -u +%s)"
@@ -123,7 +157,10 @@ for profile in "${profiles[@]}"; do
   account="$(jq -r '.Account' <<<"$identity")"
 
   if [[ ${#regions[@]} -eq 0 ]]; then
-    mapfile -t scan_regions < <(
+    scan_regions=()
+    while IFS= read -r region_name; do
+      [[ -n "$region_name" ]] && scan_regions+=("$region_name")
+    done < <(
       aws ec2 describe-regions --profile "$profile" --region us-east-1 --all-regions --output json |
         jq -r '.Regions[] | select(.OptInStatus == null or .OptInStatus == "opt-in-not-required" or .OptInStatus == "opted-in") | .RegionName' |
         sort
@@ -143,20 +180,39 @@ for profile in "${profiles[@]}"; do
         --arg account "$account" \
         --arg region "$region" \
         --argjson now "$now" \
+        --argjson graceSeconds "$grace_seconds" \
         --argjson activeLoaded "$active_loaded" \
-        --slurpfile active "$tmpdir/active-ids.json" '
+        --slurpfile active "$tmpdir/active-ids.json" \
+        --slurpfile activeCloud "$tmpdir/active-cloud-ids.json" \
+        --slurpfile activeCloudByID "$tmpdir/active-cloud-by-id.json" '
           def tag($key): ((.Tags // []) | map(select(.Key == $key))[0].Value // "");
+          def flag_enabled($value): (($value // "") | ascii_downcase | test("^(1|true|yes|on)$"));
+          def epoch($value):
+            ($value // "") as $raw
+            | if ($raw | test("^[0-9]+$")) then ($raw | tonumber)
+              else (($raw | fromdateiso8601?) // null)
+              end;
           .Reservations[].Instances[]? as $instance
           | ($instance | tag("lease")) as $lease
-          | (($instance | tag("expires_at")) | tonumber?) as $expires
-          | ($expires != null and $expires < $now) as $expired
-          | ($activeLoaded and $lease != "" and (($active[0] | index($lease)) == null)) as $notActive
-          | select($expired or $notActive)
+          | ($instance.InstanceId // "") as $instanceId
+          | (($instance | tag("keep")) | flag_enabled) as $keep
+          | (($instance | tag("created_at")) | epoch) as $created
+          | (($instance | tag("expires_at")) | epoch) as $expires
+          | ($created != null and ($created + $graceSeconds) <= $now) as $oldEnough
+          | ($expires != null and ($expires + $graceSeconds) <= $now) as $expired
+          | ($lease != "" and (($active[0] | index($lease)) != null)) as $activeLeaseKnown
+          | ($activeCloudByID[0][$lease] // "") as $activeLeaseCloudID
+          | ($activeLeaseKnown and $activeLeaseCloudID == $instanceId) as $activeLeaseMatchesCloud
+          | ($instanceId != "" and (($activeCloud[0] | index($instanceId)) != null)) as $activeCloudKnown
+          | ($activeLoaded and $lease != "" and ($activeLeaseKnown | not) and $oldEnough) as $notActive
+          | ($activeLoaded and $activeLeaseKnown and ($activeLeaseMatchesCloud | not) and $oldEnough) as $leaseCloudMismatch
+          | ($activeLoaded and $lease == "" and $oldEnough) as $missingLease
+          | select(($keep | not) and ($activeCloudKnown | not) and (($activeLeaseKnown | not) or $leaseCloudMismatch) and ($expired or $notActive or $missingLease or $leaseCloudMismatch))
           | {
               profile: $profile,
               account: $account,
               region: $region,
-              instanceId: $instance.InstanceId,
+              instanceId: $instanceId,
               state: $instance.State.Name,
               instanceType: $instance.InstanceType,
               launchTime: $instance.LaunchTime,
@@ -164,10 +220,13 @@ for profile in "${profiles[@]}"; do
               name: ($instance | tag("Name")),
               lease: $lease,
               owner: ($instance | tag("owner")),
+              createdAtEpoch: $created,
               expiresAtEpoch: $expires,
               expired: $expired,
-              activeLeaseKnown: ($lease != "" and (($active[0] | index($lease)) != null)),
-              reason: (if $expired and $notActive then "expired-and-not-active" elif $expired then "expired" else "not-active" end)
+              activeLeaseKnown: $activeLeaseKnown,
+              activeCloudKnown: $activeCloudKnown,
+              activeLeaseCloudID: $activeLeaseCloudID,
+              reason: (if $leaseCloudMismatch then "lease-cloud-mismatch" elif $expired and ($notActive or $missingLease) then "expired-and-orphaned" elif $expired then "expired" elif $notActive then "not-active" else "missing-lease-label" end)
             }
         ' >>"$matches"
   done

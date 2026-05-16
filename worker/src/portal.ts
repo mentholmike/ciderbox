@@ -784,10 +784,14 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
         return state;
       }
       async function takeControlIfRequested(state) {
-        if (!takeControlOnConnect || takeControlAttempted || state?.viewerRole === "controller") return;
+        if (!takeControlOnConnect || takeControlAttempted) return;
+        if (state?.viewerRole === "controller") {
+          takeControlAttempted = true;
+          return;
+        }
         if (state?.viewerRole !== "observer") return;
-        takeControlAttempted = true;
         await takeControl();
+        takeControlAttempted = true;
       }
       function stopPolling(label) {
         stopped = true;
