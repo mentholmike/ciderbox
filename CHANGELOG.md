@@ -17,6 +17,7 @@
 - Added parsed IAM policy target details to `crabbox admin aws-identity --json` so operators know which role or user needs the macOS image lifecycle policy.
 - Added regression coverage for the guarded macOS image lifecycle smoke and configurable WebVNC post-start grace period.
 - Added a broker-side AWS orphan sweep that periodically scans configured AWS capacity regions from the Durable Object alarm and can terminate confirmed Crabbox-tagged EC2 orphans.
+- Added AWS macOS support to native `crabbox checkpoint` snapshot/image creation and forks, including host-pin metadata and On-Demand fork defaults.
 
 ### Changed
 

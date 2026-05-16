@@ -46,6 +46,7 @@ type checkpointRecord struct {
 	Slug           string `json:"slug,omitempty"`
 	TargetOS       string `json:"targetOS,omitempty"`
 	WindowsMode    string `json:"windowsMode,omitempty"`
+	HostID         string `json:"hostId,omitempty"`
 	Workdir        string `json:"workdir,omitempty"`
 	ArchivePath    string `json:"archivePath,omitempty"`
 	ArchiveBytes   int64  `json:"archiveBytes,omitempty"`
@@ -108,7 +109,7 @@ func (a App) printCheckpointHelp() {
   crabbox checkpoint delete <checkpoint-id>
   crabbox checkpoint prune --older-than <duration> [--kind native|archive] [--dry-run]
 
-Checkpoints use provider-native disk snapshots for brokered AWS, Azure, and GCP Linux leases, and portable workspace archives elsewhere.`)
+Checkpoints use provider-native disk snapshots for brokered AWS Linux/macOS leases and Azure/GCP Linux leases, and portable workspace archives elsewhere.`)
 }
 
 func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
@@ -425,10 +426,13 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 	if err != nil {
 		return err
 	}
+	nativeCheckpoint := isNativeCheckpointKind(record.Kind)
+	if nativeCheckpoint && record.TargetOS == targetMacOS && !flagWasSet(fs, "market") {
+		cfg.Capacity.Market = "on-demand"
+	}
 	if err := applyLeaseCreateFlags(&cfg, fs, leaseFlags); err != nil {
 		return err
 	}
-	nativeCheckpoint := isNativeCheckpointKind(record.Kind)
 	if record.Kind != checkpointKindArchive && !nativeCheckpoint {
 		return exit(2, "checkpoint %s has kind=%s; fork requires %s or a native image checkpoint", record.ID, record.Kind, checkpointKindArchive)
 	}
@@ -816,6 +820,7 @@ func newCheckpointRecord(repo Repo, cfg Config, server Server, target SSHTarget,
 		Slug:           serverSlug(server),
 		TargetOS:       firstNonBlank(target.TargetOS, cfg.TargetOS),
 		WindowsMode:    firstNonBlank(target.WindowsMode, cfg.WindowsMode),
+		HostID:         firstNonBlank(cfg.HostID, cfg.AWSMacHostID),
 		Workdir:        workdir,
 	}
 	record.Repo.Root = repo.Root
@@ -877,22 +882,32 @@ func checkpointCreateMode(mode, strategy string, cfg Config, server Server, targ
 }
 
 func nativeCheckpointKind(cfg Config, server Server, target SSHTarget, strategy string) (string, bool) {
-	if cfg.Coordinator == "" || server.CloudID == "" || isWindowsNativeTarget(target) || firstNonBlank(target.TargetOS, cfg.TargetOS) != targetLinux {
+	if cfg.Coordinator == "" || server.CloudID == "" || isWindowsNativeTarget(target) {
 		return "", false
 	}
+	targetOS := firstNonBlank(target.TargetOS, cfg.TargetOS)
 	strategy = normalizeCheckpointStrategy(strategy)
 	switch server.Provider {
 	case "aws":
+		if targetOS != targetLinux && targetOS != targetMacOS {
+			return "", false
+		}
 		if strategy == checkpointStrategyImage {
 			return checkpointKindAWSAMI, true
 		}
 		return checkpointKindAWSEBS, true
 	case "azure":
+		if targetOS != targetLinux {
+			return "", false
+		}
 		if strategy == checkpointStrategyImage {
 			return checkpointKindAzure, true
 		}
 		return checkpointKindAzureOS, true
 	case "gcp":
+		if targetOS != targetLinux {
+			return "", false
+		}
 		if strategy == checkpointStrategyImage {
 			return checkpointKindGCP, true
 		}
@@ -941,7 +956,7 @@ func (a App) createNativeCheckpoint(ctx context.Context, cfg Config, server Serv
 	}
 	strategy = normalizeCheckpointStrategy(strategy)
 	if _, ok := nativeCheckpointKind(cfg, server, target, strategy); !ok {
-		return CoordinatorImage{}, exit(2, "native checkpoints currently support brokered AWS, Azure, and GCP Linux leases only")
+		return CoordinatorImage{}, exit(2, "native checkpoints support brokered AWS Linux/macOS leases and brokered Azure/GCP Linux leases only")
 	}
 	if server.Provider == "azure" && strategy == checkpointStrategyImage {
 		return CoordinatorImage{}, exit(2, "Azure managed images require a stopped/generalized source VM; use --strategy disk-snapshot for active Azure leases")
@@ -953,7 +968,7 @@ func (a App) createNativeCheckpoint(ctx context.Context, cfg Config, server Serv
 	if err != nil {
 		return CoordinatorImage{}, err
 	}
-	if err := prepareNativeLinuxImageSource(ctx, target); err != nil {
+	if err := prepareNativeImageSource(ctx, target); err != nil {
 		return CoordinatorImage{}, err
 	}
 	image, err := coord.CreateImage(ctx, leaseID, name, noReboot, strategy)
@@ -986,15 +1001,15 @@ func defaultNativeImageName(leaseID, repoName string) string {
 	return base
 }
 
-func prepareNativeLinuxImageSource(ctx context.Context, target SSHTarget) error {
-	command := remotePrepareAWSAMICommand()
+func prepareNativeImageSource(ctx context.Context, target SSHTarget) error {
+	command := remotePrepareNativeImageCommand()
 	if out, err := runSSHCombinedOutput(ctx, target, "bash -lc "+shellQuote(command)); err != nil {
-		return exit(7, "prepare native checkpoint source cloud-init: %v: %s", err, trimFailureDetail(out))
+		return exit(7, "prepare native checkpoint source: %v: %s", err, trimFailureDetail(out))
 	}
 	return nil
 }
 
-func remotePrepareAWSAMICommand() string {
+func remotePrepareNativeImageCommand() string {
 	return "if command -v cloud-init >/dev/null 2>&1; then sudo cloud-init clean --logs; fi; sync"
 }
 
@@ -1060,6 +1075,16 @@ func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record check
 	}
 	if record.WindowsMode != "" {
 		cfg.WindowsMode = record.WindowsMode
+	}
+	if cfg.Provider == "aws" && cfg.TargetOS == targetMacOS {
+		if record.HostID != "" {
+			cfg.HostID = record.HostID
+			cfg.AWSMacHostID = record.HostID
+		}
+		if !flagWasSet(fs, "market") {
+			cfg.Capacity.Market = "on-demand"
+		}
+		normalizeTargetConfig(cfg)
 	}
 	if !flagWasSet(fs, "type") {
 		cfg.ServerTypeExplicit = false
