@@ -356,7 +356,7 @@ describe("aws provider", () => {
   });
 
   it("resolves macOS AMIs per fallback instance type", async () => {
-    const imageArchitectures: string[] = [];
+    const imageQueries: string[] = [];
     const hostTypes: string[] = [];
     const runImages: string[] = [];
     const runTypes: string[] = [];
@@ -377,8 +377,14 @@ describe("aws provider", () => {
         }
         if (action === "DescribeImages") {
           const architecture = params.get("Filter.1.Value.1") ?? "";
-          imageArchitectures.push(architecture);
-          const imageID = architecture === "x86_64_mac" ? "ami-x86-mac" : "ami-arm-mac";
+          const name = params.get("Filter.2.Value.1") ?? "";
+          imageQueries.push(`${name}:${architecture}`);
+          const imageID =
+            architecture === "x86_64_mac"
+              ? "ami-x86-mac"
+              : name === "amzn-ec2-macos-15.*-arm64"
+                ? "ami-m4-mac"
+                : "ami-arm-mac";
           return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
 <DescribeImagesResponse>
   <imagesSet>
@@ -452,7 +458,11 @@ describe("aws provider", () => {
       "alice@example.com",
     );
 
-    expect(imageArchitectures).toEqual(["arm64_mac", "x86_64_mac"]);
+    expect(imageQueries).toEqual([
+      "amzn-ec2-macos-14.*-arm64:arm64_mac",
+      "amzn-ec2-macos-15.*-arm64:arm64_mac",
+      "amzn-ec2-macos-14.*:x86_64_mac",
+    ]);
     expect(hostTypes).toEqual(awsMacOSInstanceTypeCandidates);
     expect(runTypes).toEqual(["mac1.metal"]);
     expect(runImages).toEqual(["ami-x86-mac"]);

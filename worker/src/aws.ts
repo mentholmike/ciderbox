@@ -272,13 +272,14 @@ export class EC2SpotClient {
         if (candidateConfig.target !== "macos") {
           return this.resolveAMI(candidateConfig);
         }
-        const architecture = awsMacOSAMIArchitecture(candidateConfig.serverType);
-        const cached = imageCache.get(architecture);
+        const query = awsMacOSAMIQuery(candidateConfig.serverType);
+        const cacheKey = `${query.name}\0${query.architecture}`;
+        const cached = imageCache.get(cacheKey);
         if (cached) {
           return cached;
         }
         const imageID = await this.resolveAMI(candidateConfig);
-        imageCache.set(architecture, imageID);
+        imageCache.set(cacheKey, imageID);
         return imageID;
       };
       for (const serverType of candidates) {
@@ -960,10 +961,8 @@ export class EC2SpotClient {
       return this.resolveLatestAmazonAMI("Windows_Server-2022-English-Full-Base-*", "x86_64");
     }
     if (config.target === "macos") {
-      if (awsMacOSAMIArchitecture(config.serverType) === "x86_64_mac") {
-        return this.resolveLatestAmazonAMI("amzn-ec2-macos-14.*", "x86_64_mac");
-      }
-      return this.resolveLatestAmazonAMI("amzn-ec2-macos-14.*-arm64", "arm64_mac");
+      const query = awsMacOSAMIQuery(config.serverType);
+      return this.resolveLatestAmazonAMI(query.name, query.architecture);
     }
     return this.resolveLatestAMI(
       awsUbuntuOwner,
@@ -1655,8 +1654,17 @@ function awsMacHostFamily(serverType: string): string {
   return serverType.split(".")[0]?.toLowerCase() ?? "";
 }
 
-function awsMacOSAMIArchitecture(serverType: string): "arm64_mac" | "x86_64_mac" {
-  return serverType.startsWith("mac1.") ? "x86_64_mac" : "arm64_mac";
+function awsMacOSAMIQuery(serverType: string): {
+  name: string;
+  architecture: "arm64_mac" | "x86_64_mac";
+} {
+  if (serverType.startsWith("mac1.")) {
+    return { name: "amzn-ec2-macos-14.*", architecture: "x86_64_mac" };
+  }
+  if (serverType.startsWith("mac-m")) {
+    return { name: "amzn-ec2-macos-15.*-arm64", architecture: "arm64_mac" };
+  }
+  return { name: "amzn-ec2-macos-14.*-arm64", architecture: "arm64_mac" };
 }
 
 function awsServiceQuotaFromRecord(value: unknown): AWSServiceQuota | undefined {

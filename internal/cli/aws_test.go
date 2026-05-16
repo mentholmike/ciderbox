@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -116,6 +117,7 @@ func TestStaleAWSCrabboxSSHIngressPermissionsKeepsDefaultCIDR(t *testing.T) {
 }
 
 func TestAWSMacOSFallbackResolvesAMIForEachInstanceType(t *testing.T) {
+	var imageQueries []string
 	var runImages []string
 	var runTypes []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,9 +134,13 @@ func TestAWSMacOSFallbackResolvesAMIForEachInstanceType(t *testing.T) {
 			writeEC2XML(w, `<DescribeKeyPairsResponse><keySet><item><keyName>crabbox-test</keyName></item></keySet></DescribeKeyPairsResponse>`)
 		case "DescribeImages":
 			architecture := params.Get("Filter.1.Value.1")
+			name := params.Get("Filter.2.Value.1")
+			imageQueries = append(imageQueries, name+":"+architecture)
 			imageID := "ami-arm64"
 			if architecture == "x86_64_mac" {
 				imageID = "ami-x86"
+			} else if name == "amzn-ec2-macos-15.*-arm64" {
+				imageID = "ami-m4"
 			}
 			writeEC2XML(w, `<DescribeImagesResponse><imagesSet><item><imageId>`+imageID+`</imageId><name>macos</name><creationDate>2026-05-01T00:00:00Z</creationDate></item></imagesSet></DescribeImagesResponse>`)
 		case "RunInstances":
@@ -183,8 +189,61 @@ func TestAWSMacOSFallbackResolvesAMIForEachInstanceType(t *testing.T) {
 	if len(runImages) != len(awsMacOSInstanceTypeCandidates()) || runImages[0] != "ami-arm64" || runImages[len(runImages)-1] != "ami-x86" {
 		t.Fatalf("run image sequence=%v, want arm64 candidates ending with x86 mac1 AMI", runImages)
 	}
+	if !slices.Contains(runImages, "ami-m4") {
+		t.Fatalf("run image sequence=%v, want M4 candidates to use macOS 15 AMI", runImages)
+	}
+	wantQueries := make([]string, 0, len(awsMacOSInstanceTypeCandidates()))
+	for _, instanceType := range awsMacOSInstanceTypeCandidates() {
+		name, architecture := awsMacOSAMIQueryForInstanceType(instanceType)
+		wantQueries = append(wantQueries, name+":"+architecture)
+	}
+	if !stringSlicesEqual(imageQueries, wantQueries) {
+		t.Fatalf("image queries=%v, want %v", imageQueries, wantQueries)
+	}
 	if len(runTypes) != len(awsMacOSInstanceTypeCandidates()) || runTypes[0] != "mac2.metal" || runTypes[len(runTypes)-1] != "mac1.metal" {
 		t.Fatalf("run type sequence=%v, want macOS fallback list ending with mac1", runTypes)
+	}
+}
+
+func TestAWSMacOSAMIQueryForInstanceType(t *testing.T) {
+	tests := []struct {
+		name             string
+		instanceType     string
+		wantName         string
+		wantArchitecture string
+	}{
+		{
+			name:             "m2",
+			instanceType:     "mac2-m2pro.metal",
+			wantName:         "amzn-ec2-macos-14.*-arm64",
+			wantArchitecture: "arm64_mac",
+		},
+		{
+			name:             "m3-ultra",
+			instanceType:     "mac-m3ultra.metal",
+			wantName:         "amzn-ec2-macos-15.*-arm64",
+			wantArchitecture: "arm64_mac",
+		},
+		{
+			name:             "m4",
+			instanceType:     "mac-m4pro.metal",
+			wantName:         "amzn-ec2-macos-15.*-arm64",
+			wantArchitecture: "arm64_mac",
+		},
+		{
+			name:             "x86",
+			instanceType:     "mac1.metal",
+			wantName:         "amzn-ec2-macos-14.*",
+			wantArchitecture: "x86_64_mac",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotName, gotArchitecture := awsMacOSAMIQueryForInstanceType(tt.instanceType)
+			if gotName != tt.wantName || gotArchitecture != tt.wantArchitecture {
+				t.Fatalf("query=(%q,%q), want (%q,%q)", gotName, gotArchitecture, tt.wantName, tt.wantArchitecture)
+			}
+		})
 	}
 }
 

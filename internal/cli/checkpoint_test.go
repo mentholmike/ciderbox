@@ -731,6 +731,42 @@ func TestApplyAWSAMICheckpointForkConfigRecomputesServerType(t *testing.T) {
 	}
 }
 
+func TestApplyAWSAMICheckpointForkConfigHonorsClassOverride(t *testing.T) {
+	fs := newFlagSet("checkpoint fork", io.Discard)
+	class := fs.String("class", "standard", "provider class")
+	_ = fs.String("type", "", "provider type")
+	if err := parseFlags(fs, []string{"--class", "beast"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Provider = "hetzner"
+	cfg.Class = *class
+	cfg.ServerType = "ccx63"
+	cfg.ServerTypeExplicit = true
+	record := checkpointRecord{
+		Kind:        checkpointKindAWSAMI,
+		TargetOS:    targetLinux,
+		WindowsMode: windowsModeNormal,
+		ServerType:  "c7a.4xlarge",
+	}
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "eu-west-1"
+
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Provider != "aws" || cfg.AWSAMI != "ami-12345678" || cfg.AWSRegion != "eu-west-1" {
+		t.Fatalf("aws config not applied: %#v", cfg)
+	}
+	if cfg.ServerTypeExplicit {
+		t.Fatal("ServerTypeExplicit=true, want false")
+	}
+	if cfg.ServerType != "c7a.48xlarge" {
+		t.Fatalf("ServerType=%q, want AWS beast default instead of checkpoint source type", cfg.ServerType)
+	}
+}
+
 func TestApplyAWSAMICheckpointForkConfigPreservesExplicitTypeFlag(t *testing.T) {
 	fs := newFlagSet("checkpoint fork", io.Discard)
 	serverType := fs.String("type", "", "provider type")

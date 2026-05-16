@@ -406,10 +406,8 @@ func (c *AWSClient) resolveAMI(ctx context.Context, cfg Config) (string, error) 
 		return c.resolveLatestAmazonAMI(ctx, "Windows_Server-2022-English-Full-Base-*", "x86_64")
 	}
 	if cfg.TargetOS == targetMacOS {
-		if strings.HasPrefix(cfg.ServerType, "mac1.") {
-			return c.resolveLatestAmazonAMI(ctx, "amzn-ec2-macos-14.*", "x86_64_mac")
-		}
-		return c.resolveLatestAmazonAMI(ctx, "amzn-ec2-macos-14.*-arm64", "arm64_mac")
+		name, architecture := awsMacOSAMIQueryForInstanceType(cfg.ServerType)
+		return c.resolveLatestAmazonAMI(ctx, name, architecture)
 	}
 	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
 		Owners: []string{awsUbuntuOwner},
@@ -430,6 +428,16 @@ func (c *AWSClient) resolveAMI(ctx context.Context, cfg Config) (string, error) 
 		return aws.ToString(out.Images[i].CreationDate) > aws.ToString(out.Images[j].CreationDate)
 	})
 	return aws.ToString(out.Images[0].ImageId), nil
+}
+
+func awsMacOSAMIQueryForInstanceType(instanceType string) (string, string) {
+	if strings.HasPrefix(instanceType, "mac1.") {
+		return "amzn-ec2-macos-14.*", "x86_64_mac"
+	}
+	if strings.HasPrefix(instanceType, "mac-m") {
+		return "amzn-ec2-macos-15.*-arm64", "arm64_mac"
+	}
+	return "amzn-ec2-macos-14.*-arm64", "arm64_mac"
 }
 
 func (c *AWSClient) resolveLatestAmazonAMI(ctx context.Context, name, architecture string) (string, error) {

@@ -1099,7 +1099,7 @@ func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record check
 		cfg.AzureOSDiskExplicit = true
 	}
 	if !flagWasSet(fs, "type") {
-		if record.ServerType != "" {
+		if record.ServerType != "" && !flagWasSet(fs, "class") {
 			cfg.ServerType = record.ServerType
 			cfg.ServerTypeExplicit = true
 		} else {
