@@ -266,6 +266,53 @@ describe("lease config", () => {
     expect(config.serverType).toBe("Standard_D192ds_v6");
     expect(config.azureLocation).toBe("eastus");
     expect(config.azureImage).toBe("Canonical:offer:sku:latest");
+    expect(config.azureOSDisk).toBe("managed");
+  });
+
+  it("normalizes Azure OS disk requests", () => {
+    expect(
+      leaseConfig({
+        provider: "azure",
+        azureOSDisk: "MANAGED",
+        sshPublicKey: "ssh-ed25519 test",
+      }).azureOSDisk,
+    ).toBe("managed");
+    expect(
+      leaseConfig({
+        provider: "azure",
+        azureOSDisk: "auto",
+        sshPublicKey: "ssh-ed25519 test",
+      }).azureOSDisk,
+    ).toBe("managed");
+    expect(() =>
+      leaseConfig({
+        provider: "azure",
+        azureOSDisk: "premium",
+        sshPublicKey: "ssh-ed25519 test",
+      }),
+    ).toThrow("azureOSDisk must be auto, managed, or ephemeral");
+  });
+
+  it("uses Worker Azure OS disk defaults when the request omits one", () => {
+    expect(
+      leaseConfig(
+        {
+          provider: "azure",
+          sshPublicKey: "ssh-ed25519 test",
+        },
+        { azureOSDisk: "ephemeral" },
+      ).azureOSDisk,
+    ).toBe("ephemeral");
+    expect(
+      leaseConfig(
+        {
+          provider: "azure",
+          azureOSDisk: "managed",
+          sshPublicKey: "ssh-ed25519 test",
+        },
+        { azureOSDisk: "ephemeral" },
+      ).azureOSDisk,
+    ).toBe("managed");
   });
 
   it("leaves omitted GCP fields for Worker defaults", () => {

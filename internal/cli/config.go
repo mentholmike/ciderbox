@@ -13,90 +13,92 @@ import (
 )
 
 type Config struct {
-	Profile            string
-	Provider           string
-	TargetOS           string
-	WindowsMode        string
-	Desktop            bool
-	Browser            bool
-	Code               bool
-	Network            NetworkMode
-	Class              string
-	ServerType         string
-	ServerTypeExplicit bool
-	Coordinator        string
-	CoordToken         string
-	CoordAdminToken    string
-	Access             AccessConfig
-	Location           string
-	Image              string
-	AWSRegion          string
-	AWSAMI             string
-	AWSSnapshot        string
-	AWSSGID            string
-	AWSSubnetID        string
-	AWSProfile         string
-	AWSRootGB          int32
-	AWSSSHCIDRs        []string
-	AWSMacHostID       string
-	AzureSubscription  string
-	AzureTenant        string
-	AzureClientID      string
-	AzureLocation      string
-	AzureResourceGroup string
-	AzureImage         string
-	AzureSnapshot      string
-	AzureVNet          string
-	AzureSubnet        string
-	AzureNSG           string
-	AzureSSHCIDRs      []string
-	AzureNetwork       string
-	GCPProject         string
-	gcpProjectExplicit bool
-	GCPZone            string
-	gcpZoneExplicit    bool
-	GCPImage           string
-	gcpImageExplicit   bool
-	GCPMachineImage    string
-	GCPSnapshot        string
-	GCPNetwork         string
-	gcpNetworkExplicit bool
-	GCPSubnet          string
-	GCPTags            []string
-	gcpTagsExplicit    bool
-	GCPSSHCIDRs        []string
-	GCPRootGB          int64
-	gcpRootGBExplicit  bool
-	GCPServiceAccount  string
-	Proxmox            ProxmoxConfig
-	SSHUser            string
-	SSHKey             string
-	SSHPort            string
-	SSHFallbackPorts   []string
-	ProviderKey        string
-	WorkRoot           string
-	TTL                time.Duration
-	IdleTimeout        time.Duration
-	Sync               SyncConfig
-	Run                RunConfig
-	EnvAllow           []string
-	Capacity           CapacityConfig
-	Actions            ActionsConfig
-	Blacksmith         BlacksmithConfig
-	Namespace          NamespaceConfig
-	Daytona            DaytonaConfig
-	E2B                E2BConfig
-	Islo               IsloConfig
-	Tensorlake         TensorlakeConfig
-	Modal              ModalConfig
-	Cloudflare         CloudflareConfig
-	Semaphore          SemaphoreConfig
-	Sprites            SpritesConfig
-	Tailscale          TailscaleConfig
-	Static             StaticConfig
-	Results            ResultsConfig
-	Cache              CacheConfig
-	Jobs               map[string]JobConfig
+	Profile             string
+	Provider            string
+	TargetOS            string
+	WindowsMode         string
+	Desktop             bool
+	Browser             bool
+	Code                bool
+	Network             NetworkMode
+	Class               string
+	ServerType          string
+	ServerTypeExplicit  bool
+	Coordinator         string
+	CoordToken          string
+	CoordAdminToken     string
+	Access              AccessConfig
+	Location            string
+	Image               string
+	AWSRegion           string
+	AWSAMI              string
+	AWSSnapshot         string
+	AWSSGID             string
+	AWSSubnetID         string
+	AWSProfile          string
+	AWSRootGB           int32
+	AWSSSHCIDRs         []string
+	AWSMacHostID        string
+	AzureSubscription   string
+	AzureTenant         string
+	AzureClientID       string
+	AzureLocation       string
+	AzureResourceGroup  string
+	AzureImage          string
+	AzureSnapshot       string
+	AzureOSDisk         string
+	AzureOSDiskExplicit bool
+	AzureVNet           string
+	AzureSubnet         string
+	AzureNSG            string
+	AzureSSHCIDRs       []string
+	AzureNetwork        string
+	GCPProject          string
+	gcpProjectExplicit  bool
+	GCPZone             string
+	gcpZoneExplicit     bool
+	GCPImage            string
+	gcpImageExplicit    bool
+	GCPMachineImage     string
+	GCPSnapshot         string
+	GCPNetwork          string
+	gcpNetworkExplicit  bool
+	GCPSubnet           string
+	GCPTags             []string
+	gcpTagsExplicit     bool
+	GCPSSHCIDRs         []string
+	GCPRootGB           int64
+	gcpRootGBExplicit   bool
+	GCPServiceAccount   string
+	Proxmox             ProxmoxConfig
+	SSHUser             string
+	SSHKey              string
+	SSHPort             string
+	SSHFallbackPorts    []string
+	ProviderKey         string
+	WorkRoot            string
+	TTL                 time.Duration
+	IdleTimeout         time.Duration
+	Sync                SyncConfig
+	Run                 RunConfig
+	EnvAllow            []string
+	Capacity            CapacityConfig
+	Actions             ActionsConfig
+	Blacksmith          BlacksmithConfig
+	Namespace           NamespaceConfig
+	Daytona             DaytonaConfig
+	E2B                 E2BConfig
+	Islo                IsloConfig
+	Tensorlake          TensorlakeConfig
+	Modal               ModalConfig
+	Cloudflare          CloudflareConfig
+	Semaphore           SemaphoreConfig
+	Sprites             SpritesConfig
+	Tailscale           TailscaleConfig
+	Static              StaticConfig
+	Results             ResultsConfig
+	Cache               CacheConfig
+	Jobs                map[string]JobConfig
 }
 
 type SyncConfig struct {
@@ -395,6 +397,7 @@ func baseConfig() Config {
 		AzureLocation:      "eastus",
 		AzureResourceGroup: "crabbox-leases",
 		AzureImage:         defaultAzureLinuxImage,
+		AzureOSDisk:        AzureOSDiskManaged,
 		AzureVNet:          "crabbox-vnet",
 		AzureSubnet:        "crabbox-subnet",
 		AzureNSG:           "crabbox-nsg",
@@ -589,6 +592,7 @@ type fileAzureConfig struct {
 	Location       string   `yaml:"location,omitempty"`
 	ResourceGroup  string   `yaml:"resourceGroup,omitempty"`
 	Image          string   `yaml:"image,omitempty"`
+	OSDisk         string   `yaml:"osDisk,omitempty"`
 	VNet           string   `yaml:"vnet,omitempty"`
 	Subnet         string   `yaml:"subnet,omitempty"`
 	NSG            string   `yaml:"nsg,omitempty"`
@@ -1078,6 +1082,10 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 		}
 		if file.Azure.Image != "" {
 			cfg.AzureImage = file.Azure.Image
+		}
+		if file.Azure.OSDisk != "" {
+			cfg.AzureOSDisk = file.Azure.OSDisk
+			cfg.AzureOSDiskExplicit = true
 		}
 		if file.Azure.VNet != "" {
 			cfg.AzureVNet = file.Azure.VNet
@@ -1718,6 +1726,10 @@ func applyEnv(cfg *Config) {
 	cfg.AzureLocation = getenv("CRABBOX_AZURE_LOCATION", cfg.AzureLocation)
 	cfg.AzureResourceGroup = getenv("CRABBOX_AZURE_RESOURCE_GROUP", cfg.AzureResourceGroup)
 	cfg.AzureImage = getenv("CRABBOX_AZURE_IMAGE", cfg.AzureImage)
+	if value := os.Getenv("CRABBOX_AZURE_OS_DISK"); value != "" {
+		cfg.AzureOSDisk = value
+		cfg.AzureOSDiskExplicit = true
+	}
 	cfg.AzureVNet = getenv("CRABBOX_AZURE_VNET", cfg.AzureVNet)
 	cfg.AzureSubnet = getenv("CRABBOX_AZURE_SUBNET", cfg.AzureSubnet)
 	cfg.AzureNSG = getenv("CRABBOX_AZURE_NSG", cfg.AzureNSG)

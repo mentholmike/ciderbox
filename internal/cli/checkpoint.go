@@ -436,7 +436,9 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 		if nativeCheckpointResourceID(record) == "" {
 			return exit(2, "checkpoint %s is pending; native provider resource is not recorded yet", record.ID)
 		}
-		applyNativeCheckpointForkConfig(&cfg, fs, record)
+		if err := applyNativeCheckpointForkConfig(&cfg, fs, record); err != nil {
+			return err
+		}
 	}
 	repo, err := findRepo()
 	if err != nil {
@@ -1010,7 +1012,7 @@ func nativeCheckpointForkWorkdir(cfg Config, leaseID, repoName, override string)
 	return remoteJoin(cfg, leaseID, repoName)
 }
 
-func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record checkpointRecord) {
+func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record checkpointRecord) error {
 	cfg.Provider = firstNonBlank(record.Native.Provider, checkpointProviderForKind(record.Kind), record.Provider)
 	if cfg.CoordAdminToken != "" {
 		cfg.CoordToken = cfg.CoordAdminToken
@@ -1061,14 +1063,23 @@ func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record check
 	if record.WindowsMode != "" {
 		cfg.WindowsMode = record.WindowsMode
 	}
+	if cfg.Provider == "azure" && flagWasSet(fs, "azure-os-disk") {
+		mode, err := NormalizeAzureOSDiskMode(fs.Lookup("azure-os-disk").Value.String())
+		if err != nil {
+			return err
+		}
+		cfg.AzureOSDisk = mode
+		cfg.AzureOSDiskExplicit = true
+	}
 	if !flagWasSet(fs, "type") {
 		cfg.ServerTypeExplicit = false
 		cfg.ServerType = serverTypeForConfig(*cfg)
 	}
+	return nil
 }
 
-func applyAWSAMICheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record checkpointRecord) {
-	applyNativeCheckpointForkConfig(cfg, fs, record)
+func applyAWSAMICheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record checkpointRecord) error {
+	return applyNativeCheckpointForkConfig(cfg, fs, record)
 }
 
 func nativeCoordinatorImageRef(record checkpointRecord) CoordinatorImageRef {

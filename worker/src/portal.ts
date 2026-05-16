@@ -642,6 +642,7 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       const target = ${JSON.stringify(target)};
       const username = fragment.get("username") || "";
       const password = fragment.get("password") || "";
+      const takeControlOnConnect = fragment.get("control") === "take";
       const credentials = {};
       if (username) credentials.username = username;
       if (password) credentials.password = password;
@@ -659,6 +660,7 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       let statusTimer;
       let controllerLabel = "";
       let isController = false;
+      let takeControlAttempted = false;
       const terminalStatusCodes = new Set([403, 404, 409, 410]);
       function focusVNC() {
         if (!isController) return;
@@ -671,16 +673,16 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
           rfb?.focus?.({ preventScroll: true });
         } catch (_) {}
       }
-      function captureVNCInput(event) {
+      function captureVNCInput(event, options = {}) {
         if (!isController) return;
-        if (event.cancelable) event.preventDefault();
+        if (options.preventDefault && event.cancelable) event.preventDefault();
         focusVNC();
       }
       screen.addEventListener("contextmenu", (event) => {
         event.preventDefault();
       });
-      screen.addEventListener("pointerdown", captureVNCInput, { capture: true });
-      screen.addEventListener("mousedown", captureVNCInput, { capture: true });
+      screen.addEventListener("pointerdown", (event) => captureVNCInput(event), { capture: true });
+      screen.addEventListener("mousedown", (event) => captureVNCInput(event, { preventDefault: true }), { capture: true });
       function retryDelay() {
         return Math.min(5000, 500 * 2 ** retryAttempt);
       }
@@ -763,6 +765,34 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
         applyCollaborationState(state);
         return state;
       }
+      async function refreshCollaborationStateAndMaybeTakeControl() {
+        const state = await refreshCollaborationState();
+        await takeControlIfRequested(state);
+        return state;
+      }
+      async function takeControl(label = "you took control") {
+        const response = await fetch(controlURL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ viewerID }),
+        });
+        const state = response.ok ? await response.json() : undefined;
+        if (!response.ok) throw new Error(state?.message || "takeover failed");
+        applyCollaborationState(state);
+        setStatus(label, "ok");
+        focusVNC();
+        return state;
+      }
+      async function takeControlIfRequested(state) {
+        if (!takeControlOnConnect || takeControlAttempted) return;
+        if (state?.viewerRole === "controller") {
+          takeControlAttempted = true;
+          return;
+        }
+        if (state?.viewerRole !== "observer") return;
+        await takeControl();
+        takeControlAttempted = true;
+      }
       function stopPolling(label) {
         stopped = true;
         connected = false;
@@ -813,9 +843,11 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
             connected = true;
             retryAttempt = 0;
             setStatus("connected", "ok");
-            void refreshCollaborationState().then(focusVNC).catch(() => {});
+            void refreshCollaborationStateAndMaybeTakeControl().then(focusVNC).catch(() => {});
             window.clearInterval(statusTimer);
-            statusTimer = window.setInterval(refreshCollaborationState, 1500);
+            statusTimer = window.setInterval(() => {
+              void refreshCollaborationStateAndMaybeTakeControl().catch(() => {});
+            }, 1500);
           });
           rfb.addEventListener("clipboard", (event) => {
             remoteClipboardText = event.detail?.text || "";
@@ -858,16 +890,7 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       const takeoverBtn = document.getElementById("vnc-takeover");
       takeoverBtn?.addEventListener("click", async () => {
         try {
-          const response = await fetch(controlURL, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ viewerID }),
-          });
-          const state = response.ok ? await response.json() : undefined;
-          if (!response.ok) throw new Error(state?.message || "takeover failed");
-          applyCollaborationState(state);
-          setStatus("you took control", "ok");
-          focusVNC();
+          await takeControl();
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error), "bad");
         }

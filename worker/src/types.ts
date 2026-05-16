@@ -12,6 +12,10 @@ export interface Env {
   CRABBOX_AWS_ROOT_GB?: string;
   CRABBOX_AWS_SSH_CIDRS?: string;
   CRABBOX_AWS_MAC_HOST_ID?: string;
+  CRABBOX_AWS_ORPHAN_SWEEP_ENABLED?: string;
+  CRABBOX_AWS_ORPHAN_SWEEP_DELETE?: string;
+  CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS?: string;
+  CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS?: string;
   CRABBOX_CAPACITY_REGIONS?: string;
   CRABBOX_CAPACITY_AVAILABILITY_ZONES?: string;
   CRABBOX_CAPACITY_HINTS?: string;
@@ -23,6 +27,7 @@ export interface Env {
   CRABBOX_AZURE_LOCATION?: string;
   CRABBOX_AZURE_RESOURCE_GROUP?: string;
   CRABBOX_AZURE_IMAGE?: string;
+  CRABBOX_AZURE_OS_DISK?: string;
   CRABBOX_AZURE_VNET?: string;
   CRABBOX_AZURE_SUBNET?: string;
   CRABBOX_AZURE_NSG?: string;
@@ -113,6 +118,7 @@ export interface LeaseRequest {
   azureLocation?: string;
   azureImage?: string;
   azureSnapshot?: string;
+  azureOSDisk?: string;
   gcpProject?: string;
   gcpZone?: string;
   gcpImage?: string;

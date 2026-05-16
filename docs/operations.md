@@ -139,6 +139,10 @@ CRABBOX_ARTIFACTS_SECRET_ACCESS_KEY required when artifact backend is enabled
 CRABBOX_ARTIFACTS_SESSION_TOKEN optional
 CRABBOX_ARTIFACTS_UPLOAD_EXPIRES_SECONDS optional
 CRABBOX_ARTIFACTS_URL_EXPIRES_SECONDS optional
+CRABBOX_AWS_ORPHAN_SWEEP_ENABLED optional; defaults on when AWS broker credentials exist
+CRABBOX_AWS_ORPHAN_SWEEP_DELETE optional; set 1 to terminate confirmed orphan EC2 instances
+CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS optional; default 3600
+CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS optional; default 900
 ```
 
 Artifact backend vars are ordinary Worker vars except
@@ -230,12 +234,111 @@ bin/crabbox stop blue-lobster
 
 Trusted operators can use `crabbox admin release` or `crabbox admin delete --force` for stuck leases.
 
+After AWS credential or account rotation, scan old provider accounts directly for
+Crabbox-tagged EC2 instances that the current coordinator cannot see:
+
+```sh
+scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account
+scripts/aws-crabbox-orphan-audit.sh --profile old-crabbox-account --terminate
+```
+
+The audit is read-only by default. It skips `keep=true` instances, protects
+active coordinator leases by lease tag or EC2 instance ID, and applies the same
+grace window as the broker sweep before reporting stale labels. `--terminate`
+refuses to run if active coordinator leases cannot be loaded or may be truncated.
+
 Direct-provider cleanup is only for debug mode without a coordinator:
 
 ```sh
 bin/crabbox cleanup --dry-run
 bin/crabbox cleanup
 ```
+
+The coordinator also runs an AWS orphan sweep from the Durable Object alarm when
+AWS broker credentials are configured. The Worker cron route bootstraps the same
+maintenance loop for idle fleets, so cleanup does not depend on new lease
+traffic after deploy. It scans `CRABBOX_AWS_REGION` plus
+`CRABBOX_CAPACITY_REGIONS` for `crabbox=true` EC2 instances and compares their
+lease tags with active coordinator leases. Active matching leases always win,
+because provider `expires_at` tags are written at launch and can be older than a
+heartbeat-extended lease.
+
+The sweep reports candidates when an instance is past its provider `expires_at`
+tag, has no active lease, is missing a lease label, or points at an active lease
+whose current cloud ID is different. It skips `keep=true` instances and applies
+the grace window before acting on missing or mismatched lease state. Set
+`CRABBOX_AWS_ORPHAN_SWEEP_DELETE=1` to terminate confirmed candidates
+automatically.
+
+Trusted admins can inspect or trigger the sweep:
+
+```sh
+curl -H "Authorization: Bearer $CRABBOX_COORDINATOR_ADMIN_TOKEN" \
+  https://crabbox.example.com/v1/admin/aws-orphan-sweep
+
+curl -X POST -H "Authorization: Bearer $CRABBOX_COORDINATOR_ADMIN_TOKEN" \
+  https://crabbox.example.com/v1/admin/aws-orphan-sweep
+```
+
+## AWS Security Guardrails
+
+Use the cheap account guardrails before adding heavier audit services:
+
+```sh
+account_id="$(aws sts get-caller-identity --query Account --output text)"
+
+aws s3control put-public-access-block \
+  --account-id "$account_id" \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+aws iam update-account-password-policy \
+  --minimum-password-length 14 \
+  --require-symbols \
+  --require-numbers \
+  --require-uppercase-characters \
+  --require-lowercase-characters \
+  --allow-users-to-change-password \
+  --max-password-age 90 \
+  --password-reuse-prevention 24
+```
+
+S3 account-level Block Public Access and the IAM account password policy are
+account-wide controls. IAM Access Analyzer external-access analyzers are
+regional, so create one in each AWS capacity region:
+
+```sh
+for region in eu-west-1 eu-west-2 eu-central-1 us-east-1 us-west-2; do
+  if ! aws accessanalyzer get-analyzer \
+    --region "$region" \
+    --analyzer-name crabbox-external-access >/dev/null 2>&1; then
+    aws accessanalyzer create-analyzer \
+      --region "$region" \
+      --analyzer-name crabbox-external-access \
+      --type ACCOUNT
+  fi
+done
+```
+
+List active external-access findings across the same pool:
+
+```sh
+for region in eu-west-1 eu-west-2 eu-central-1 us-east-1 us-west-2; do
+  arn="$(aws accessanalyzer get-analyzer \
+    --region "$region" \
+    --analyzer-name crabbox-external-access \
+    --query 'analyzer.arn' \
+    --output text)"
+  aws accessanalyzer list-findings \
+    --region "$region" \
+    --analyzer-arn "$arn" \
+    --filter '{"status":{"eq":["ACTIVE"]}}'
+done
+```
+
+Do not treat these as spend caps or compliance audit trails. CloudTrail, AWS
+Config, Security Hub, and GuardDuty are separate choices with different cost and
+retention tradeoffs.
 
 ## Cost Guardrails
 

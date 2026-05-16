@@ -155,6 +155,20 @@ aws:
   macHostId: h-0123456789abcdef0
 ```
 
+### Azure
+
+```yaml
+provider: azure
+azure:
+  location: eastus
+  osDisk: managed     # managed | ephemeral | auto
+```
+
+Azure uses managed `StandardSSD_LRS` OS disks by default so leases can support
+native disk-snapshot checkpoints. `ephemeral` opts into local OS disks for
+stateless leases and disables native Azure checkpoint/fork support. `auto` is
+accepted for compatibility and resolves to managed.
+
 ### Hetzner
 
 Hetzner credentials and image come from broker-side config. Repos do not need
@@ -532,6 +546,7 @@ provider-native:
 ```text
 HCLOUD_TOKEN / HETZNER_TOKEN
 AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN
+AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_SUBSCRIPTION_ID
 GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_CLOUD_PROJECT
 CRABBOX_PROXMOX_TOKEN_ID / CRABBOX_PROXMOX_TOKEN_SECRET
 DAYTONA_API_KEY / DAYTONA_JWT_TOKEN

@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"flag"
 	"testing"
 
 	core "github.com/openclaw/crabbox/internal/cli"
@@ -28,6 +29,37 @@ func TestIsCrabboxAzureLeaseRequiresProviderTag(t *testing.T) {
 				t.Fatalf("labels=%+v got %v want %v", tc.labels, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestProviderAppliesAzureOSDiskFlag(t *testing.T) {
+	t.Parallel()
+	provider := Provider{}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values := provider.RegisterFlags(fs, core.Config{})
+	if err := fs.Parse([]string{"--azure-os-disk", "managed"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := core.Config{Provider: "azure"}
+	if err := provider.ApplyFlags(&cfg, fs, values); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AzureOSDisk != core.AzureOSDiskManaged {
+		t.Fatalf("AzureOSDisk=%q want %q", cfg.AzureOSDisk, core.AzureOSDiskManaged)
+	}
+	if !cfg.AzureOSDiskExplicit {
+		t.Fatal("AzureOSDiskExplicit=false, want true")
+	}
+}
+
+func TestProviderValidatesConfiguredAzureOSDisk(t *testing.T) {
+	t.Parallel()
+	provider := Provider{}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values := provider.RegisterFlags(fs, core.Config{})
+	cfg := core.Config{Provider: "azure", AzureOSDisk: "premium"}
+	if err := provider.ApplyFlags(&cfg, fs, values); err == nil {
+		t.Fatal("expected invalid configured Azure OS disk mode to fail")
 	}
 }
 

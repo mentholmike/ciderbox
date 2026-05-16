@@ -161,6 +161,7 @@ func TestDesktopLaunchWebVNCArgsCarriesTargetDetails(t *testing.T) {
 		SSHTarget{TargetOS: targetWindows, WindowsMode: windowsModeWSL2},
 		"cbx_1",
 		true,
+		true,
 	)
 	joined := strings.Join(got, " ")
 	for _, want := range []string{
@@ -170,6 +171,7 @@ func TestDesktopLaunchWebVNCArgsCarriesTargetDetails(t *testing.T) {
 		"--windows-mode wsl2",
 		"--id cbx_1",
 		"--open",
+		"--take-control",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("webvnc args missing %q: %v", want, got)

@@ -6,6 +6,7 @@
 crabbox run --id blue-lobster -- pnpm test:changed:max
 crabbox run --class beast -- pnpm check
 crabbox run --provider aws --class beast --market on-demand -- pnpm check
+crabbox run --provider azure --class beast -- pnpm check
 crabbox run --tailscale -- pnpm check
 crabbox run --id blue-lobster --network tailscale -- pnpm test
 crabbox run --browser -- google-chrome --headless --version
@@ -255,6 +256,7 @@ Flags:
 --profile <name>
 --class <name>
 --type <provider-type>
+--azure-os-disk managed|ephemeral|auto
 --market spot|on-demand
 --ttl <duration>
 --idle-timeout <duration>
@@ -327,6 +329,11 @@ portal.
 For AWS one-shot leases, `--market` overrides `capacity.market` for this run.
 Explicit `--type` keeps exact-type semantics; Crabbox reports why that type
 failed rather than falling back to a different size.
+
+Azure one-shot leases use managed `StandardSSD_LRS` OS disks by default so they
+can become native checkpoint sources. Use `--azure-os-disk ephemeral` only for
+stateless leases where native Azure checkpoint/fork support is not needed.
+`--azure-os-disk auto` is accepted for compatibility and resolves to managed.
 
 Delegated providers such as Blacksmith Testbox, Daytona `run`, Islo, and E2B
 own command transport. They reject SSH-run-only features including

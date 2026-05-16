@@ -11,6 +11,7 @@ crabbox warmup --desktop
 crabbox webvnc --id blue-lobster
 crabbox webvnc --id blue-lobster --network tailscale
 crabbox webvnc --id blue-lobster --open
+crabbox webvnc --id blue-lobster --open --take-control
 crabbox webvnc daemon start --id blue-lobster --open
 crabbox webvnc daemon status --id blue-lobster
 crabbox webvnc daemon stop --id blue-lobster
@@ -75,6 +76,9 @@ to become the controller — including the prior controller, who stays connected
 as an observer and can reclaim control the same way. Observer mode is a
 collaboration UX for trusted shared leases; it relies on the portal noVNC
 client staying read-only and is not a hostile-client isolation boundary.
+Use `--take-control` when opening or printing a handoff URL for someone who
+should immediately drive the session; the portal will request control once
+after that viewer connects.
 
 The older `crabbox webvnc --id <lease> --daemon`, `--background`, `--status`,
 and `--stop` forms remain accepted as compatibility aliases, but new docs and
@@ -126,6 +130,9 @@ special characters such as `!` when building the fragment. If the portal login
 flow redirects first, the page may still prompt for the VNC password; use the
 password printed by the command. If an old browser tab is retrying with a stale
 fragment, close it before opening the new bridge URL.
+`--take-control` also writes `control=take` into the URL fragment. That is a
+viewer hint, not a new permission boundary; portal auth and lease sharing still
+decide who can open the session.
 
 The portal page may show `WebVNC daemon not running` or `waiting for VNC
 bridge` until the local command has connected. If you opened the portal first,
@@ -166,6 +173,7 @@ Flags:
 --network auto|tailscale|public
 --local-port <port>
 --open
+--take-control
 status
 reset
 daemon start

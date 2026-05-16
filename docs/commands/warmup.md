@@ -5,6 +5,7 @@
 ```sh
 crabbox warmup --class beast
 crabbox warmup --provider aws --class beast --market on-demand
+crabbox warmup --provider azure --class beast
 crabbox warmup --browser
 crabbox warmup --tailscale
 crabbox warmup --desktop --browser
@@ -111,6 +112,7 @@ Flags:
 --profile <name>
 --class <name>
 --type <provider-type>
+--azure-os-disk managed|ephemeral|auto
 --market spot|on-demand
 --ttl <duration>
 --idle-timeout <duration>
@@ -182,6 +184,12 @@ For AWS, `--market` overrides `capacity.market` for this lease. Use
 approved only for the standard On-Demand quota. Explicit `--type` still means
 exact type: Crabbox reports quota/capacity/policy failures instead of silently
 changing capacity.
+
+Azure leases use managed `StandardSSD_LRS` OS disks by default so native
+disk-snapshot checkpoints can be created and forked. Use
+`--azure-os-disk ephemeral` only for stateless leases where native Azure
+checkpoint/fork support is not needed. `--azure-os-disk auto` is accepted for
+compatibility and resolves to managed.
 
 `--actions-runner` immediately registers the warm box as an ephemeral self-hosted GitHub Actions runner for the current repository. Most projects should prefer `crabbox actions hydrate --id <lease-id-or-slug>` after warmup because it also dispatches the workflow and waits for the ready marker.
 

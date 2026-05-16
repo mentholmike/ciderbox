@@ -669,7 +669,9 @@ func TestApplyAWSAMICheckpointForkConfigRecomputesServerType(t *testing.T) {
 	record.Native.ImageID = "ami-12345678"
 	record.Native.Region = "eu-west-1"
 
-	applyAWSAMICheckpointForkConfig(&cfg, fs, record)
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
 
 	if cfg.Provider != "aws" || cfg.AWSAMI != "ami-12345678" || cfg.AWSRegion != "eu-west-1" {
 		t.Fatalf("aws config not applied: %#v", cfg)
@@ -698,7 +700,9 @@ func TestApplyAWSAMICheckpointForkConfigPreservesExplicitTypeFlag(t *testing.T) 
 	record := checkpointRecord{Kind: checkpointKindAWSAMI, TargetOS: targetLinux, WindowsMode: windowsModeNormal}
 	record.Native.ImageID = "ami-12345678"
 
-	applyAWSAMICheckpointForkConfig(&cfg, fs, record)
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
 
 	if cfg.ServerType != "c7a.4xlarge" || !cfg.ServerTypeExplicit {
 		t.Fatalf("explicit type not preserved: type=%q explicit=%t", cfg.ServerType, cfg.ServerTypeExplicit)
@@ -780,12 +784,38 @@ func TestApplyNativeCheckpointForkConfigForAzureAndGCP(t *testing.T) {
 			cfg := defaultConfig()
 			cfg.Provider = "hetzner"
 			cfg.Class = "standard"
-			applyNativeCheckpointForkConfig(&cfg, fs, tc.record)
+			if err := applyNativeCheckpointForkConfig(&cfg, fs, tc.record); err != nil {
+				t.Fatal(err)
+			}
 			tc.check(t, cfg)
 			if cfg.ServerTypeExplicit {
 				t.Fatal("ServerTypeExplicit=true, want false")
 			}
 		})
+	}
+}
+
+func TestApplyNativeCheckpointForkConfigHonorsAzureOSDiskFlagAfterProviderRewrite(t *testing.T) {
+	fs := newFlagSet("checkpoint fork", io.Discard)
+	_ = fs.String("type", "", "provider type")
+	_ = fs.String("azure-os-disk", AzureOSDiskManaged, "Azure OS disk mode")
+	if err := parseFlags(fs, []string{"--azure-os-disk", "ephemeral"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Provider = "hetzner"
+	cfg.AzureOSDisk = AzureOSDiskManaged
+	record := checkpointRecord{Kind: checkpointKindAzureOS, TargetOS: targetLinux}
+	record.Native.ImageID = "checkpoint-azure"
+
+	if err := applyNativeCheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "azure" {
+		t.Fatalf("Provider=%q", cfg.Provider)
+	}
+	if cfg.AzureOSDisk != AzureOSDiskEphemeral || !cfg.AzureOSDiskExplicit {
+		t.Fatalf("AzureOSDisk=%q explicit=%t", cfg.AzureOSDisk, cfg.AzureOSDiskExplicit)
 	}
 }
 

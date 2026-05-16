@@ -182,6 +182,32 @@ describe("coordinator auth", () => {
     expect(response.status).toBe(401);
   });
 
+  it("does not expose internal scheduled maintenance through public fetch", async () => {
+    const env = {
+      CRABBOX_SHARED_TOKEN: "shared",
+      CRABBOX_DEFAULT_ORG: "example-org",
+      FLEET: {
+        idFromName: () => "default",
+        get: () => {
+          throw new Error("internal maintenance reached coordinator");
+        },
+      },
+    } as unknown as Env;
+
+    const response = await coordinator.fetch(
+      new Request("https://example.test/v1/internal/scheduled", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer shared",
+          "x-crabbox-internal": "scheduled",
+        },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
   it("does not let caller-supplied Access identity override signed user token identity", () => {
     const request = new Request("https://example.test/v1/whoami", {
       headers: {

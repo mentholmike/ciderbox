@@ -325,6 +325,7 @@ Flags:
 --profile <name>        profile to run on
 --class <name>          machine class override
 --type <name>           provider server or instance type override
+--azure-os-disk <mode> Azure OS disk mode: managed, ephemeral, or auto
 --market spot|on-demand AWS capacity market override
 --ttl <duration>        maximum lease lifetime, default 90m
 --idle-timeout <duration> idle expiry, default 30m

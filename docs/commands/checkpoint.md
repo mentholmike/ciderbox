@@ -258,6 +258,11 @@ Default strategy `disk-snapshot`:
 - Azure: Managed OS disk snapshot
 - GCP: Persistent disk snapshot
 
+Azure disk-snapshot checkpoints require the source lease to use a managed OS
+disk, which is the default for new Azure leases. Checkpoint creation refuses
+leases started with `--azure-os-disk ephemeral`, because Azure reports a
+successful snapshot but does not capture the live OS disk state.
+
 Opt-in strategy `--strategy image`:
 - AWS: AMI (Amazon Machine Image)
 - Azure: Not created from active VMs (requires stopped/generalized source)

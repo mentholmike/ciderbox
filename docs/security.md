@@ -148,12 +148,37 @@ Required:
 - Idle timeout and heartbeat/touch deadline.
 - Explicit release.
 - Durable Object alarm cleanup.
+- Durable Object AWS orphan sweep for current broker credentials and capacity regions.
 - Provider label sweep for clearly expired, inactive orphan machines.
 - Boot-time cleanup of stale `/work/crabbox/*` dirs.
 
 Direct-CLI cleanup uses provider labels. It skips kept machines, deletes expired ready/leased/active machines, and only removes running/provisioning machines after the extra stale safety window. When a coordinator is configured, provider-side cleanup is disabled because the Durable Object alarm owns brokered cleanup.
 
+Brokered AWS cleanup includes a coordinator-side orphan sweep. The sweep uses
+live Durable Object lease state as the authority and only uses provider tags
+after a matching active lease is absent or points at a different cloud instance.
+It skips `keep=true` provider resources and has a grace window before acting on
+missing labels or stale lease mappings.
+
 Release must be idempotent. Delete must tolerate already-deleted provider resources.
+
+## AWS Account Guardrails
+
+Crabbox AWS accounts should use low-cost default-deny guardrails before relying
+on lease cleanup alone:
+
+- Enable account-level S3 Block Public Access with all four settings. This is an
+  account-level S3 control that applies across regions after propagation.
+- Set an IAM account password policy when IAM users exist. Prefer SSO for human
+  access, but do not leave IAM user passwords on the AWS default policy.
+- Create IAM Access Analyzer external-access analyzers in every AWS region where
+  Crabbox can allocate resources. External analyzers are regional; a single
+  analyzer in the primary launch region does not cover the full capacity pool.
+
+For the default brokered AWS capacity pool, run Access Analyzer in
+`eu-west-1`, `eu-west-2`, `eu-central-1`, `us-east-1`, and `us-west-2`.
+Review active findings before deleting trusts: SSO roles and deliberately scoped
+artifact-publishing roles can appear as expected cross-account access.
 
 ## Data Retention
 

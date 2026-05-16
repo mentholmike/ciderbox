@@ -500,6 +500,7 @@ func TestEnvOverridesConfig(t *testing.T) {
 	t.Setenv("CRABBOX_TTL", "3h")
 	t.Setenv("CRABBOX_IDLE_TIMEOUT", "20m")
 	t.Setenv("CRABBOX_AWS_SSH_CIDRS", "198.51.100.7/32,203.0.113.8/32")
+	t.Setenv("CRABBOX_AZURE_OS_DISK", "managed")
 	t.Setenv("CRABBOX_AZURE_SSH_CIDRS", "198.51.100.9/32,203.0.113.10/32")
 	t.Setenv("CRABBOX_GCP_PROJECT", "crabbox-project")
 	t.Setenv("CRABBOX_GCP_ZONE", "europe-west2-b")
@@ -657,6 +658,12 @@ func TestEnvOverridesConfig(t *testing.T) {
 	}
 	if len(cfg.AzureSSHCIDRs) != 2 || cfg.AzureSSHCIDRs[0] != "198.51.100.9/32" || cfg.AzureSSHCIDRs[1] != "203.0.113.10/32" {
 		t.Fatalf("AzureSSHCIDRs=%v", cfg.AzureSSHCIDRs)
+	}
+	if cfg.AzureOSDisk != "managed" {
+		t.Fatalf("AzureOSDisk=%q", cfg.AzureOSDisk)
+	}
+	if !cfg.AzureOSDiskExplicit {
+		t.Fatal("AzureOSDiskExplicit=false, want true")
 	}
 	if cfg.GCPProject != "crabbox-project" || cfg.GCPZone != "europe-west2-b" || cfg.GCPNetwork != "crabbox-net" || cfg.GCPSubnet != "crabbox-subnet" || cfg.GCPRootGB != 900 || cfg.GCPServiceAccount != "runner@crabbox-project.iam.gserviceaccount.com" {
 		t.Fatalf("unexpected gcp env: project=%s zone=%s network=%s subnet=%s root=%d service=%s", cfg.GCPProject, cfg.GCPZone, cfg.GCPNetwork, cfg.GCPSubnet, cfg.GCPRootGB, cfg.GCPServiceAccount)

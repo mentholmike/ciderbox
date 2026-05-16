@@ -71,11 +71,16 @@ const webVNCTicketTTLSeconds = 120;
 const codeTicketTTLSeconds = 120;
 const egressTicketTTLSeconds = 120;
 const leaseCleanupRetryDelayMs = 5 * 60 * 1000;
+const awsOrphanSweepInitialDelayMs = 60 * 1000;
+const defaultAWSOrphanSweepIntervalSeconds = 60 * 60;
+const defaultAWSOrphanSweepGraceSeconds = 15 * 60;
 const maxPendingWebVNCBytes = 1024 * 1024;
 const maxCodeRequestBytes = 10 * 1024 * 1024;
 const maxCodeWebSocketFrameChunkBytes = 15 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const awsOrphanSweepRecordKey = "aws-orphan-sweep:last";
+const awsOrphanSweepFirstAlarmKey = "aws-orphan-sweep:first-alarm";
 
 interface WebVNCTicketRecord {
   ticket: string;
@@ -214,6 +219,46 @@ interface LeaseCloudAudit {
   message?: string;
 }
 
+interface AWSOrphanSweepConfig {
+  enabled: boolean;
+  deleteEnabled: boolean;
+  intervalSeconds: number;
+  graceSeconds: number;
+  regions: string[];
+}
+
+interface AWSOrphanSweepCandidate {
+  region: string;
+  cloudID: string;
+  name: string;
+  status: string;
+  serverType: string;
+  host?: string;
+  leaseID?: string;
+  slug?: string;
+  owner?: string;
+  reason: string;
+  createdAt?: string;
+  expiresAt?: string;
+  activeCloudID?: string;
+  action: "reported" | "terminated" | "terminate_failed";
+  error?: string;
+}
+
+interface AWSOrphanSweepRecord {
+  startedAt: string;
+  finishedAt: string;
+  mode: "report" | "delete";
+  trigger: "alarm" | "admin";
+  enabled: boolean;
+  regions: string[];
+  scanned: number;
+  candidates: AWSOrphanSweepCandidate[];
+  terminated: number;
+  errors: Array<{ region: string; message: string }>;
+  nextRunAt?: string;
+}
+
 type BridgeAttachment =
   | { kind: "webvnc-agent"; leaseID: string; id: string }
   | {
@@ -297,6 +342,9 @@ export class FleetDurableObject implements DurableObject {
       if (method === "GET" && parts.join("/") === "v1/health") {
         return json({ ok: true, fleet: fleetID });
       }
+      if (method === "POST" && parts.join("/") === "v1/internal/scheduled") {
+        return await this.scheduledMaintenance(request);
+      }
       if (parts[0] === "v1" && parts[1] === "auth" && parts[2] === "github") {
         return await githubAuthRoute(request, parts[3], this.state.storage, this.env);
       }
@@ -335,6 +383,12 @@ export class FleetDurableObject implements DurableObject {
       }
       if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
         return await this.adminLeaseAudit(request);
+      }
+      if (
+        (method === "GET" || method === "POST") &&
+        parts.join("/") === "v1/admin/aws-orphan-sweep"
+      ) {
+        return await this.adminAWSOrphanSweep(request);
       }
       if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && parts[3]) {
         return await this.adminLeaseRoute(request, parts[3], parts[4]);
@@ -832,7 +886,20 @@ export class FleetDurableObject implements DurableObject {
   }
 
   async alarm(): Promise<void> {
+    await this.runMaintenance();
+  }
+
+  private async scheduledMaintenance(request: Request): Promise<Response> {
+    if (request.headers.get("x-crabbox-internal") !== "scheduled") {
+      return json({ error: "unauthorized" }, { status: 401 });
+    }
+    await this.runMaintenance();
+    return json({ ok: true });
+  }
+
+  private async runMaintenance(): Promise<void> {
     await this.expireLeases();
+    await this.runAWSOrphanSweepIfDue("alarm");
     await this.scheduleAlarm();
   }
 
@@ -840,7 +907,10 @@ export class FleetDurableObject implements DurableObject {
     const owner = requestOwner(request);
     const org = requestOrg(request, this.env);
     const input = await readJson<LeaseRequest>(request);
-    const config = leaseConfig(input);
+    const config = leaseConfig(
+      input,
+      this.env.CRABBOX_AZURE_OS_DISK ? { azureOSDisk: this.env.CRABBOX_AZURE_OS_DISK } : undefined,
+    );
     if (!isAdminRequest(request) && hasNativeLeaseSource(config)) {
       return json(
         {
@@ -2587,6 +2657,29 @@ export class FleetDurableObject implements DurableObject {
     return json({ audits });
   }
 
+  private async adminAWSOrphanSweep(request: Request): Promise<Response> {
+    const config = this.awsOrphanSweepConfig();
+    const lastRun =
+      (await this.state.storage.get<AWSOrphanSweepRecord>(awsOrphanSweepRecordKey)) ?? null;
+    if (request.method.toUpperCase() === "GET") {
+      return json({ config, lastRun });
+    }
+    if (!config.enabled) {
+      return json(
+        {
+          error: "aws_orphan_sweep_disabled",
+          message: "AWS orphan sweep is disabled or AWS broker credentials are not configured",
+          config,
+          lastRun,
+        },
+        { status: 409 },
+      );
+    }
+    const sweep = await this.runAWSOrphanSweep("admin", config);
+    await this.scheduleAlarm();
+    return json({ config, sweep });
+  }
+
   private async auditAWSLeaseCloud(lease: LeaseRecord): Promise<LeaseCloudAudit> {
     const audit: LeaseCloudAudit = {
       leaseID: lease.id,
@@ -3216,15 +3309,156 @@ export class FleetDurableObject implements DurableObject {
 
   private async scheduleAlarm(): Promise<void> {
     const leases = await this.state.storage.list<LeaseRecord>({ prefix: "lease:" });
-    const activeExpiries = [...leases.values()]
+    const alarmTimes = [...leases.values()]
       .filter((lease) => lease.state === "active")
       .map((lease) => nextLeaseAlarmTime(lease))
       .filter((time) => Number.isFinite(time));
-    if (activeExpiries.length === 0) {
+    const orphanSweepAlarm = await this.nextAWSOrphanSweepAlarmTime();
+    if (orphanSweepAlarm !== undefined) {
+      alarmTimes.push(orphanSweepAlarm);
+    }
+    if (alarmTimes.length === 0) {
       await this.state.storage.deleteAlarm();
       return;
     }
-    await this.state.storage.setAlarm(Math.min(...activeExpiries));
+    await this.state.storage.setAlarm(Math.min(...alarmTimes));
+  }
+
+  private async nextAWSOrphanSweepAlarmTime(): Promise<number | undefined> {
+    const config = this.awsOrphanSweepConfig();
+    if (!config.enabled) {
+      return undefined;
+    }
+    const lastRun = await this.state.storage.get<AWSOrphanSweepRecord>(awsOrphanSweepRecordKey);
+    const lastFinishedAt = Date.parse(lastRun?.finishedAt ?? "");
+    const now = Date.now();
+    if (!Number.isFinite(lastFinishedAt)) {
+      const stored = await this.state.storage.get<number>(awsOrphanSweepFirstAlarmKey);
+      if (typeof stored === "number" && Number.isFinite(stored)) {
+        return Math.max(now + 1000, stored);
+      }
+      const next = now + Math.min(config.intervalSeconds * 1000, awsOrphanSweepInitialDelayMs);
+      await this.state.storage.put(awsOrphanSweepFirstAlarmKey, next);
+      return next;
+    }
+    return Math.max(now + 1000, lastFinishedAt + config.intervalSeconds * 1000);
+  }
+
+  private async runAWSOrphanSweepIfDue(trigger: "alarm" | "admin"): Promise<void> {
+    const config = this.awsOrphanSweepConfig();
+    if (!config.enabled) {
+      return;
+    }
+    const lastRun = await this.state.storage.get<AWSOrphanSweepRecord>(awsOrphanSweepRecordKey);
+    const lastFinishedAt = Date.parse(lastRun?.finishedAt ?? "");
+    if (
+      trigger !== "admin" &&
+      Number.isFinite(lastFinishedAt) &&
+      Date.now() < lastFinishedAt + config.intervalSeconds * 1000
+    ) {
+      return;
+    }
+    await this.runAWSOrphanSweep(trigger, config);
+  }
+
+  private async runAWSOrphanSweep(
+    trigger: "alarm" | "admin",
+    config = this.awsOrphanSweepConfig(),
+  ): Promise<AWSOrphanSweepRecord> {
+    const startedAt = new Date().toISOString();
+    const leases = [...(await this.state.storage.list<LeaseRecord>({ prefix: "lease:" })).values()];
+    const activeAWSLeases = leases.filter(
+      (lease) => lease.provider === "aws" && lease.state === "active",
+    );
+    const activeLeases = new Map(activeAWSLeases.map((lease) => [lease.id, lease]));
+    const activeCloudIDs = new Set(activeAWSLeases.map((lease) => lease.cloudID).filter(Boolean));
+    const candidates: AWSOrphanSweepCandidate[] = [];
+    const errors: AWSOrphanSweepRecord["errors"] = [];
+    let scanned = 0;
+    for (const region of config.regions) {
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- regions are swept independently.
+        const machines = await this.provider("aws", region).listCrabboxServers();
+        scanned += machines.length;
+        for (const machine of machines) {
+          const candidate = awsOrphanSweepCandidate(
+            machine,
+            activeLeases,
+            activeCloudIDs,
+            region,
+            config.graceSeconds,
+          );
+          if (!candidate) {
+            continue;
+          }
+          if (config.deleteEnabled) {
+            try {
+              // oxlint-disable-next-line eslint/no-await-in-loop -- delete failures must stay attached to the candidate.
+              await this.provider("aws", region).deleteServer(
+                machine.cloudID || String(machine.id),
+              );
+              candidate.action = "terminated";
+            } catch (error) {
+              candidate.action = "terminate_failed";
+              candidate.error = errorMessage(error);
+              console.warn(
+                `aws orphan sweep terminate failed region=${region} cloud=${machine.cloudID}: ${candidate.error}`,
+              );
+            }
+          }
+          candidates.push(candidate);
+        }
+      } catch (error) {
+        const message = errorMessage(error);
+        errors.push({ region, message });
+        console.warn(`aws orphan sweep failed region=${region}: ${message}`);
+      }
+    }
+    const finishedAt = new Date().toISOString();
+    const record: AWSOrphanSweepRecord = {
+      startedAt,
+      finishedAt,
+      mode: config.deleteEnabled ? "delete" : "report",
+      trigger,
+      enabled: config.enabled,
+      regions: config.regions,
+      scanned,
+      candidates,
+      terminated: candidates.filter((candidate) => candidate.action === "terminated").length,
+      errors,
+      nextRunAt: new Date(Date.parse(finishedAt) + config.intervalSeconds * 1000).toISOString(),
+    };
+    await this.state.storage.put(awsOrphanSweepRecordKey, record);
+    await this.state.storage.delete(awsOrphanSweepFirstAlarmKey);
+    if (candidates.length > 0 || errors.length > 0) {
+      console.warn(
+        `aws orphan sweep mode=${record.mode} scanned=${record.scanned} candidates=${candidates.length} terminated=${record.terminated} errors=${errors.length}`,
+      );
+    }
+    return record;
+  }
+
+  private awsOrphanSweepConfig(): AWSOrphanSweepConfig {
+    const hasAWSCredentials = Boolean(this.env.AWS_ACCESS_KEY_ID && this.env.AWS_SECRET_ACCESS_KEY);
+    const enabled =
+      hasAWSCredentials && !envFlagDisabled(this.env.CRABBOX_AWS_ORPHAN_SWEEP_ENABLED);
+    return {
+      enabled,
+      deleteEnabled: enabled && envFlagEnabled(this.env.CRABBOX_AWS_ORPHAN_SWEEP_DELETE),
+      intervalSeconds: positiveEnvInt(
+        this.env.CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS,
+        defaultAWSOrphanSweepIntervalSeconds,
+      ),
+      graceSeconds: positiveEnvInt(
+        this.env.CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS,
+        defaultAWSOrphanSweepGraceSeconds,
+      ),
+      regions: awsRegionCandidates(
+        { awsRegion: "", capacityRegions: [] },
+        this.env,
+        this.env.CRABBOX_AWS_REGION || "eu-west-1",
+      ),
+    };
   }
 
   private async getLease(leaseID: string): Promise<LeaseRecord | undefined> {
@@ -3893,6 +4127,9 @@ function isAdminRoute(method: string, parts: string[]): boolean {
     return true;
   }
   if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
+    return true;
+  }
+  if ((method === "GET" || method === "POST") && parts.join("/") === "v1/admin/aws-orphan-sweep") {
     return true;
   }
   if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && Boolean(parts[3])) {
@@ -4996,6 +5233,15 @@ function envFlagDisabled(value: string | undefined): boolean {
   return ["0", "false", "no", "off"].includes((value || "").trim().toLowerCase());
 }
 
+function envFlagEnabled(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((value || "").trim().toLowerCase());
+}
+
+function positiveEnvInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt((value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function uniqueNonEmpty(values: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -5007,6 +5253,90 @@ function uniqueNonEmpty(values: Array<string | undefined>): string[] {
     }
   }
   return out;
+}
+
+function awsOrphanSweepCandidate(
+  machine: ProviderMachine,
+  activeLeases: Map<string, LeaseRecord>,
+  activeCloudIDs: Set<string>,
+  region: string,
+  graceSeconds: number,
+): AWSOrphanSweepCandidate | undefined {
+  const cloudID = machine.cloudID || String(machine.id);
+  if (activeCloudIDs.has(cloudID)) {
+    return undefined;
+  }
+  const labels = machine.labels ?? {};
+  if (envFlagEnabled(labels["keep"])) {
+    return undefined;
+  }
+  const leaseID = (labels["lease"] ?? "").trim();
+  const activeLease = leaseID ? activeLeases.get(leaseID) : undefined;
+  if (activeLease?.cloudID === machine.cloudID) {
+    return undefined;
+  }
+  const now = Date.now();
+  const graceMs = Math.max(0, graceSeconds) * 1000;
+  const createdAt = parseProviderLabelTime(labels["created_at"]);
+  const expiresAt = parseProviderLabelTime(labels["expires_at"]);
+  const oldEnough = Number.isFinite(createdAt) && createdAt + graceMs <= now;
+  const expired = Number.isFinite(expiresAt) && expiresAt + graceMs <= now;
+  let reason = "";
+  if (activeLease && oldEnough) {
+    reason = "lease-cloud-mismatch";
+  } else if (expired) {
+    reason = "expired-provider-tag";
+  } else if (!leaseID && oldEnough) {
+    reason = "missing-lease-label";
+  } else if (leaseID && !activeLease && oldEnough) {
+    reason = "no-active-lease";
+  }
+  if (!reason) {
+    return undefined;
+  }
+  const candidate: AWSOrphanSweepCandidate = {
+    region,
+    cloudID,
+    name: machine.name,
+    status: machine.status,
+    serverType: machine.serverType,
+    reason,
+    action: "reported",
+  };
+  if (machine.host) {
+    candidate.host = machine.host;
+  }
+  if (leaseID) {
+    candidate.leaseID = leaseID;
+  }
+  if (labels["slug"]) {
+    candidate.slug = labels["slug"];
+  }
+  if (labels["owner"]) {
+    candidate.owner = labels["owner"];
+  }
+  if (Number.isFinite(createdAt)) {
+    candidate.createdAt = new Date(createdAt).toISOString();
+  }
+  if (Number.isFinite(expiresAt)) {
+    candidate.expiresAt = new Date(expiresAt).toISOString();
+  }
+  if (activeLease?.cloudID) {
+    candidate.activeCloudID = activeLease.cloudID;
+  }
+  return candidate;
+}
+
+function parseProviderLabelTime(value: string | undefined): number {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return Number.NaN;
+  }
+  if (/^\d+$/.test(raw)) {
+    const seconds = Number.parseInt(raw, 10);
+    return Number.isFinite(seconds) ? seconds * 1000 : Number.NaN;
+  }
+  return Date.parse(raw);
 }
 
 interface CloudProvider {

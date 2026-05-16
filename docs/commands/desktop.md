@@ -7,6 +7,7 @@ over VNC manually.
 crabbox warmup --desktop --browser
 crabbox desktop launch --id blue-lobster --browser --url https://example.com
 crabbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open
+crabbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open --take-control
 crabbox desktop launch --id blue-lobster --browser --url https://discord.com/login --egress discord --webvnc --open
 crabbox desktop launch --id blue-lobster -- xterm
 crabbox desktop terminal --id blue-lobster --sixel -- ./scripts/visual-smoke.sh
@@ -29,6 +30,8 @@ With `--browser`, Crabbox probes the target browser the same way `run --browser`
 does and launches `BROWSER` when no explicit command is provided.
 With `--webvnc`, the command keeps running after launch and bridges the desktop
 into the authenticated WebVNC portal. Add `--open` to open that portal locally.
+Add `--take-control` when the opened WebVNC viewer should immediately become
+the keyboard and mouse controller instead of joining as an observer.
 Browser launches default to a windowed human desktop with the remote panel and
 title bar visible; use `--fullscreen` only for capture/video workflows.
 

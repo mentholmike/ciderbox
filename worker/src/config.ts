@@ -31,6 +31,7 @@ export interface LeaseConfig {
   azureLocation: string;
   azureImage: string;
   azureSnapshot: string;
+  azureOSDisk: AzureOSDiskMode;
   gcpProject: string;
   gcpZone: string;
   gcpImage: string;
@@ -63,7 +64,13 @@ export interface LeaseConfig {
   sshPublicKey: string;
 }
 
-export function leaseConfig(input: LeaseRequest): LeaseConfig {
+export type AzureOSDiskMode = "managed" | "ephemeral";
+
+export interface LeaseConfigDefaults {
+  azureOSDisk?: string;
+}
+
+export function leaseConfig(input: LeaseRequest, defaults: LeaseConfigDefaults = {}): LeaseConfig {
   const provider = input.provider ?? "hetzner";
   if (provider !== "hetzner" && provider !== "aws" && provider !== "azure" && provider !== "gcp") {
     throw new Error(`unsupported provider: ${String(provider)}`);
@@ -149,6 +156,7 @@ export function leaseConfig(input: LeaseRequest): LeaseConfig {
     azureLocation: input.azureLocation ?? "",
     azureImage: input.azureImage ?? "",
     azureSnapshot: input.azureSnapshot ?? "",
+    azureOSDisk: normalizeAzureOSDiskMode(input.azureOSDisk ?? defaults.azureOSDisk),
     gcpProject: input.gcpProject ?? "",
     gcpZone: input.gcpZone ?? "",
     gcpImage: input.gcpImage ?? "",
@@ -176,6 +184,21 @@ export function leaseConfig(input: LeaseRequest): LeaseConfig {
     keep: input.keep ?? false,
     sshPublicKey,
   };
+}
+
+export function normalizeAzureOSDiskMode(value: string | undefined): AzureOSDiskMode {
+  const normalized = (value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "":
+    case "managed":
+      return "managed";
+    case "auto":
+      return "managed";
+    case "ephemeral":
+      return "ephemeral";
+    default:
+      throw new Error("azureOSDisk must be auto, managed, or ephemeral");
+  }
 }
 
 function defaultWorkRoot(target: TargetOS, windowsMode: WindowsMode, sshUser: string): string {

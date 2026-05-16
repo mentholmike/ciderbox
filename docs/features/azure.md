@@ -28,6 +28,7 @@ Examples:
 
 ```sh
 crabbox warmup --provider azure --class beast
+crabbox warmup --provider azure --class beast --azure-os-disk ephemeral
 crabbox run --provider azure --class standard -- pnpm test
 crabbox warmup --provider azure --target windows --class standard
 crabbox warmup --provider azure --target windows --desktop --class standard
@@ -62,10 +63,13 @@ SKU cannot be created. Spot leases fall back to on-demand when
 
 Default Azure Linux class candidates mirror the vCPU scale of the AWS Linux
 class table. Default Azure Windows candidates mirror the AWS native Windows
-class table. Crabbox asks Azure Resource SKUs whether the selected VM
-supports ephemeral OS disks; ephemeral-capable sizes use local OS disks,
-while exact `--type` requests for non-ephemeral sizes use managed
-`StandardSSD_LRS` OS disks.
+class table. Azure leases use managed `StandardSSD_LRS` OS disks by default so
+native checkpoint/fork works without manual SKU picking. Set
+`azure.osDisk: ephemeral` or pass `--azure-os-disk ephemeral` only for
+stateless leases that must use a local OS disk; provisioning fails if the
+selected SKU cannot support it, and native Azure checkpoint/fork support is not
+available. `azure.osDisk: auto` is accepted for compatibility and resolves to
+managed.
 
 ## Quick Start With `az login`
 
@@ -102,6 +106,7 @@ CRABBOX_AZURE_CLIENT_ID
 CRABBOX_AZURE_LOCATION
 CRABBOX_AZURE_RESOURCE_GROUP
 CRABBOX_AZURE_IMAGE
+CRABBOX_AZURE_OS_DISK
 CRABBOX_AZURE_VNET
 CRABBOX_AZURE_SUBNET
 CRABBOX_AZURE_NSG
@@ -117,7 +122,7 @@ create the resource group on first use).
 Brokered Azure uses `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
 `AZURE_CLIENT_SECRET`, and `AZURE_SUBSCRIPTION_ID` on the Worker. Operators
 own the shared infra settings through `CRABBOX_AZURE_*`. Lease requests may
-override only `azureLocation` and `azureImage`.
+override only `azureLocation`, `azureImage`, and `azureOSDisk`.
 
 ## Shared Infra
 

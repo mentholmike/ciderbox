@@ -38,6 +38,12 @@ func TestWebVNCURLs(t *testing.T) {
 	if got := webVNCPortalURL("https://crabbox.openclaw.ai/#stale", "cbx_abcdef123456", "", ""); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/vnc" {
 		t.Fatalf("portal URL=%q", got)
 	}
+	if got := webVNCPortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456", "", "", webVNCPortalOptions{TakeControl: true}); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/vnc#control=take" {
+		t.Fatalf("portal URL with control=%q", got)
+	}
+	if got := webVNCPortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456", "", "secret value", webVNCPortalOptions{TakeControl: true}); got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/vnc#control=take&password=secret+value" {
+		t.Fatalf("portal URL with password and control=%q", got)
+	}
 	got := webVNCPortalURL("https://crabbox.openclaw.ai/", "cbx_abcdef123456", "", "JVS/yMb%2B")
 	if got != "https://crabbox.openclaw.ai/portal/leases/cbx_abcdef123456/vnc#password=JVS%2FyMb%252B" {
 		t.Fatalf("portal URL with escaped password=%q", got)
@@ -303,8 +309,9 @@ func TestWebVNCBridgeArgsCarriesNetworkOverride(t *testing.T) {
 		SSHTarget{TargetOS: targetLinux},
 		"cbx_1",
 		true,
+		true,
 	), " ")
-	if got != "--provider aws --target linux --network tailscale --id cbx_1 --open" {
+	if got != "--provider aws --target linux --network tailscale --id cbx_1 --open --take-control" {
 		t.Fatalf("bridge args=%q", got)
 	}
 }

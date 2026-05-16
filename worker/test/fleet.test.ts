@@ -228,6 +228,293 @@ describe("fleet lease identity and idle", () => {
     expect(storage.alarm()).toBe(Date.parse(lease.expiresAt));
   });
 
+  it("does not postpone the first AWS orphan sweep alarm on repeated scheduling", async () => {
+    const storage = new MemoryStorage();
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        owner: "alice@example.com",
+        org: "example-org",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+      },
+    );
+
+    const first = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "x-crabbox-org": "example-org",
+        },
+        body: { idleTimeoutSeconds: 3600 },
+      }),
+    );
+    const firstAlarm = storage.alarm();
+    const second = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "x-crabbox-org": "example-org",
+        },
+        body: { idleTimeoutSeconds: 3600 },
+      }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(storage.alarm()).toBe(firstAlarm);
+  });
+
+  it("bootstraps AWS orphan sweep maintenance from the Worker cron route", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(
+      storage,
+      { aws: fakeProvider(undefined, { provider: "aws", servers: [] }) },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_ENABLED: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS: "3600",
+      },
+    );
+
+    const unauthorized = await fleet.fetch(request("POST", "/v1/internal/scheduled"));
+    expect(unauthorized.status).toBe(401);
+
+    const response = await fleet.fetch(
+      request("POST", "/v1/internal/scheduled", {
+        headers: { "x-crabbox-internal": "scheduled" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(storage.value("aws-orphan-sweep:last")).toMatchObject({
+      trigger: "alarm",
+      scanned: 0,
+      candidates: [],
+    });
+    expect(storage.alarm()).toBeGreaterThan(Date.now());
+  });
+
+  it("reports AWS orphan sweep candidates from the coordinator alarm without delete enabled", async () => {
+    const storage = new MemoryStorage();
+    const deleted: string[] = [];
+    const oldSeconds = String(Math.trunc((Date.now() - 60 * 60 * 1000) / 1000));
+    const fleet = testFleet(
+      storage,
+      {
+        aws: fakeProvider(
+          undefined,
+          {
+            provider: "aws",
+            servers: [
+              testMachine({
+                cloudID: "i-orphan",
+                labels: {
+                  crabbox: "true",
+                  lease: "cbx_missing",
+                  created_at: oldSeconds,
+                  expires_at: oldSeconds,
+                },
+              }),
+            ],
+          },
+          async (id) => {
+            deleted.push(id);
+          },
+        ),
+      },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_INTERVAL_SECONDS: "60",
+      },
+    );
+
+    await fleet.alarm();
+
+    const sweep = storage.value<{
+      mode: string;
+      scanned: number;
+      terminated: number;
+      candidates: Array<Record<string, unknown>>;
+    }>("aws-orphan-sweep:last");
+    expect(deleted).toEqual([]);
+    expect(sweep).toMatchObject({ mode: "report", scanned: 1, terminated: 0 });
+    expect(sweep?.candidates).toEqual([
+      expect.objectContaining({
+        cloudID: "i-orphan",
+        leaseID: "cbx_missing",
+        reason: "expired-provider-tag",
+        action: "reported",
+      }),
+    ]);
+    expect(storage.alarm()).toBeGreaterThan(Date.now());
+  });
+
+  it("terminates AWS orphan sweep candidates only when delete is enabled", async () => {
+    const storage = new MemoryStorage();
+    const deleted: string[] = [];
+    const oldSeconds = String(Math.trunc((Date.now() - 60 * 60 * 1000) / 1000));
+    const fleet = testFleet(
+      storage,
+      {
+        aws: fakeProvider(
+          undefined,
+          {
+            provider: "aws",
+            servers: [
+              testMachine({
+                cloudID: "i-orphan",
+                labels: {
+                  crabbox: "true",
+                  lease: "cbx_missing",
+                  created_at: oldSeconds,
+                  expires_at: oldSeconds,
+                },
+              }),
+            ],
+          },
+          async (id) => {
+            deleted.push(id);
+          },
+        ),
+      },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_DELETE: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS: "1",
+      },
+    );
+
+    await fleet.alarm();
+
+    const sweep = storage.value<{
+      mode: string;
+      terminated: number;
+      candidates: Array<Record<string, unknown>>;
+    }>("aws-orphan-sweep:last");
+    expect(deleted).toEqual(["i-orphan"]);
+    expect(sweep).toMatchObject({ mode: "delete", terminated: 1 });
+    expect(sweep?.candidates[0]).toMatchObject({ action: "terminated" });
+  });
+
+  it("does not terminate an active AWS lease just because launch tags are stale", async () => {
+    const storage = new MemoryStorage();
+    const deleted: string[] = [];
+    const oldSeconds = String(Math.trunc((Date.now() - 60 * 60 * 1000) / 1000));
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        provider: "aws",
+        cloudID: "i-active",
+        region: "eu-west-1",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {
+        aws: fakeProvider(
+          undefined,
+          {
+            provider: "aws",
+            servers: [
+              testMachine({
+                cloudID: "i-active",
+                labels: {
+                  crabbox: "true",
+                  lease: "cbx_000000000001",
+                  created_at: oldSeconds,
+                  expires_at: oldSeconds,
+                },
+              }),
+            ],
+          },
+          async (id) => {
+            deleted.push(id);
+          },
+        ),
+      },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_DELETE: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS: "1",
+      },
+    );
+
+    await fleet.alarm();
+
+    const sweep = storage.value<{ candidates: unknown[] }>("aws-orphan-sweep:last");
+    expect(deleted).toEqual([]);
+    expect(sweep?.candidates).toEqual([]);
+  });
+
+  it("does not terminate an active AWS lease when the provider lease tag is stale", async () => {
+    const storage = new MemoryStorage();
+    const deleted: string[] = [];
+    const oldSeconds = String(Math.trunc((Date.now() - 60 * 60 * 1000) / 1000));
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        provider: "aws",
+        cloudID: "i-active",
+        region: "eu-west-1",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {
+        aws: fakeProvider(
+          undefined,
+          {
+            provider: "aws",
+            servers: [
+              testMachine({
+                cloudID: "i-active",
+                labels: {
+                  crabbox: "true",
+                  lease: "cbx_stale",
+                  created_at: oldSeconds,
+                  expires_at: oldSeconds,
+                },
+              }),
+            ],
+          },
+          async (id) => {
+            deleted.push(id);
+          },
+        ),
+      },
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        CRABBOX_AWS_ORPHAN_SWEEP_DELETE: "1",
+        CRABBOX_AWS_ORPHAN_SWEEP_GRACE_SECONDS: "1",
+      },
+    );
+
+    await fleet.alarm();
+
+    const sweep = storage.value<{ candidates: unknown[] }>("aws-orphan-sweep:last");
+    expect(deleted).toEqual([]);
+    expect(sweep?.candidates).toEqual([]);
+  });
+
   it("creates leases through the public route with slug and idle metadata", async () => {
     const storage = new MemoryStorage();
     const fleet = testFleet(storage, {
@@ -2010,9 +2297,20 @@ describe("fleet lease identity and idle", () => {
     expect(pageBody).toContain("vnc-control");
     expect(pageBody).toContain("take control");
     expect(pageBody).toContain("you control");
+    expect(pageBody).toContain('fragment.get("control") === "take"');
+    expect(pageBody).toContain("takeControlIfRequested(state)");
+    expect(pageBody).toContain("refreshCollaborationStateAndMaybeTakeControl");
+    expect(pageBody).toContain(
+      "void refreshCollaborationStateAndMaybeTakeControl().catch(() => {})",
+    );
     expect(pageBody).toContain('aria-label="WebVNC display" tabindex="0"');
     expect(pageBody).toContain('screen.addEventListener("contextmenu"');
-    expect(pageBody).toContain('screen.addEventListener("pointerdown", captureVNCInput');
+    expect(pageBody).toContain(
+      'screen.addEventListener("pointerdown", (event) => captureVNCInput(event)',
+    );
+    expect(pageBody).toContain(
+      'screen.addEventListener("mousedown", (event) => captureVNCInput(event, { preventDefault: true })',
+    );
     expect(pageBody).toContain("rfb?.focus?.({ preventScroll: true })");
     expect(pageBody).toContain("window.setTimeout(focusVNC, 0)");
     expect(pageBody).toContain("rfb.focusOnClick = true");
@@ -3915,6 +4213,7 @@ function fakeProvider(
     imageRegion?: string;
     market?: string;
     attempts?: ProvisioningAttempt[];
+    servers?: ProviderMachine[];
     onCreateImage?: (
       instanceID: string,
       name: string,
@@ -3928,7 +4227,7 @@ function fakeProvider(
 ) {
   return {
     async listCrabboxServers() {
-      return [];
+      return result.servers ?? [];
     },
     async getServer(id: string) {
       if (onGet) {
@@ -4053,6 +4352,20 @@ function fakeProvider(
     async hourlyPriceUSD() {
       return 0.1;
     },
+  };
+}
+
+function testMachine(overrides: Partial<ProviderMachine>): ProviderMachine {
+  return {
+    provider: "aws",
+    id: 123,
+    cloudID: "i-000000000000",
+    name: "crabbox-test",
+    status: "running",
+    serverType: "t3.small",
+    host: "192.0.2.10",
+    labels: { crabbox: "true" },
+    ...overrides,
   };
 }
 

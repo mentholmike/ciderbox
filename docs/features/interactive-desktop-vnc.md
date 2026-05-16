@@ -85,9 +85,9 @@ preferred path for human demos because `--open` preloads the VNC password in
 the local browser fragment:
 
 ```sh
-crabbox webvnc --id blue-lobster --open
+crabbox webvnc --id blue-lobster --open --take-control
 crabbox webvnc status --id blue-lobster
-crabbox webvnc reset --id blue-lobster --open
+crabbox webvnc reset --id blue-lobster --open --take-control
 ```
 
 Use `crabbox vnc` for a native VNC client when WebVNC status/reset says the
@@ -112,6 +112,8 @@ observer or the prior controller — can press **take over** to become the
 controller; whoever loses control stays connected as an observer and sees who
 took over. Observer mode is intended for trusted shared leases; it is not a
 hostile-client security boundary.
+For handoffs where the opened browser should drive the session immediately,
+add `--take-control`; the portal requests control after that viewer connects.
 
 The portal toolbar supports explicit clipboard exchange. Paste reads the local
 browser clipboard, forwards it to the remote VNC server, and sends the target
@@ -138,7 +140,7 @@ Use `crabbox desktop launch` to start a browser or app inside the visible
 session without keeping the SSH command attached:
 
 ```sh
-crabbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open
+crabbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open --take-control
 ```
 
 For human demos, Crabbox keeps launched browsers windowed so the remote desktop
