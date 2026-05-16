@@ -56,6 +56,7 @@ func TestAdminMacHostsPolicyPrintsLifecyclePermissions(t *testing.T) {
 		`"ec2:ReleaseHosts"`,
 		`"ec2:CreateTags"`,
 		`"ec2:CreateAction": "AllocateHosts"`,
+		`"servicequotas:GetServiceQuota"`,
 		`"servicequotas:ListServiceQuotas"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -109,6 +110,7 @@ func TestAdminAWSPolicyCanIncludeMacHostPermissions(t *testing.T) {
 		`"ec2:AllocateHosts"`,
 		`"ec2:ReleaseHosts"`,
 		`"ec2:CreateAction": "AllocateHosts"`,
+		`"servicequotas:GetServiceQuota"`,
 		`"servicequotas:ListServiceQuotas"`,
 	} {
 		if !strings.Contains(out, want) {

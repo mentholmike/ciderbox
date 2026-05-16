@@ -17,6 +17,32 @@ const ec2Version = "2016-11-15";
 const stsVersion = "2011-06-15";
 const awsSpotQuotaCode = "L-34B43A08";
 const awsOnDemandQuotaCode = "L-1216C47A";
+const awsMacHostQuotaSpecs: Record<string, { quotaCode: string; quotaName: string }> = {
+  mac1: { quotaCode: "L-A8448DC5", quotaName: "Running Dedicated mac1 Hosts" },
+  mac2: { quotaCode: "L-5D8DADF5", quotaName: "Running Dedicated mac2 Hosts" },
+  "mac2-m1ultra": {
+    quotaCode: "L-AE4D744C",
+    quotaName: "Running Dedicated mac2-m1ultra Hosts",
+  },
+  "mac2-m2": { quotaCode: "L-B90B5B66", quotaName: "Running Dedicated mac2-m2 Hosts" },
+  "mac2-m2pro": {
+    quotaCode: "L-14F120D1",
+    quotaName: "Running Dedicated mac2-m2pro Hosts",
+  },
+  "mac-m3ultra": {
+    quotaCode: "L-7108A7B5",
+    quotaName: "Running Dedicated mac-m3ultra Hosts",
+  },
+  "mac-m4": { quotaCode: "L-2CBA8B92", quotaName: "Running Dedicated mac-m4 Hosts" },
+  "mac-m4max": {
+    quotaCode: "L-D82CB68A",
+    quotaName: "Running Dedicated mac-m4max Hosts",
+  },
+  "mac-m4pro": {
+    quotaCode: "L-6919FC30",
+    quotaName: "Running Dedicated mac-m4pro Hosts",
+  },
+};
 const snapshotDeleteBackoffMs = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 
 export interface AWSMacHost {
@@ -570,7 +596,11 @@ export class EC2SpotClient {
   }
 
   async listMacHostQuotas(serverType = "mac2.metal"): Promise<AWSServiceQuota[]> {
-    const family = serverType.split(".")[0]?.toLowerCase() ?? "";
+    const family = awsMacHostFamily(serverType);
+    const direct = await this.macHostQuotaByFamily(family);
+    if (direct) {
+      return [direct];
+    }
     const all = await this.listEC2ServiceQuotas();
     const macHostQuotas = all.filter((quota) => {
       const name = quota.quotaName.toLowerCase();
@@ -585,6 +615,20 @@ export class EC2SpotClient {
       const rightFamily = family && rightName.includes(family) ? 0 : 1;
       return leftFamily - rightFamily || left.quotaName.localeCompare(right.quotaName);
     });
+  }
+
+  private async macHostQuotaByFamily(family: string): Promise<AWSServiceQuota | undefined> {
+    const spec = awsMacHostQuotaSpecs[family];
+    if (!spec) {
+      return undefined;
+    }
+    const quota = await this.getEC2ServiceQuota(spec.quotaCode);
+    return {
+      ...quota,
+      quotaCode: quota.quotaCode || spec.quotaCode,
+      quotaName: quota.quotaName || spec.quotaName,
+      serviceCode: quota.serviceCode || "ec2",
+    };
   }
 
   async releaseMacHost(hostID: string): Promise<string[]> {
@@ -1194,35 +1238,34 @@ export class EC2SpotClient {
       }
       const parsed = record(JSON.parse(text));
       for (const quota of items(parsed["Quotas"]).map(record)) {
-        const quotaCode = asString(quota["QuotaCode"]);
-        const quotaName = asString(quota["QuotaName"]);
-        if (!quotaCode || !quotaName) {
-          continue;
+        const out = awsServiceQuotaFromRecord(quota);
+        if (out) {
+          quotas.push(out);
         }
-        const out: AWSServiceQuota = { quotaCode, quotaName };
-        const serviceCode = asString(quota["ServiceCode"]);
-        const value = finiteNumber(quota["Value"]);
-        const unit = asString(quota["Unit"]);
-        if (serviceCode) {
-          out.serviceCode = serviceCode;
-        }
-        if (value !== undefined) {
-          out.value = value;
-        }
-        if (typeof quota["Adjustable"] === "boolean") {
-          out.adjustable = quota["Adjustable"];
-        }
-        if (typeof quota["GlobalQuota"] === "boolean") {
-          out.globalQuota = quota["GlobalQuota"];
-        }
-        if (unit) {
-          out.unit = unit;
-        }
-        quotas.push(out);
       }
       nextToken = asString(parsed["NextToken"]);
     } while (nextToken);
     return quotas;
+  }
+
+  private async getEC2ServiceQuota(quotaCode: string): Promise<AWSServiceQuota> {
+    const response = await this.serviceQuotas.fetch(this.serviceQuotasEndpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-amz-json-1.1",
+        "x-amz-target": "ServiceQuotasV20190624.GetServiceQuota",
+      },
+      body: JSON.stringify({ ServiceCode: "ec2", QuotaCode: quotaCode }),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`aws GetServiceQuota: http ${response.status}: ${trimBody(text)}`);
+    }
+    const quota = awsServiceQuotaFromRecord(record(JSON.parse(text))["Quota"]);
+    if (!quota) {
+      throw new Error(`aws GetServiceQuota: missing quota ${quotaCode}`);
+    }
+    return quota;
   }
 
   private withRegion(server: ProviderMachine): ProviderMachine {
@@ -1532,6 +1575,39 @@ export function applyAWSRunInstanceTargetOptions(
 
 export function awsQuotaCodeForMarket(market: string): string {
   return market === "on-demand" ? awsOnDemandQuotaCode : awsSpotQuotaCode;
+}
+
+function awsMacHostFamily(serverType: string): string {
+  return serverType.split(".")[0]?.toLowerCase() ?? "";
+}
+
+function awsServiceQuotaFromRecord(value: unknown): AWSServiceQuota | undefined {
+  const quota = record(value);
+  const quotaCode = asString(quota["QuotaCode"]);
+  const quotaName = asString(quota["QuotaName"]);
+  if (!quotaCode || !quotaName) {
+    return undefined;
+  }
+  const out: AWSServiceQuota = { quotaCode, quotaName };
+  const serviceCode = asString(quota["ServiceCode"]);
+  const valueNumber = finiteNumber(quota["Value"]);
+  const unit = asString(quota["Unit"]);
+  if (serviceCode) {
+    out.serviceCode = serviceCode;
+  }
+  if (valueNumber !== undefined) {
+    out.value = valueNumber;
+  }
+  if (typeof quota["Adjustable"] === "boolean") {
+    out.adjustable = quota["Adjustable"];
+  }
+  if (typeof quota["GlobalQuota"] === "boolean") {
+    out.globalQuota = quota["GlobalQuota"];
+  }
+  if (unit) {
+    out.unit = unit;
+  }
+  return out;
 }
 
 export function awsInstanceTypeVCPUs(serverType: string): number | undefined {

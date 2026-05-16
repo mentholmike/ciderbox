@@ -4237,7 +4237,10 @@ function sanitizeMacHostQuotaError(message: string): string {
     message.includes("Encoded authorization") ||
     message.includes("arn:aws:iam::")
   ) {
-    return "AWS authorization failure: coordinator AWS identity needs servicequotas:ListServiceQuotas to inspect EC2 Mac Dedicated Host quotas";
+    if (message.includes("GetServiceQuota")) {
+      return "AWS authorization failure: coordinator AWS identity needs servicequotas:GetServiceQuota to inspect EC2 Mac Dedicated Host quotas";
+    }
+    return "AWS authorization failure: coordinator AWS identity needs servicequotas:GetServiceQuota or servicequotas:ListServiceQuotas to inspect EC2 Mac Dedicated Host quotas";
   }
   return message.replace(/\s+/g, " ");
 }

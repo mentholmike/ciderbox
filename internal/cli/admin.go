@@ -328,7 +328,10 @@ const macHostLifecyclePolicyJSON = `{
     },
     {
       "Effect": "Allow",
-      "Action": "servicequotas:ListServiceQuotas",
+      "Action": [
+        "servicequotas:GetServiceQuota",
+        "servicequotas:ListServiceQuotas"
+      ],
       "Resource": "*"
     }
   ]
