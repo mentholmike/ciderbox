@@ -2170,7 +2170,12 @@ describe("fleet lease identity and idle", () => {
     expect(pageBody).toContain("you control");
     expect(pageBody).toContain('aria-label="WebVNC display" tabindex="0"');
     expect(pageBody).toContain('screen.addEventListener("contextmenu"');
-    expect(pageBody).toContain('screen.addEventListener("pointerdown", captureVNCInput');
+    expect(pageBody).toContain(
+      'screen.addEventListener("pointerdown", (event) => captureVNCInput(event)',
+    );
+    expect(pageBody).toContain(
+      'screen.addEventListener("mousedown", (event) => captureVNCInput(event, { preventDefault: true })',
+    );
     expect(pageBody).toContain("rfb?.focus?.({ preventScroll: true })");
     expect(pageBody).toContain("window.setTimeout(focusVNC, 0)");
     expect(pageBody).toContain("rfb.focusOnClick = true");

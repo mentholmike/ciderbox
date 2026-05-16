@@ -11,6 +11,10 @@
 
 - Clarified AWS security guardrail docs so IAM Access Analyzer external-access analyzers are created in every configured capacity region, while S3 Block Public Access and IAM password policy remain account-level controls.
 
+### Fixed
+
+- Fixed WebVNC portal click forwarding so controller clicks reach the remote desktop while preserving focus and browser context-menu suppression.
+
 ## 0.14.0 - 2026-05-15
 
 ### Added

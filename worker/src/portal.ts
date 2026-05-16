@@ -671,16 +671,16 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
           rfb?.focus?.({ preventScroll: true });
         } catch (_) {}
       }
-      function captureVNCInput(event) {
+      function captureVNCInput(event, options = {}) {
         if (!isController) return;
-        if (event.cancelable) event.preventDefault();
+        if (options.preventDefault && event.cancelable) event.preventDefault();
         focusVNC();
       }
       screen.addEventListener("contextmenu", (event) => {
         event.preventDefault();
       });
-      screen.addEventListener("pointerdown", captureVNCInput, { capture: true });
-      screen.addEventListener("mousedown", captureVNCInput, { capture: true });
+      screen.addEventListener("pointerdown", (event) => captureVNCInput(event), { capture: true });
+      screen.addEventListener("mousedown", (event) => captureVNCInput(event, { preventDefault: true }), { capture: true });
       function retryDelay() {
         return Math.min(5000, 500 * 2 ** retryAttempt);
       }
