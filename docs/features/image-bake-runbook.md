@@ -232,6 +232,17 @@ If dry-run succeeds, run
 `crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal`
 before real allocation. It prints the selected EC2 Mac Dedicated Host quota
 from AWS Service Quotas, which is the next useful no-spend blocker after IAM.
+For a single artifact bundle that captures identity, IAM policy, quota,
+allocation dry-run, local AWS profile matching, and quota request dry-run
+evidence, run:
+
+```bash
+scripts/macos-coordinator-remediation-audit.sh --region eu-west-1 --type mac2.metal --profile auto
+```
+
+The audit writes `summary.json` with `blocked` or `ready-for-paid-smoke`,
+artifact-relative evidence paths, blocker names, and exact remediation
+commands.
 
 Do not treat that host policy as the whole image bake policy. It only unblocks
 Dedicated Host allocation and release. The full paid lifecycle also needs the

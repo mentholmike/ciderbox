@@ -267,6 +267,18 @@ with `ready-existing-host`, `ready-allocation`, or `blocked`; `ready-allocation`
 requires both a successful allocation dry-run and visible quota of at least one
 host for the selected type.
 
+When the coordinator is blocked and you need a handoff bundle for the AWS
+account owner, run:
+
+```sh
+scripts/macos-coordinator-remediation-audit.sh --region eu-west-1 --type mac2.metal --profile auto
+```
+
+The audit is no-spend. It captures provider identity, the combined macOS IAM
+policy, EC2 Mac host quota, host allocation dry-run, guarded IAM apply dry-run,
+and guarded quota request dry-run evidence, then writes `summary.json` with the
+blockers and exact remediation commands.
+
 When the only blocker is Dedicated Mac host quota, capture the same quota and
 coordinator identity evidence, then dry-run the AWS quota request before
 submitting it:
