@@ -702,6 +702,65 @@ func TestCheckpointInspectVerifyResourceOnlyNativeDoesNotUseCoordinator(t *testi
 	}
 }
 
+func TestCheckpointInspectVerifyDirectAWSUsesLocalPathBeforeCoordinator(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_AWS_REGION", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	var coordinatorHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		coordinatorHits++
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	t.Setenv("CRABBOX_COORDINATOR", server.URL)
+	t.Setenv("CRABBOX_COORDINATOR_ADMIN_TOKEN", "admin")
+	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
+	if err := os.WriteFile(cfgPath, []byte("provider: aws\ncoordinator: "+server.URL+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CRABBOX_CONFIG", cfgPath)
+
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{
+		ID:        "chk_direct_aws",
+		Kind:      checkpointKindAWSAMI,
+		Provider:  "aws",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		TargetOS:  targetMacOS,
+	}
+	record.Native.Provider = "aws"
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "not a valid region"
+	record.Native.Direct = true
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.checkpointInspect(context.Background(), []string{record.ID, "--verify", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var audit checkpointAudit
+	if err := json.Unmarshal(stdout.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if coordinatorHits != 0 {
+		t.Fatalf("direct AWS verification hit coordinator %d time(s)", coordinatorHits)
+	}
+	if audit.ProviderState != "unknown" || audit.NextAction != "check_auth_or_provider" {
+		t.Fatalf("audit=%#v", audit)
+	}
+	if audit.Error == "" {
+		t.Fatal("expected local AWS verification error")
+	}
+}
+
 func TestCheckpointDeleteResourceOnlyNativeDeletesProviderResource(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))

@@ -710,31 +710,11 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 			audit.NextAction = "delete_local"
 			return audit, nil
 		}
+		if cfg, ok := directAWSCheckpointConfig(record); ok {
+			return verifyDirectAWSCheckpoint(ctx, audit, cfg, providerID), nil
+		}
 		coord, err := configuredAdminCoordinator()
 		if err != nil {
-			if cfg, ok := directAWSCheckpointConfig(record); ok {
-				client, clientErr := newAWSClient(ctx, cfg)
-				if clientErr != nil {
-					audit.ProviderState = "unknown"
-					audit.NextAction = "check_auth_or_provider"
-					audit.Error = clientErr.Error()
-					return audit, nil
-				}
-				image, imageErr := client.GetImageCheckpoint(ctx, providerID)
-				if imageErr != nil {
-					if strings.Contains(imageErr.Error(), "InvalidAMIID.NotFound") || strings.Contains(imageErr.Error(), "aws image not found") {
-						audit.ProviderState = "missing"
-						audit.NextAction = "delete_local"
-						return audit, nil
-					}
-					audit.ProviderState = "unknown"
-					audit.NextAction = "check_auth_or_provider"
-					audit.Error = imageErr.Error()
-					return audit, nil
-				}
-				applyCheckpointImageAudit(&audit, image)
-				return audit, nil
-			}
 			audit.ProviderState = "unknown"
 			audit.NextAction = "configure_admin_auth"
 			audit.Error = err.Error()
@@ -760,6 +740,30 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 		audit.NextAction = "inspect"
 		return audit, nil
 	}
+}
+
+func verifyDirectAWSCheckpoint(ctx context.Context, audit checkpointAudit, cfg Config, providerID string) checkpointAudit {
+	client, clientErr := newAWSClient(ctx, cfg)
+	if clientErr != nil {
+		audit.ProviderState = "unknown"
+		audit.NextAction = "check_auth_or_provider"
+		audit.Error = clientErr.Error()
+		return audit
+	}
+	image, imageErr := client.GetImageCheckpoint(ctx, providerID)
+	if imageErr != nil {
+		if strings.Contains(imageErr.Error(), "InvalidAMIID.NotFound") || strings.Contains(imageErr.Error(), "aws image not found") {
+			audit.ProviderState = "missing"
+			audit.NextAction = "delete_local"
+			return audit
+		}
+		audit.ProviderState = "unknown"
+		audit.NextAction = "check_auth_or_provider"
+		audit.Error = imageErr.Error()
+		return audit
+	}
+	applyCheckpointImageAudit(&audit, image)
+	return audit
 }
 
 func directAWSCheckpointConfig(record checkpointRecord) (Config, bool) {
