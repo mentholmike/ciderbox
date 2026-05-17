@@ -402,7 +402,7 @@ func TestCheckpointCreateModeNativeSupportsDirectAWSAMI(t *testing.T) {
 	}
 }
 
-func TestDirectAWSCheckpointConfigRequiresNoCoordinator(t *testing.T) {
+func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -427,8 +427,12 @@ func TestDirectAWSCheckpointConfigRequiresNoCoordinator(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\ncoordinator: https://coordinator.example\naws:\n  region: us-east-1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := directAWSCheckpointConfig(record); ok {
-		t.Fatal("coordinator-backed config should not use direct AWS cleanup")
+	cfg, ok = directAWSCheckpointConfig(record)
+	if !ok {
+		t.Fatal("direct AWS checkpoint should still use direct cleanup when a coordinator is configured later")
+	}
+	if cfg.Coordinator == "" {
+		t.Fatal("expected loaded config to preserve coordinator for unrelated settings")
 	}
 
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {

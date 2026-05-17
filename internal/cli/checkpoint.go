@@ -768,7 +768,7 @@ func directAWSCheckpointConfig(record checkpointRecord) (Config, bool) {
 		return Config{}, false
 	}
 	cfg, err := loadConfig()
-	if err != nil || cfg.Coordinator != "" {
+	if err != nil {
 		return Config{}, false
 	}
 	cfg.Provider = "aws"
