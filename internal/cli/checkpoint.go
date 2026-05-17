@@ -993,6 +993,9 @@ func nativeCheckpointKind(cfg Config, server Server, target SSHTarget, strategy 
 		if targetOS != targetLinux && targetOS != targetMacOS {
 			return "", false
 		}
+		if targetOS == targetMacOS {
+			return checkpointKindAWSAMI, true
+		}
 		if strategy == checkpointStrategyImage {
 			return checkpointKindAWSAMI, true
 		}

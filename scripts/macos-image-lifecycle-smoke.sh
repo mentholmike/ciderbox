@@ -793,7 +793,7 @@ create_checkpoint_from_source() {
     --id "$source_lease" \
     --name "$image_name-checkpoint" \
     --mode native \
-    --strategy disk-snapshot \
+    --strategy image \
     --wait \
     --wait-timeout "$image_wait_timeout"
   checkpoint_id="$(checkpoint_id_from_log "$checkpoint_create_log")"

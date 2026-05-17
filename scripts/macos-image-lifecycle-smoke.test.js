@@ -162,11 +162,11 @@ case "$1" in
     ;;
   checkpoint)
     if [[ "$2" == "create" ]]; then
-      printf 'checkpoint created id=chk_macos kind=aws-ebs-snapshot resource=snap-mock state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
+      printf 'checkpoint created id=chk_macos kind=aws-ami resource=ami-checkpoint state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
     elif [[ "$2" == "fork" ]]; then
-      printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=snap-mock workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
+      printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=ami-checkpoint workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
     elif [[ "$2" == "delete" ]]; then
-      printf 'checkpoint deleted id=%s kind=aws-ebs-snapshot\\n' "$3"
+      printf 'checkpoint deleted id=%s kind=aws-ami\\n' "$3"
     fi
     ;;
   stop)
@@ -611,7 +611,7 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal((fakeLog.match(/^warmup\b/gm) ?? []).length, 3);
   assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 4);
   assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
-  assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy disk-snapshot --wait --wait-timeout 60m$/m);
+  assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy image --wait --wait-timeout 60m$/m);
   assert.match(fakeLog, /^checkpoint fork chk_macos$/m);
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);

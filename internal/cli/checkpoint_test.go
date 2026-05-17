@@ -327,7 +327,7 @@ func TestCheckpointCreateModePrefersDiskSnapshotLinuxNative(t *testing.T) {
 	}
 }
 
-func TestCheckpointCreateModeSupportsAWSMacOSNativeSnapshots(t *testing.T) {
+func TestCheckpointCreateModeSupportsAWSMacOSAMIBackedCheckpoints(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Provider = "aws"
 	cfg.Coordinator = "https://coordinator.example"
@@ -336,11 +336,14 @@ func TestCheckpointCreateModeSupportsAWSMacOSNativeSnapshots(t *testing.T) {
 	server := Server{Provider: "aws", CloudID: "i-123"}
 	target := SSHTarget{TargetOS: targetMacOS}
 
-	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindAWSEBS {
-		t.Fatalf("mode=%q, want %q", got, checkpointKindAWSEBS)
+	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
 	if got := checkpointCreateMode("native", "image", cfg, server, target, false); got != checkpointKindAWSAMI {
 		t.Fatalf("image strategy mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("snapshot", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("snapshot mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
 }
 
