@@ -48,13 +48,8 @@ export function renderTailscaleHostname(
   for (const [key, replacement] of Object.entries(replacements)) {
     value = value.replaceAll(key, replacement);
   }
-  value = value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9-]/g, "-")
-    .replaceAll(/-+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, 63);
-  return value || `crabbox-${leaseID.replaceAll("_", "-")}`.slice(0, 63);
+  value = sanitizeDNSLabel(value).slice(0, 63);
+  return value || sanitizeDNSLabel(`crabbox-${leaseID.replaceAll("_", "-")}`).slice(0, 63);
 }
 
 export async function createTailscaleAuthKey(
@@ -137,4 +132,31 @@ function normalizeTags(values: string[]): string[] {
 
 function trimBody(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function sanitizeDNSLabel(value: string): string {
+  let out = "";
+  let lastDash = false;
+  for (const char of value.toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const ok = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+    if (ok) {
+      out += char;
+      lastDash = false;
+      continue;
+    }
+    if (!lastDash) {
+      out += "-";
+      lastDash = true;
+    }
+  }
+  let start = 0;
+  let end = out.length;
+  while (start < end && out[start] === "-") {
+    start += 1;
+  }
+  while (end > start && out[end - 1] === "-") {
+    end -= 1;
+  }
+  return out.slice(start, end);
 }

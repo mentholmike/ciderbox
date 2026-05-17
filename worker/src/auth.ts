@@ -263,11 +263,23 @@ async function accessPublicKey(teamDomain: string, kid: string): Promise<CryptoK
 }
 
 function normalizedAccessTeamDomain(value: string | undefined): string {
-  const trimmed = value?.trim() ?? "";
+  let trimmed = value?.trim() ?? "";
   if (!trimmed) {
     return "";
   }
-  return trimmed.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("https://")) {
+    trimmed = trimmed.slice("https://".length);
+  } else if (lower.startsWith("http://")) {
+    trimmed = trimmed.slice("http://".length);
+  }
+  for (const separator of ["/", "?", "#"]) {
+    const index = trimmed.indexOf(separator);
+    if (index >= 0) {
+      trimmed = trimmed.slice(0, index);
+    }
+  }
+  return trimmed;
 }
 
 function validAccessPayload(

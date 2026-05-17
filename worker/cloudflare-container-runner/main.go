@@ -159,7 +159,13 @@ func streamHeartbeat(done <-chan struct{}, writer *eventWriter) {
 }
 
 func runCommand(ctx context.Context, req execRequest, cwd string, writer *eventWriter) (int, error) {
-	cmd := exec.Command("/bin/bash", "-lc", req.Command)
+	scriptPath, err := writeCommandScript(req.Command)
+	if err != nil {
+		return 0, err
+	}
+	defer os.Remove(scriptPath)
+
+	cmd := exec.Command("/bin/bash", "-l", scriptPath)
 	cmd.Dir = cwd
 	cmd.Env = commandEnv(req.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -204,6 +210,27 @@ func runCommand(ctx context.Context, req execRequest, cwd string, writer *eventW
 		return commandExitCode(exitErr), nil
 	}
 	return 1, waitErr
+}
+
+func writeCommandScript(command string) (string, error) {
+	if strings.Contains(command, "\x00") {
+		return "", errors.New("command contains NUL byte")
+	}
+	file, err := os.CreateTemp("", "crabbox-command-*.sh")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err := file.WriteString(command + "\n"); err != nil {
+		file.Close()
+		os.Remove(path)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 func commandExitCode(exitErr *exec.ExitError) int {

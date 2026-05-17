@@ -278,14 +278,23 @@ function rewriteHref(href, currentRel) {
 
 function tocFromHtml(html) {
   const items = [];
-  const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
-  let m;
-  while ((m = re.exec(html))) {
-    const text = m[3]
-      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
-    items.push({ level: Number(m[1]), id: m[2], text });
+  let cursor = 0;
+  while (cursor < html.length) {
+    const h2 = html.indexOf('<h2 id="', cursor);
+    const h3 = html.indexOf('<h3 id="', cursor);
+    const open = firstIndex(h2, h3);
+    if (open < 0) break;
+    const level = open === h2 ? 2 : 3;
+    const idStart = open + `<h${level} id="`.length;
+    const idEnd = html.indexOf('"', idStart);
+    const bodyStart = html.indexOf(">", idEnd);
+    const closeTag = `</h${level}>`;
+    const close = html.indexOf(closeTag, bodyStart + 1);
+    if (idEnd < 0 || bodyStart < 0 || close < 0) break;
+    const body = html.slice(bodyStart + 1, close);
+    const text = stripHtmlTags(stripHeadingAnchor(body)).trim();
+    items.push({ level, id: html.slice(idStart, idEnd), text });
+    cursor = close + closeTag.length;
   }
   if (items.length < 2) return "";
   return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
@@ -655,7 +664,58 @@ function crabSvg() {
 }
 
 function slug(text) {
-  return text.toLowerCase().replace(/`/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  let out = "";
+  let lastDash = false;
+  for (const char of text.toLowerCase()) {
+    if (char === "`") continue;
+    const code = char.charCodeAt(0);
+    const ok = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+    if (ok) {
+      out += char;
+      lastDash = false;
+    } else if (!lastDash) {
+      out += "-";
+      lastDash = true;
+    }
+  }
+  return trimDashes(out);
+}
+
+function firstIndex(left, right) {
+  if (left < 0) return right;
+  if (right < 0) return left;
+  return Math.min(left, right);
+}
+
+function stripHeadingAnchor(value) {
+  if (!value.startsWith('<a class="anchor"')) return value;
+  const end = value.indexOf("</a>");
+  return end >= 0 ? value.slice(end + "</a>".length) : value;
+}
+
+function stripHtmlTags(value) {
+  let out = "";
+  let inTag = false;
+  for (const char of value) {
+    if (char === "<") {
+      inTag = true;
+      continue;
+    }
+    if (char === ">") {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) out += char;
+  }
+  return out;
+}
+
+function trimDashes(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "-") start += 1;
+  while (end > start && value[end - 1] === "-") end -= 1;
+  return value.slice(start, end);
 }
 
 function escapeHtml(value) {

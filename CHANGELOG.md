@@ -41,6 +41,7 @@
 
 ### Fixed
 
+- Fixed code-scanning findings in container command execution, Worker sanitizers, docs link/build helpers, and JSON error responses.
 - Fixed raw SSH-provider JS package command failures so Crabbox probes obvious `pnpm`, `npm`, `node`, `corepack`, `yarn`, and `bun` entrypoints before syncing and fails with hydration/setup guidance instead of an empty `exit 127` tail.
 - Fixed `crabbox webvnc --open` so opened portal links make the lease visible to authenticated org users instead of showing a misleading 404 when CLI auth and browser auth differ.
 - Fixed WebVNC portal click forwarding so controller clicks reach the remote desktop while preserving focus and browser context-menu suppression.

@@ -1,7 +1,7 @@
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
-  return new Response(JSON.stringify(data), { ...init, headers });
+  return new Response(JSON.stringify(data, jsonReplacer), { ...init, headers });
 }
 
 export function text(message: string, status = 200): Response {
@@ -34,5 +34,20 @@ export function pathParts(request: Request): string[] {
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return firstLine(error instanceof Error ? error.message : String(error));
+}
+
+function jsonReplacer(key: string, value: unknown): unknown {
+  if (key === "stack") {
+    return undefined;
+  }
+  if (value instanceof Error) {
+    return { name: value.name, message: firstLine(value.message) };
+  }
+  return value;
+}
+
+function firstLine(value: string): string {
+  const index = value.indexOf("\n");
+  return index >= 0 ? value.slice(0, index) : value;
 }

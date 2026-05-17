@@ -40,7 +40,7 @@ export function normalizeLeaseSlug(value: string | undefined): string {
       lastDash = true;
     }
   }
-  return out.replaceAll(/^-+|-+$/g, "");
+  return trimDashes(out);
 }
 
 export function slugWithCollisionSuffix(base: string, seed: string): string {
@@ -62,4 +62,16 @@ function slugHash(value: string): number {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash >>> 0;
+}
+
+function trimDashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "-") {
+    start += 1;
+  }
+  while (end > start && value[end - 1] === "-") {
+    end -= 1;
+  }
+  return value.slice(start, end);
 }

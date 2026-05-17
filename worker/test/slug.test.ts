@@ -23,6 +23,7 @@ describe("lease slugs", () => {
 
   it("normalizes requested slugs and appends collision suffixes", () => {
     expect(normalizeLeaseSlug(" Blue Lobster ")).toBe("blue-lobster");
+    expect(normalizeLeaseSlug(" --- Blue__Lobster!! ")).toBe("blue-lobster");
     expect(slugWithCollisionSuffix("Blue Lobster", "cbx_abcdef123456")).toMatch(
       /^blue-lobster-[a-f0-9]{4}$/,
     );

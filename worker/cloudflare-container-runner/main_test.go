@@ -99,6 +99,70 @@ func TestHandleExecTimeoutCompletesWithExitCode124(t *testing.T) {
 	}
 }
 
+func TestHandleExecRejectsNulCommand(t *testing.T) {
+	body, err := json.Marshal(execRequest{
+		Command: "printf ok\x00bad",
+		Cwd:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/exec", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handleExec(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	events := parseStreamEvents(t, rec.Body.String())
+	if len(events) < 2 {
+		t.Fatalf("events = %#v, want start and error", events)
+	}
+	last := events[len(events)-1]
+	if last.Type != "error" || !strings.Contains(last.Error, "NUL byte") {
+		t.Fatalf("last event = %#v, want NUL byte error", last)
+	}
+}
+
+func TestRunCommandExecutesShellScriptContent(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writer := &eventWriter{w: rec, flusher: rec}
+
+	code, err := runCommand(context.Background(), execRequest{Command: "name=crabbox\nprintf 'hello %s\\n' \"$name\""}, t.TempDir(), writer)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "hello crabbox") {
+		t.Fatalf("stream body = %q, want command output", body)
+	}
+}
+
+func TestRunCommandKeepsChildStdinSeparateFromScript(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writer := &eventWriter{w: rec, flusher: rec}
+
+	code, err := runCommand(context.Background(), execRequest{Command: "cat\necho after"}, t.TempDir(), writer)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "echo after") {
+		t.Fatalf("stream body = %q, child command consumed script content", body)
+	}
+	if !strings.Contains(body, "after") {
+		t.Fatalf("stream body = %q, want later command output", body)
+	}
+}
+
 func TestRunCommandMapsSignaledExitCode(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writer := &eventWriter{w: rec, flusher: rec}

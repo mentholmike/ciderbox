@@ -51,20 +51,50 @@ function walk(dir) {
 
 function headingAnchors(markdown) {
   const anchors = new Set();
-  for (const match of markdown.matchAll(/^#{1,6}\s+(.+)$/gm)) {
-    anchors.add(slugify(match[1]));
+  for (const rawLine of markdown.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    let hashes = 0;
+    while (hashes < line.length && line[hashes] === "#") {
+      hashes += 1;
+    }
+    if (hashes < 1 || hashes > 6 || line[hashes] !== " ") {
+      continue;
+    }
+    anchors.add(slugify(line.slice(hashes + 1)));
   }
   return anchors;
 }
 
 function slugify(text) {
-  return text
-    .toLowerCase()
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
+  let out = "";
+  let inTag = false;
+  let lastDash = false;
+  for (const char of text.toLowerCase()) {
+    if (char === "`") {
+      continue;
+    }
+    if (char === "<") {
+      inTag = true;
+      continue;
+    }
+    if (char === ">") {
+      inTag = false;
+      continue;
+    }
+    if (inTag) {
+      continue;
+    }
+    const code = char.charCodeAt(0);
+    const ok = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+    if (ok) {
+      out += char;
+      lastDash = false;
+    } else if (!lastDash) {
+      out += "-";
+      lastDash = true;
+    }
+  }
+  return trimDashes(out);
 }
 
 function stripAngleBrackets(text) {
@@ -74,4 +104,12 @@ function stripAngleBrackets(text) {
 
 function rel(file) {
   return path.relative(root, file).replaceAll(path.sep, "/");
+}
+
+function trimDashes(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === "-") start += 1;
+  while (end > start && value[end - 1] === "-") end -= 1;
+  return value.slice(start, end);
 }

@@ -5712,12 +5712,27 @@ async function runCodePortalScript(
 }
 
 function inlineScript(page: string, marker: string): string {
-  const scripts = [...page.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
-  const match = scripts.find((script) => script[1]?.includes(marker));
-  if (!match?.[1]) {
-    throw new Error(`script marker not found: ${marker}`);
+  let cursor = 0;
+  while (cursor < page.length) {
+    const open = page.indexOf("<script", cursor);
+    if (open < 0) {
+      break;
+    }
+    const bodyStart = page.indexOf(">", open);
+    if (bodyStart < 0) {
+      break;
+    }
+    const close = page.indexOf("</script>", bodyStart + 1);
+    if (close < 0) {
+      break;
+    }
+    const body = page.slice(bodyStart + 1, close);
+    if (body.includes(marker)) {
+      return body;
+    }
+    cursor = close + "</script>".length;
   }
-  return match[1];
+  throw new Error(`script marker not found: ${marker}`);
 }
 
 function testRun(overrides: Partial<RunRecord>): RunRecord {

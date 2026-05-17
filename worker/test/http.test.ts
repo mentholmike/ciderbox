@@ -7,7 +7,7 @@ import {
   issueUserToken,
   requestWithAuthContext,
 } from "../src/auth";
-import { requestOwner } from "../src/http";
+import { errorMessage, json, requestOwner } from "../src/http";
 import type { Env } from "../src/types";
 
 describe("coordinator auth", () => {
@@ -98,6 +98,44 @@ describe("coordinator auth", () => {
         admin: false,
         owner: "verified@example.com",
       });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("normalizes Cloudflare Access team domains before fetching certs", async () => {
+    const { jwt, publicJwk } = await accessJwt({
+      kid: "access-test-kid-url",
+      aud: "access-aud",
+      iss: "https://team.example.cloudflareaccess.com",
+      email: "verified@example.com",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ keys: [publicJwk] }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    try {
+      const auth = await authenticateRequest(
+        new Request("https://example.test/v1/whoami", {
+          headers: {
+            authorization: "Bearer shared",
+            "cf-access-authenticated-user-email": "spoof@example.com",
+            "cf-access-jwt-assertion": jwt,
+          },
+        }),
+        {
+          CRABBOX_SHARED_TOKEN: "shared",
+          CRABBOX_DEFAULT_ORG: "example-org",
+          CRABBOX_ACCESS_TEAM_DOMAIN: "https://team.example.cloudflareaccess.com/path",
+          CRABBOX_ACCESS_AUD: "access-aud",
+        },
+      );
+
+      expect(auth.owner).toBe("verified@example.com");
       expect(fetchMock).toHaveBeenCalledWith(
         "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
       );
@@ -260,6 +298,24 @@ describe("coordinator auth", () => {
     expect(logout.status).toBe(302);
     expect(logout.headers.get("location")).toBe("https://crabbox.openclaw.ai/portal/logout");
     expect(fleetCalled).toBe(false);
+  });
+});
+
+describe("http responses", () => {
+  it("does not serialize stack traces from response payloads", async () => {
+    const response = json({
+      error: new Error("boom\n    at hidden"),
+      nested: { stack: "hidden stack" },
+    });
+
+    expect(await response.json()).toEqual({
+      error: { name: "Error", message: "boom" },
+      nested: {},
+    });
+  });
+
+  it("keeps public error messages to the first line", () => {
+    expect(errorMessage(new Error("boom\n    at hidden"))).toBe("boom");
   });
 });
 
