@@ -3,9 +3,47 @@ package railway
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
+	"sync"
 	"time"
 )
+
+// Polling configuration for Run(). Railway has no synchronous exec endpoint,
+// so we trigger a deploy and then poll the new deployment's status until it
+// reaches a terminal state. The interval grows exponentially with jitter so a
+// long deployment doesn't hammer the API while a short one still feels snappy.
+const (
+	railwayPollInitialInterval = 5 * time.Second
+	railwayPollMaxInterval     = 30 * time.Second
+	railwayPollOverallTimeout  = 30 * time.Minute
+	railwayPollJitterFraction  = 0.2
+	railwayPollLogLimit        = 500
+)
+
+// railwayPollRand seeds a private rand.Source on first use so jitter doesn't
+// rely on the global generator (which other tests may reseed) while staying
+// dependency-free.
+var (
+	railwayPollRandOnce sync.Once
+	railwayPollRand     *rand.Rand
+	railwayPollRandMu   sync.Mutex
+)
+
+func railwayJitter(d time.Duration) time.Duration {
+	railwayPollRandOnce.Do(func() {
+		railwayPollRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	})
+	railwayPollRandMu.Lock()
+	defer railwayPollRandMu.Unlock()
+	// Centered jitter in [-fraction, +fraction] * d.
+	delta := (railwayPollRand.Float64()*2 - 1) * railwayPollJitterFraction
+	jittered := time.Duration(float64(d) * (1 + delta))
+	if jittered <= 0 {
+		return d
+	}
+	return jittered
+}
 
 func NewRailwayBackend(spec ProviderSpec, cfg Config, rt Runtime) Backend {
 	cfg.Provider = providerName
@@ -17,6 +55,12 @@ type railwayBackend struct {
 	cfg    Config
 	rt     Runtime
 	client railwayAPI
+
+	// pollOverride lets tests shrink the polling interval without changing the
+	// production defaults. When zero, railwayPollInitialInterval is used.
+	pollInitialOverride time.Duration
+	// pollOverallOverride lets tests shorten the overall poll timeout.
+	pollOverallOverride time.Duration
 }
 
 func (b *railwayBackend) Spec() ProviderSpec { return b.spec }
@@ -38,13 +82,9 @@ func (b *railwayBackend) Run(ctx context.Context, req RunRequest) (RunResult, er
 	if req.ID == "" {
 		return RunResult{}, exit(2, "provider=%s requires --id <railway-service-id>", providerName)
 	}
-	projectID := strings.TrimSpace(b.cfg.Railway.ProjectID)
-	environmentID := strings.TrimSpace(b.cfg.Railway.EnvironmentID)
-	if projectID == "" {
-		return RunResult{}, exit(2, "provider=%s requires --railway-project or RAILWAY_PROJECT_ID", providerName)
-	}
-	if environmentID == "" {
-		return RunResult{}, exit(2, "provider=%s requires --railway-environment or RAILWAY_ENVIRONMENT_ID", providerName)
+	projectID, environmentID, err := b.requireProjectEnv()
+	if err != nil {
+		return RunResult{}, err
 	}
 	if len(req.Command) == 0 {
 		return RunResult{}, exit(2, "missing command")
@@ -55,30 +95,40 @@ func (b *railwayBackend) Run(ctx context.Context, req RunRequest) (RunResult, er
 	}
 	started := b.now()
 	fmt.Fprintf(b.rt.Stderr, "running on %s service=%s command=%s (start command is owned by the Railway service)\n", providerName, req.ID, strings.Join(req.Command, " "))
-	if _, err := client.TriggerDeploy(ctx, projectID, environmentID, req.ID); err != nil {
+
+	deploymentID, err := client.TriggerDeploy(ctx, projectID, environmentID, req.ID)
+	if err != nil {
 		return RunResult{}, ExitError{Code: 1, Message: fmt.Sprintf("%s trigger deploy failed: %v", providerName, err)}
 	}
-	deployment, err := client.LatestDeployment(ctx, projectID, environmentID, req.ID)
-	if err != nil {
-		return RunResult{}, ExitError{Code: 1, Message: fmt.Sprintf("%s fetch deployment failed: %v", providerName, err)}
+	deploymentID = strings.TrimSpace(deploymentID)
+	if deploymentID == "" {
+		// Without an id we cannot poll the deployment we just created vs. the
+		// prior one — surface this as a hard error rather than silently returning
+		// 0 (the legacy behaviour, which masked failing deploys).
+		return RunResult{ExitCode: 1}, ExitError{Code: 1, Message: fmt.Sprintf("%s trigger deploy returned no deployment id", providerName)}
 	}
-	if deployment.ID == "" {
-		return RunResult{}, ExitError{Code: 1, Message: fmt.Sprintf("%s deployment id missing", providerName)}
+
+	finalStatus, pollErr := b.pollDeployment(ctx, client, deploymentID)
+	if pollErr != nil {
+		commandDuration := b.now().Sub(started)
+		return RunResult{ExitCode: 1, Command: commandDuration, Total: commandDuration}, ExitError{Code: 1, Message: fmt.Sprintf("%s deployment %s polling failed: %v", providerName, deploymentID, pollErr)}
 	}
-	logs, err := client.DeploymentLogs(ctx, deployment.ID, 0)
+
+	logs, err := client.DeploymentLogs(ctx, deploymentID, railwayPollLogLimit)
 	if err != nil {
 		return RunResult{}, ExitError{Code: 1, Message: fmt.Sprintf("%s fetch logs failed: %v", providerName, err)}
 	}
 	for _, line := range logs {
 		fmt.Fprintln(b.rt.Stdout, line)
 	}
+
 	commandDuration := b.now().Sub(started)
 	result := RunResult{
-		ExitCode: railwayExitCode(deployment.Status),
+		ExitCode: finalStatus.ExitCode(),
 		Command:  commandDuration,
 		Total:    commandDuration,
 	}
-	fmt.Fprintf(b.rt.Stderr, "%s run summary command=%s total=%s exit=%d status=%s\n", providerName, result.Command.Round(time.Millisecond), result.Total.Round(time.Millisecond), result.ExitCode, deployment.Status)
+	fmt.Fprintf(b.rt.Stderr, "%s run summary command=%s total=%s exit=%d status=%s\n", providerName, result.Command.Round(time.Millisecond), result.Total.Round(time.Millisecond), result.ExitCode, finalStatus)
 	if req.TimingJSON {
 		if err := writeTimingJSON(b.rt.Stderr, timingReport{
 			Provider:  providerName,
@@ -90,9 +140,55 @@ func (b *railwayBackend) Run(ctx context.Context, req RunRequest) (RunResult, er
 		}
 	}
 	if result.ExitCode != 0 {
-		return result, ExitError{Code: result.ExitCode, Message: fmt.Sprintf("%s deployment status=%s", providerName, deployment.Status)}
+		return result, ExitError{Code: result.ExitCode, Message: fmt.Sprintf("%s deployment status=%s", providerName, finalStatus)}
 	}
 	return result, nil
+}
+
+// pollDeployment polls a specific deployment until it reaches a terminal state
+// or the overall timeout / parent context expires. Returns the final observed
+// status on success.
+func (b *railwayBackend) pollDeployment(ctx context.Context, client railwayAPI, deploymentID string) (railwayDeploymentStatus, error) {
+	overall := railwayPollOverallTimeout
+	if b.pollOverallOverride > 0 {
+		overall = b.pollOverallOverride
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, overall)
+	defer cancel()
+
+	initial := railwayPollInitialInterval
+	if b.pollInitialOverride > 0 {
+		initial = b.pollInitialOverride
+	}
+	interval := initial
+
+	for {
+		dep, err := client.Deployment(deadlineCtx, deploymentID)
+		if err != nil {
+			// Bubble up context errors as-is so the caller can tell timeout from
+			// transport failures.
+			if deadlineCtx.Err() != nil {
+				return "", fmt.Errorf("polling cancelled: %w", deadlineCtx.Err())
+			}
+			return "", err
+		}
+		if dep.Status.IsTerminal() {
+			return dep.Status, nil
+		}
+		// Backoff with ±jitter, capped at railwayPollMaxInterval.
+		sleepFor := railwayJitter(interval)
+		select {
+		case <-deadlineCtx.Done():
+			return "", fmt.Errorf("polling cancelled: %w", deadlineCtx.Err())
+		case <-time.After(sleepFor):
+		}
+		if interval < railwayPollMaxInterval {
+			interval *= 2
+			if interval > railwayPollMaxInterval {
+				interval = railwayPollMaxInterval
+			}
+		}
+	}
 }
 
 func (b *railwayBackend) List(ctx context.Context, req ListRequest) ([]LeaseView, error) {
@@ -121,33 +217,55 @@ func (b *railwayBackend) Status(ctx context.Context, req StatusRequest) (StatusV
 	if req.ID == "" {
 		return StatusView{}, exit(2, "provider=%s status requires --id <railway-service-id>", providerName)
 	}
-	projectID := strings.TrimSpace(b.cfg.Railway.ProjectID)
-	environmentID := strings.TrimSpace(b.cfg.Railway.EnvironmentID)
-	if projectID == "" || environmentID == "" {
+	projectID, environmentID, err := b.requireProjectEnv()
+	if err != nil {
+		// Status accepts the legacy combined message because callers historically
+		// piped --id-only requests through here.
 		return StatusView{}, exit(2, "provider=%s status requires --railway-project and --railway-environment", providerName)
 	}
 	client, err := b.api()
 	if err != nil {
 		return StatusView{}, err
 	}
-	service, err := client.GetService(ctx, req.ID)
-	if err != nil {
-		return StatusView{}, err
+
+	// GetService and LatestDeployment are independent reads; fan them out in
+	// parallel so a slow Railway region doesn't double the wall-clock cost of
+	// a status check. Done with a WaitGroup rather than errgroup because the
+	// repository does not depend on golang.org/x/sync.
+	var (
+		wg         sync.WaitGroup
+		service    railwayService
+		deployment railwayDeployment
+		serviceErr error
+		deployErr  error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		service, serviceErr = client.GetService(ctx, req.ID)
+	}()
+	go func() {
+		defer wg.Done()
+		deployment, deployErr = client.LatestDeployment(ctx, projectID, environmentID, req.ID)
+	}()
+	wg.Wait()
+	if serviceErr != nil {
+		return StatusView{}, serviceErr
 	}
-	deployment, err := client.LatestDeployment(ctx, projectID, environmentID, req.ID)
-	if err != nil {
-		return StatusView{}, err
+	if deployErr != nil {
+		return StatusView{}, deployErr
 	}
+
 	view := StatusView{
 		ID:         service.ID,
 		Slug:       service.Name,
 		Provider:   providerName,
 		TargetOS:   targetLinux,
-		State:      strings.ToLower(deployment.Status),
+		State:      strings.ToLower(string(deployment.Status.Normalized())),
 		ServerID:   service.ID,
 		ServerType: "railway-service",
 		Network:    networkPublic,
-		Ready:      railwayReady(deployment.Status),
+		Ready:      deployment.Status.Normalized() == railwayStatusSuccess,
 		Labels:     map[string]string{"projectId": service.ProjectID},
 	}
 	return view, nil
@@ -157,9 +275,8 @@ func (b *railwayBackend) Stop(ctx context.Context, req StopRequest) error {
 	if req.ID == "" {
 		return exit(2, "provider=%s stop requires --id <railway-service-id>", providerName)
 	}
-	projectID := strings.TrimSpace(b.cfg.Railway.ProjectID)
-	environmentID := strings.TrimSpace(b.cfg.Railway.EnvironmentID)
-	if projectID == "" || environmentID == "" {
+	projectID, environmentID, err := b.requireProjectEnv()
+	if err != nil {
 		return exit(2, "provider=%s stop requires --railway-project and --railway-environment", providerName)
 	}
 	client, err := b.api()
@@ -181,6 +298,21 @@ func (b *railwayBackend) api() (railwayAPI, error) {
 		return b.client, nil
 	}
 	return newRailwayClient(b.cfg, b.rt)
+}
+
+// requireProjectEnv reads and trims the Railway project + environment ids and
+// returns a CLI-facing exit error when either is missing. Callers route the
+// error directly out to the user.
+func (b *railwayBackend) requireProjectEnv() (string, string, error) {
+	projectID := strings.TrimSpace(b.cfg.Railway.ProjectID)
+	environmentID := strings.TrimSpace(b.cfg.Railway.EnvironmentID)
+	if projectID == "" {
+		return "", "", exit(2, "provider=%s requires --railway-project or RAILWAY_PROJECT_ID", providerName)
+	}
+	if environmentID == "" {
+		return "", "", exit(2, "provider=%s requires --railway-environment or RAILWAY_ENVIRONMENT_ID", providerName)
+	}
+	return projectID, environmentID, nil
 }
 
 func rejectRailwayRunOptions(req RunRequest) error {
@@ -210,24 +342,6 @@ func rejectRailwayRunOptions(req RunRequest) error {
 		return exit(2, "provider=%s does not support sync; --full-resync is rejected", providerName)
 	}
 	return nil
-}
-
-func railwayExitCode(status string) int {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "SUCCESS", "DEPLOYED":
-		return 0
-	case "":
-		return 0
-	}
-	return 1
-}
-
-func railwayReady(status string) bool {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "SUCCESS", "DEPLOYED":
-		return true
-	}
-	return false
 }
 
 func (b *railwayBackend) now() time.Time {

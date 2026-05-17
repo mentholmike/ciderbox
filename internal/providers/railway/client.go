@@ -22,6 +22,7 @@ type railwayAPI interface {
 	TriggerDeploy(ctx context.Context, projectID, environmentID, serviceID string) (string, error)
 	DeploymentLogs(ctx context.Context, deploymentID string, limit int) ([]string, error)
 	LatestDeployment(ctx context.Context, projectID, environmentID, serviceID string) (railwayDeployment, error)
+	Deployment(ctx context.Context, deploymentID string) (railwayDeployment, error)
 	StopDeployment(ctx context.Context, deploymentID string) error
 	ListServices(ctx context.Context) ([]railwayService, error)
 	GetService(ctx context.Context, serviceID string) (railwayService, error)
@@ -53,10 +54,76 @@ type railwayService struct {
 }
 
 type railwayDeployment struct {
-	ID        string
-	Status    string
-	URL       string
-	CreatedAt string
+	ID        string                  `json:"id"`
+	Status    railwayDeploymentStatus `json:"status"`
+	URL       string                  `json:"url"`
+	CreatedAt string                  `json:"createdAt"`
+}
+
+// railwayDeploymentStatus mirrors Railway's GraphQL DeploymentStatus enum.
+// Values: https://docs.railway.com (verified via docs.railway.com/integrations/api/manage-deployments).
+// Terminal states represent a completed deployment (SUCCESS/FAILED/CRASHED/REMOVED/SKIPPED);
+// the remaining values are still progressing and must be polled.
+type railwayDeploymentStatus string
+
+const (
+	railwayStatusQueued        railwayDeploymentStatus = "QUEUED"
+	railwayStatusInitializing  railwayDeploymentStatus = "INITIALIZING"
+	railwayStatusBuilding      railwayDeploymentStatus = "BUILDING"
+	railwayStatusDeploying     railwayDeploymentStatus = "DEPLOYING"
+	railwayStatusWaiting       railwayDeploymentStatus = "WAITING"
+	railwayStatusNeedsApproval railwayDeploymentStatus = "NEEDS_APPROVAL"
+	railwayStatusRemoving      railwayDeploymentStatus = "REMOVING"
+	railwayStatusSleeping      railwayDeploymentStatus = "SLEEPING"
+	railwayStatusSuccess       railwayDeploymentStatus = "SUCCESS"
+	railwayStatusFailed        railwayDeploymentStatus = "FAILED"
+	railwayStatusCrashed       railwayDeploymentStatus = "CRASHED"
+	railwayStatusRemoved       railwayDeploymentStatus = "REMOVED"
+	railwayStatusSkipped       railwayDeploymentStatus = "SKIPPED"
+)
+
+// UnmarshalJSON normalizes the incoming string (trim + upper-case) so callers
+// can compare against the typed constants without worrying about whitespace or
+// casing quirks in upstream responses.
+func (s *railwayDeploymentStatus) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = railwayDeploymentStatus(strings.ToUpper(strings.TrimSpace(raw)))
+	return nil
+}
+
+// Normalized returns the trim+upper-case form of s so ad-hoc string values
+// (e.g. plumbed from configuration) compare equal to the typed constants.
+func (s railwayDeploymentStatus) Normalized() railwayDeploymentStatus {
+	return railwayDeploymentStatus(strings.ToUpper(strings.TrimSpace(string(s))))
+}
+
+// IsTerminal reports whether the deployment has reached a final state and will
+// not transition further without a new trigger. Non-terminal statuses must be
+// polled.
+func (s railwayDeploymentStatus) IsTerminal() bool {
+	switch s.Normalized() {
+	case railwayStatusSuccess,
+		railwayStatusFailed,
+		railwayStatusCrashed,
+		railwayStatusRemoved,
+		railwayStatusSkipped:
+		return true
+	}
+	return false
+}
+
+// ExitCode maps a terminal deployment status to a process exit code: 0 for
+// SUCCESS, 1 for every other terminal state. Non-terminal statuses also map to
+// 1 because they only reach this function when the polling loop bails out (for
+// example on context cancellation).
+func (s railwayDeploymentStatus) ExitCode() int {
+	if s.Normalized() == railwayStatusSuccess {
+		return 0
+	}
+	return 1
 }
 
 func newRailwayClient(cfg Config, rt Runtime) (railwayAPI, error) {
@@ -157,12 +224,19 @@ func (c *railwayClient) TriggerDeploy(ctx context.Context, projectID, environmen
 	if err := c.do(ctx, triggerDeployMutation, vars, &out); err != nil {
 		return "", err
 	}
-	// The deployment id is not always returned in the trigger payload; callers
-	// resolve the active deployment via LatestDeployment afterwards. Surface the
-	// raw response if it happens to be a string so tests can inspect it.
+	// Railway's environmentTriggersDeploy historically returns the new deployment
+	// id as a bare string. Some schema versions wrap it in a Deployment object;
+	// accept either so callers always receive the id of the deployment they just
+	// triggered (which they then poll for terminal status).
 	var maybeID string
 	if err := json.Unmarshal(out.EnvironmentTriggersDeploy, &maybeID); err == nil {
-		return maybeID, nil
+		return strings.TrimSpace(maybeID), nil
+	}
+	var maybeObject struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out.EnvironmentTriggersDeploy, &maybeObject); err == nil {
+		return strings.TrimSpace(maybeObject.ID), nil
 	}
 	return "", nil
 }
@@ -179,6 +253,34 @@ const latestDeploymentQuery = `query crabboxLatestDeployment($input: DeploymentL
     }
   }
 }`
+
+// deploymentQuery fetches a single deployment by ID. Verified against
+// docs.railway.com/integrations/api/manage-deployments: the GraphQL schema
+// exposes `deployment(id: String!): Deployment`.
+const deploymentQuery = `query crabboxDeployment($id: String!) {
+  deployment(id: $id) {
+    id
+    status
+    url
+    createdAt
+  }
+}`
+
+func (c *railwayClient) Deployment(ctx context.Context, deploymentID string) (railwayDeployment, error) {
+	if strings.TrimSpace(deploymentID) == "" {
+		return railwayDeployment{}, fmt.Errorf("deployment: deploymentId is required")
+	}
+	var out struct {
+		Deployment railwayDeployment `json:"deployment"`
+	}
+	if err := c.do(ctx, deploymentQuery, map[string]any{"id": deploymentID}, &out); err != nil {
+		return railwayDeployment{}, err
+	}
+	if out.Deployment.ID == "" {
+		return railwayDeployment{}, fmt.Errorf("deployment %s not found", deploymentID)
+	}
+	return out.Deployment, nil
+}
 
 func (c *railwayClient) LatestDeployment(ctx context.Context, projectID, environmentID, serviceID string) (railwayDeployment, error) {
 	vars := map[string]any{
@@ -247,13 +349,21 @@ func (c *railwayClient) StopDeployment(ctx context.Context, deploymentID string)
 	return c.do(ctx, deploymentStopMutation, map[string]any{"id": deploymentID}, nil)
 }
 
-const projectsQuery = `query crabboxProjects {
-  projects {
+// railwayListServicesPageSize bounds the number of projects (and the services
+// inside each project) returned by ListServices so a long-lived token does not
+// pull megabytes of unrelated metadata in a single call. Railway's GraphQL
+// connections accept `first: Int` on the projects edge as well as on the
+// nested services edge; if a future schema rev drops support there, the inner
+// `first:` argument becomes inert and we fall back to a client-side cap below.
+const railwayListServicesPageSize = 50
+
+const projectsQuery = `query crabboxProjects($first: Int) {
+  projects(first: $first) {
     edges {
       node {
         id
         name
-        services {
+        services(first: $first) {
           edges {
             node {
               id
@@ -285,7 +395,7 @@ func (c *railwayClient) ListServices(ctx context.Context) ([]railwayService, err
 			} `json:"edges"`
 		} `json:"projects"`
 	}
-	if err := c.do(ctx, projectsQuery, nil, &out); err != nil {
+	if err := c.do(ctx, projectsQuery, map[string]any{"first": railwayListServicesPageSize}, &out); err != nil {
 		return nil, err
 	}
 	var services []railwayService
@@ -296,6 +406,12 @@ func (c *railwayClient) ListServices(ctx context.Context) ([]railwayService, err
 				Name:      s.Node.Name,
 				ProjectID: p.Node.ID,
 			})
+			// Client-side cap: defends against a Railway schema rev that ignores
+			// `first:` on the services connection, which would otherwise let a
+			// single project flood the result.
+			if len(services) >= railwayListServicesPageSize*railwayListServicesPageSize {
+				return services, nil
+			}
 		}
 	}
 	return services, nil

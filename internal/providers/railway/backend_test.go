@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestRailwayProviderSpec(t *testing.T) {
@@ -228,61 +231,125 @@ func TestRailwayRunRejectsLeaseFlags(t *testing.T) {
 }
 
 type fakeRailwayAPI struct {
+	mu                   sync.Mutex
 	triggerProjectID     string
 	triggerEnvironmentID string
 	triggerServiceID     string
 	deployID             string
 	logs                 []string
+	logsForID            string
 	deployment           railwayDeployment
-	services             []railwayService
-	service              railwayService
-	stopID               string
-	triggerErr           error
-	logsErr              error
-	listErr              error
+	// pollStatuses, when non-empty, is the sequence of statuses returned by
+	// Deployment() one call at a time. The last entry is replayed forever so
+	// callers can model "many non-terminal polls then a terminal one".
+	pollStatuses    []railwayDeploymentStatus
+	pollCalls       int
+	deploymentErr   error
+	deploymentBlock chan struct{}
+	services        []railwayService
+	service         railwayService
+	stopID          string
+	triggerErr      error
+	logsErr         error
+	listErr         error
 }
 
 func (f *fakeRailwayAPI) TriggerDeploy(_ context.Context, projectID, environmentID, serviceID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.triggerProjectID = projectID
 	f.triggerEnvironmentID = environmentID
 	f.triggerServiceID = serviceID
 	return f.deployID, f.triggerErr
 }
 
-func (f *fakeRailwayAPI) DeploymentLogs(_ context.Context, _ string, _ int) ([]string, error) {
+func (f *fakeRailwayAPI) DeploymentLogs(_ context.Context, deploymentID string, _ int) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.logsForID = deploymentID
 	return f.logs, f.logsErr
 }
 
 func (f *fakeRailwayAPI) LatestDeployment(_ context.Context, _, _, _ string) (railwayDeployment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.deployment, nil
 }
 
+func (f *fakeRailwayAPI) Deployment(ctx context.Context, deploymentID string) (railwayDeployment, error) {
+	// Optional gate that lets a test hold the call open so the polling loop can
+	// observe context-deadline cancellation.
+	f.mu.Lock()
+	block := f.deploymentBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return railwayDeployment{}, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pollCalls++
+	if f.deploymentErr != nil {
+		return railwayDeployment{}, f.deploymentErr
+	}
+	if len(f.pollStatuses) == 0 {
+		return railwayDeployment{ID: deploymentID, Status: f.deployment.Status}, nil
+	}
+	idx := f.pollCalls - 1
+	if idx >= len(f.pollStatuses) {
+		idx = len(f.pollStatuses) - 1
+	}
+	return railwayDeployment{ID: deploymentID, Status: f.pollStatuses[idx]}, nil
+}
+
 func (f *fakeRailwayAPI) StopDeployment(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stopID = id
 	return nil
 }
 
 func (f *fakeRailwayAPI) ListServices(_ context.Context) ([]railwayService, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.services, f.listErr
 }
 
 func (f *fakeRailwayAPI) GetService(_ context.Context, _ string) (railwayService, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.service, nil
 }
 
-func TestRailwayRunHappyPath(t *testing.T) {
-	api := &fakeRailwayAPI{
-		deployID:   "dep-1",
-		deployment: railwayDeployment{ID: "dep-1", Status: "SUCCESS"},
-		logs:       []string{"+ pnpm test", "PASS suite (1.2s)"},
-	}
+func newRailwayBackendForTest(api *fakeRailwayAPI) *railwayBackend {
 	cfg := Config{Provider: providerName}
 	cfg.Railway.APIToken = "test-token"
 	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"
 	cfg.Railway.ProjectID = "proj-1"
 	cfg.Railway.EnvironmentID = "env-1"
 	rt := Runtime{Stdout: io.Discard, Stderr: io.Discard}
-	backend := &railwayBackend{spec: Provider{}.Spec(), cfg: cfg, rt: rt, client: api}
+	return &railwayBackend{
+		spec:                Provider{}.Spec(),
+		cfg:                 cfg,
+		rt:                  rt,
+		client:              api,
+		pollInitialOverride: time.Millisecond,
+		pollOverallOverride: 5 * time.Second,
+	}
+}
+
+func TestRailwayRunHappyPath(t *testing.T) {
+	api := &fakeRailwayAPI{
+		deployID: "dep-1",
+		// Trigger returns dep-1; the poll loop sees one non-terminal status before
+		// terminating on SUCCESS; logs are then fetched against that exact id.
+		pollStatuses: []railwayDeploymentStatus{railwayStatusDeploying, railwayStatusSuccess},
+		logs:         []string{"+ pnpm test", "PASS suite (1.2s)"},
+	}
+	backend := newRailwayBackendForTest(api)
 	result, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -293,26 +360,149 @@ func TestRailwayRunHappyPath(t *testing.T) {
 	if api.triggerServiceID != "svc-1" || api.triggerProjectID != "proj-1" || api.triggerEnvironmentID != "env-1" {
 		t.Fatalf("trigger called with svc=%q proj=%q env=%q", api.triggerServiceID, api.triggerProjectID, api.triggerEnvironmentID)
 	}
+	if api.logsForID != "dep-1" {
+		t.Fatalf("logs fetched for id=%q, want dep-1 (new deployment, not stale)", api.logsForID)
+	}
+	if api.pollCalls < 2 {
+		t.Fatalf("poll calls = %d, want at least 2 (DEPLOYING then SUCCESS)", api.pollCalls)
+	}
 }
 
 func TestRailwayRunFailedDeploymentMapsToExit1(t *testing.T) {
 	api := &fakeRailwayAPI{
-		deployID:   "dep-1",
-		deployment: railwayDeployment{ID: "dep-1", Status: "FAILED"},
+		deployID:     "dep-1",
+		pollStatuses: []railwayDeploymentStatus{railwayStatusFailed},
 	}
-	cfg := Config{Provider: providerName}
-	cfg.Railway.APIToken = "test-token"
-	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"
-	cfg.Railway.ProjectID = "proj-1"
-	cfg.Railway.EnvironmentID = "env-1"
-	rt := Runtime{Stdout: io.Discard, Stderr: io.Discard}
-	backend := &railwayBackend{spec: Provider{}.Spec(), cfg: cfg, rt: rt, client: api}
+	backend := newRailwayBackendForTest(api)
 	result, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
 	if err == nil {
 		t.Fatal("Run accepted FAILED deployment status")
 	}
 	if result.ExitCode != 1 {
 		t.Fatalf("exit code = %d, want 1", result.ExitCode)
+	}
+}
+
+func TestRailwayRunPollsDeployingThenSuccess(t *testing.T) {
+	api := &fakeRailwayAPI{
+		deployID:     "dep-new",
+		pollStatuses: []railwayDeploymentStatus{railwayStatusQueued, railwayStatusBuilding, railwayStatusDeploying, railwayStatusSuccess},
+		logs:         []string{"ok"},
+	}
+	backend := newRailwayBackendForTest(api)
+	result, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
+	if err != nil {
+		t.Fatalf("Run err: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", result.ExitCode)
+	}
+	if api.pollCalls != 4 {
+		t.Fatalf("poll calls = %d, want 4 (queued, building, deploying, success)", api.pollCalls)
+	}
+}
+
+func TestRailwayRunReturnsErrorWhenTriggerYieldsEmptyID(t *testing.T) {
+	api := &fakeRailwayAPI{deployID: ""}
+	backend := newRailwayBackendForTest(api)
+	result, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
+	if err == nil {
+		t.Fatal("Run accepted empty deployment id from TriggerDeploy")
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("exit code = %d, want non-zero on empty deployment id", result.ExitCode)
+	}
+	if !strings.Contains(err.Error(), "no deployment id") {
+		t.Fatalf("err = %v, want 'no deployment id' message", err)
+	}
+}
+
+func TestRailwayRunPollingHonorsContextDeadline(t *testing.T) {
+	block := make(chan struct{})
+	api := &fakeRailwayAPI{
+		deployID:        "dep-1",
+		pollStatuses:    []railwayDeploymentStatus{railwayStatusBuilding},
+		deploymentBlock: block,
+	}
+	backend := newRailwayBackendForTest(api)
+	backend.pollInitialOverride = time.Millisecond
+	backend.pollOverallOverride = 25 * time.Millisecond
+	defer close(block) // unblock at the end of the test so the goroutine exits cleanly
+	_, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
+	if err == nil {
+		t.Fatal("Run accepted hung deployment status")
+	}
+	if !strings.Contains(err.Error(), "polling") && !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("err = %v, want polling/deadline message", err)
+	}
+}
+
+func TestRailwayDeploymentStatusEnum(t *testing.T) {
+	for _, tc := range []struct {
+		status     railwayDeploymentStatus
+		isTerminal bool
+		exitCode   int
+	}{
+		{railwayStatusSuccess, true, 0},
+		{railwayStatusFailed, true, 1},
+		{railwayStatusCrashed, true, 1},
+		{railwayStatusRemoved, true, 1},
+		{railwayStatusSkipped, true, 1},
+		{railwayStatusQueued, false, 1},
+		{railwayStatusInitializing, false, 1},
+		{railwayStatusBuilding, false, 1},
+		{railwayStatusDeploying, false, 1},
+		{railwayStatusWaiting, false, 1},
+		{railwayStatusNeedsApproval, false, 1},
+		{railwayStatusRemoving, false, 1},
+		{railwayStatusSleeping, false, 1},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			if got := tc.status.IsTerminal(); got != tc.isTerminal {
+				t.Fatalf("IsTerminal() = %v, want %v", got, tc.isTerminal)
+			}
+			if got := tc.status.ExitCode(); got != tc.exitCode {
+				t.Fatalf("ExitCode() = %d, want %d", got, tc.exitCode)
+			}
+		})
+	}
+}
+
+func TestRailwayDeploymentStatusNormalizesOnUnmarshal(t *testing.T) {
+	var dep railwayDeployment
+	if err := json.Unmarshal([]byte(`{"id":"d","status":"  success  "}`), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if dep.Status != railwayStatusSuccess {
+		t.Fatalf("status = %q, want SUCCESS (trim+upper-cased)", dep.Status)
+	}
+	if !dep.Status.IsTerminal() {
+		t.Fatal("normalized SUCCESS must be terminal")
+	}
+}
+
+// failingDeploymentClient lets the polling-error test thread a fake error
+// through Deployment() without bypassing the fakeRailwayAPI mutex.
+type failingDeploymentClient struct {
+	*fakeRailwayAPI
+	err error
+}
+
+func (f *failingDeploymentClient) Deployment(_ context.Context, _ string) (railwayDeployment, error) {
+	return railwayDeployment{}, f.err
+}
+
+func TestRailwayRunSurfacesPollingTransportError(t *testing.T) {
+	api := &fakeRailwayAPI{deployID: "dep-1"}
+	wrapped := &failingDeploymentClient{fakeRailwayAPI: api, err: fmt.Errorf("network broken")}
+	backend := newRailwayBackendForTest(api)
+	backend.client = wrapped
+	_, err := backend.Run(context.Background(), RunRequest{ID: "svc-1", NoSync: true, Command: []string{"pnpm", "test"}})
+	if err == nil {
+		t.Fatal("Run accepted polling transport failure")
+	}
+	if !strings.Contains(err.Error(), "network broken") {
+		t.Fatalf("err = %v, want surfaced transport error", err)
 	}
 }
 
