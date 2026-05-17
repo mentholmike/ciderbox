@@ -213,7 +213,7 @@ func (a App) runCommand(ctx context.Context, args []string) (err error) {
 	if err := applySelectedProfileConfig(&cfg); err != nil {
 		return err
 	}
-	if err := applyLeaseCreateFlags(&cfg, fs, leaseFlags); err != nil {
+	if err := applyLeaseCreateFlagsForLease(&cfg, fs, leaseFlags, *leaseIDFlag); err != nil {
 		return err
 	}
 	expansion, err := expandRunProfile(cfg, *presetName, *scenario, presetVars, command, *shellMode, *preflight, artifactGlobs, *proofTemplate)

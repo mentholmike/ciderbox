@@ -42,6 +42,10 @@ func registerLeaseCreateFlags(fs *flag.FlagSet, defaults Config) leaseCreateFlag
 }
 
 func applyLeaseCreateFlags(cfg *Config, fs *flag.FlagSet, values leaseCreateFlagValues) error {
+	return applyLeaseCreateFlagsForLease(cfg, fs, values, "")
+}
+
+func applyLeaseCreateFlagsForLease(cfg *Config, fs *flag.FlagSet, values leaseCreateFlagValues, existingLeaseID string) error {
 	cfg.Provider = *values.Provider
 	cfg.Profile = *values.Profile
 	cfg.Class = *values.Class
@@ -51,6 +55,9 @@ func applyLeaseCreateFlags(cfg *Config, fs *flag.FlagSet, values leaseCreateFlag
 	}
 	if err := applyNetworkFlagOverrides(cfg, fs, values.Network); err != nil {
 		return err
+	}
+	if existingLeaseID != "" && cfg.Provider == "aws" && cfg.TargetOS == targetMacOS && !flagWasSet(fs, "market") {
+		cfg.Capacity.Market = "on-demand"
 	}
 	if err := applyCapacityMarketFlag(cfg, fs, *values.Market); err != nil {
 		return err
