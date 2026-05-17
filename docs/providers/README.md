@@ -28,6 +28,7 @@ static SSH provider for existing machines.
 | [Modal](modal.md) | delegated run | Linux | Modal Sandbox execution through the local Python client |
 | [Tensorlake](tensorlake.md) | delegated run | Linux | Tensorlake Firecracker sandbox execution via the `tensorlake` CLI |
 | [Cloudflare](cloudflare.md) | delegated run | Linux | Cloudflare execution through a Worker and container runner |
+| [Railway](railway.md) | delegated run | Linux | redeploy and stream logs for an existing Railway service via the GraphQL API |
 
 ## Shared Rules
 
@@ -71,6 +72,10 @@ Proxmox and delegated providers do not use the Crabbox coordinator:
 - Tensorlake uses the `tensorlake` CLI (`tensorlake sbx ...`) for sandbox lifecycle and command exec.
 - Cloudflare uses a deployed Worker runner backed by a Cloudflare
   Containers image.
+- Railway uses the [Railway](https://railway.com) GraphQL API (`environmentTriggersDeploy`,
+  `deploymentLogs`, `deploymentStop`) against a pre-existing service the user
+  owns. The user's command argument is logged; Railway runs the service's own
+  start command — there is no synchronous exec endpoint.
 
 Namespace Devbox and Semaphore are SSH lease providers that do not use the
 Crabbox coordinator. Namespace provisions through the authenticated `devbox`
@@ -99,6 +104,7 @@ provisions through `ssh exe.dev` and returns a normal VM SSH target.
 | Modal | yes | yes | no | no | archive via Modal Sandbox exec | no |
 | Tensorlake | yes | yes | no | no | archive via `tensorlake sbx cp` | no |
 | Cloudflare | yes | yes | no | no | archive via Worker runner | no |
+| Railway | yes | no | no | no | no | no |
 
 Actions runner hydration requires a normal SSH lease on Linux and is core-over-SSH.
 Use AWS, Google Cloud, Hetzner, Proxmox, Static SSH, exe.dev, Namespace Devbox,

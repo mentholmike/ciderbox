@@ -57,6 +57,9 @@ Supported providers:
 - [Cloudflare](docs/providers/cloudflare.md)
   (`provider: cloudflare`): delegated Cloudflare execution through a Worker and
   container runner.
+- [Railway](docs/providers/railway.md) (`provider: railway`): delegated
+  redeploy-and-stream execution against a pre-existing Railway service through
+  the [Railway](https://railway.com) GraphQL API.
 
 ---
 

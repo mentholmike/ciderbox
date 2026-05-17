@@ -91,6 +91,7 @@ type Config struct {
 	Daytona             DaytonaConfig
 	E2B                 E2BConfig
 	ExeDev              ExeDevConfig
+	Railway             RailwayConfig
 	Islo                IsloConfig
 	Tensorlake          TensorlakeConfig
 	Modal               ModalConfig
@@ -198,6 +199,13 @@ type ExeDevConfig struct {
 	User        string
 	WorkRoot    string
 	NoEmail     bool
+}
+
+type RailwayConfig struct {
+	APIToken      string
+	APIURL        string
+	ProjectID     string
+	EnvironmentID string
 }
 
 type IsloConfig struct {
@@ -539,6 +547,9 @@ func baseConfig() Config {
 			Disk:        "10GB",
 			NoEmail:     true,
 		},
+		Railway: RailwayConfig{
+			APIURL: "https://backboard.railway.com/graphql/v2",
+		},
 		Islo: IsloConfig{
 			BaseURL:  "https://api.islo.dev",
 			Image:    "docker.io/library/ubuntu:24.04",
@@ -620,6 +631,7 @@ type fileConfig struct {
 	Daytona          *fileDaytonaConfig                 `yaml:"daytona,omitempty"`
 	E2B              *fileE2BConfig                     `yaml:"e2b,omitempty"`
 	ExeDev           *fileExeDevConfig                  `yaml:"exeDev,omitempty"`
+	Railway          *fileRailwayConfig                 `yaml:"railway,omitempty"`
 	Islo             *fileIsloConfig                    `yaml:"islo,omitempty"`
 	Tensorlake       *fileTensorlakeConfig              `yaml:"tensorlake,omitempty"`
 	Modal            *fileModalConfig                   `yaml:"modal,omitempty"`
@@ -816,6 +828,12 @@ type fileExeDevConfig struct {
 	User        string `yaml:"user,omitempty"`
 	WorkRoot    string `yaml:"workRoot,omitempty"`
 	NoEmail     *bool  `yaml:"noEmail,omitempty"`
+}
+
+type fileRailwayConfig struct {
+	APIURL        string `yaml:"apiUrl,omitempty"`
+	ProjectID     string `yaml:"projectId,omitempty"`
+	EnvironmentID string `yaml:"environmentId,omitempty"`
 }
 
 type fileIsloConfig struct {
@@ -1611,6 +1629,17 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 			cfg.ExeDev.NoEmail = *file.ExeDev.NoEmail
 		}
 	}
+	if file.Railway != nil {
+		if file.Railway.APIURL != "" {
+			cfg.Railway.APIURL = file.Railway.APIURL
+		}
+		if file.Railway.ProjectID != "" {
+			cfg.Railway.ProjectID = file.Railway.ProjectID
+		}
+		if file.Railway.EnvironmentID != "" {
+			cfg.Railway.EnvironmentID = file.Railway.EnvironmentID
+		}
+	}
 	if file.Islo != nil {
 		if file.Islo.BaseURL != "" {
 			cfg.Islo.BaseURL = file.Islo.BaseURL
@@ -2257,6 +2286,10 @@ func applyEnv(cfg *Config) {
 	if value, ok := getenvBool("CRABBOX_EXE_DEV_NO_EMAIL"); ok {
 		cfg.ExeDev.NoEmail = value
 	}
+	cfg.Railway.APIToken = getenv("CRABBOX_RAILWAY_API_TOKEN", getenv("RAILWAY_API_TOKEN", cfg.Railway.APIToken))
+	cfg.Railway.APIURL = getenv("CRABBOX_RAILWAY_API_URL", getenv("RAILWAY_API_URL", cfg.Railway.APIURL))
+	cfg.Railway.ProjectID = getenv("CRABBOX_RAILWAY_PROJECT_ID", getenv("RAILWAY_PROJECT_ID", cfg.Railway.ProjectID))
+	cfg.Railway.EnvironmentID = getenv("CRABBOX_RAILWAY_ENVIRONMENT_ID", getenv("RAILWAY_ENVIRONMENT_ID", cfg.Railway.EnvironmentID))
 	cfg.Islo.APIKey = getenv("CRABBOX_ISLO_API_KEY", getenv("ISLO_API_KEY", cfg.Islo.APIKey))
 	cfg.Islo.BaseURL = getenv("CRABBOX_ISLO_BASE_URL", getenv("ISLO_BASE_URL", cfg.Islo.BaseURL))
 	cfg.Islo.Image = getenv("CRABBOX_ISLO_IMAGE", cfg.Islo.Image)
