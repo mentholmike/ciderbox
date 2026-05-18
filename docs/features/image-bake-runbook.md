@@ -193,12 +193,14 @@ region, quotas, and image name are correct:
 scripts/mint-aws-devtools-image.sh \
   --target linux \
   --region us-west-2 \
+  --class standard \
   --type m7i.large \
   --run
 
 scripts/mint-aws-devtools-image.sh \
   --target windows \
   --region us-west-2 \
+  --class standard \
   --type m7i.large \
   --windows-mode normal \
   --run
@@ -227,10 +229,12 @@ CRABBOX_LINUX_DESKTOP_TOOLS=0
 CRABBOX_WINDOWS_INSTALL_DOCKER=0
 ```
 
-The wrapper always proves the source lease, candidate AMI, and promoted AMI
-before declaring success unless `--no-promote` is set. It writes warmup timing
-logs under `.crabbox/image-mint-<image-name>-*.log`, which is the evidence to
-compare before and after each bake.
+The wrapper defaults to `--class standard` even when an explicit instance type
+is provided, so image bakes do not accidentally consume the high-pressure beast
+class. It always proves the source lease, candidate AMI, and promoted AMI before
+declaring success unless `--no-promote` is set. It writes warmup timing logs
+under `.crabbox/image-mint-<image-name>-*.log`, which is the evidence to compare
+before and after each bake.
 
 ## Fast Boot Expectations
 

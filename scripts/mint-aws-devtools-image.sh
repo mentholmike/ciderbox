@@ -6,6 +6,7 @@ CRABBOX_BIN="${CRABBOX_BIN:-$ROOT/bin/crabbox}"
 target="${CRABBOX_IMAGE_TARGET:-linux}"
 region="${CRABBOX_IMAGE_REGION:-${CRABBOX_AWS_REGION:-}}"
 server_type="${CRABBOX_IMAGE_TYPE:-}"
+server_class="${CRABBOX_IMAGE_CLASS:-standard}"
 image_name="${CRABBOX_IMAGE_NAME:-}"
 ttl="${CRABBOX_IMAGE_TTL:-2h}"
 idle_timeout="${CRABBOX_IMAGE_IDLE_TIMEOUT:-30m}"
@@ -32,6 +33,7 @@ source/candidate leases and image artifacts.
 Flags:
   --target TARGET       linux or windows
   --region REGION       AWS region
+  --class CLASS         Crabbox machine class, default standard
   --type TYPE           AWS instance type
   --name NAME           image name
   --run                 allow paid lease/image work
@@ -69,6 +71,11 @@ while [[ "$#" -gt 0 ]]; do
     --type)
       [[ "$#" -ge 2 ]] || { printf '%s requires a value\n' "$1" >&2; exit 2; }
       server_type="$2"
+      shift 2
+      ;;
+    --class)
+      [[ "$#" -ge 2 ]] || { printf '%s requires a value\n' "$1" >&2; exit 2; }
+      server_class="$2"
       shift 2
       ;;
     --name)
@@ -174,7 +181,7 @@ run_cmd() {
 }
 
 warmup_args() {
-  printf '%s\0' warmup --provider aws --target "$target" --market on-demand --ttl "$ttl" --idle-timeout "$idle_timeout" --timing-json
+  printf '%s\0' warmup --provider aws --target "$target" --class "$server_class" --market on-demand --ttl "$ttl" --idle-timeout "$idle_timeout" --timing-json
   [[ -n "$server_type" ]] && printf '%s\0' --type "$server_type"
   [[ "$desktop" == "1" ]] && printf '%s\0' --desktop
   [[ "$browser" == "1" ]] && printf '%s\0' --browser
@@ -295,6 +302,7 @@ AWS devtools image mint
   target: $target
   image:  $image_name
   region: ${region:-auto}
+  class:  $server_class
   type:   ${server_type:-auto}
   prep:   $prep_script
   proof:  desktop=$desktop browser=$browser promote=$promote

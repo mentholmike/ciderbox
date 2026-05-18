@@ -121,6 +121,7 @@ test("AWS devtools mint wrapper runs linux source candidate and promoted proof",
   const log = await readFile(fake.log, "utf8");
   assert.match(log, /env CRABBOX_AWS_REGION=us-west-2 AWS_REGION=us-west-2 CRABBOX_AWS_AMI= args warmup --provider aws --target linux/);
   assert.match(log, /env CRABBOX_AWS_REGION=us-west-2 AWS_REGION=us-west-2 CRABBOX_AWS_AMI=ami-devtools args warmup --provider aws --target linux/);
+  assert.match(log, /--class standard/);
   assert.match(log, /--browser/);
   assert.doesNotMatch(log, /warmup .*--region us-west-2/);
   assert.match(log, /run --provider aws --target linux --id cbx_source --no-sync --script/);
