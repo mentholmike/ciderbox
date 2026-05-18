@@ -967,6 +967,10 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
           rfb.scaleViewport = true;
           rfb.resizeSession = false;
           rfb.viewOnly = true;
+          if (target === "macos") {
+            rfb.compressionLevel = 6;
+            rfb.qualityLevel = 4;
+          }
           rfb.addEventListener("connect", () => {
             connected = true;
             retryAttempt = 0;
