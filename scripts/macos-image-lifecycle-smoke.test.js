@@ -618,8 +618,14 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
   assert.match(fakeLog, /required_macos_major=15/);
   assert.match(fakeLog, /required_swift_tools=6\.2/);
+  assert.match(fakeLog, /require_xcode=0/);
   assert.match(fakeLog, /xcode-select -p/);
+  assert.match(fakeLog, /xcrun --sdk macosx --show-sdk-path/);
   assert.match(fakeLog, /Swift tools %s\+ required/);
+  assert.match(fakeLog, /command -v brew/);
+  assert.match(fakeLog, /command -v node/);
+  assert.match(fakeLog, /command -v corepack/);
+  assert.match(fakeLog, /command -v pnpm/);
   assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy image --wait --wait-timeout 60m$/m);
   assert.match(fakeLog, /^checkpoint fork chk_macos --desktop$/m);
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);

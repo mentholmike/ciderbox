@@ -34,7 +34,7 @@ keep_checkpoint="${CRABBOX_MACOS_KEEP_CHECKPOINT:-0}"
 release_host="${CRABBOX_MACOS_RELEASE_HOST:-0}"
 required_macos_major="${CRABBOX_MACOS_REQUIRED_MAJOR:-15}"
 required_swift_tools="${CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS:-6.2}"
-require_xcode="${CRABBOX_MACOS_REQUIRE_XCODE:-1}"
+require_xcode="${CRABBOX_MACOS_REQUIRE_XCODE:-0}"
 source_prep_script="${CRABBOX_MACOS_SOURCE_PREP_SCRIPT:-}"
 artifact_root="${CRABBOX_MACOS_ARTIFACT_DIR:-$ROOT/.crabbox/macos-image-smoke/$image_name}"
 summary_file="$artifact_root/summary.json"
@@ -824,9 +824,12 @@ if [[ "$require_xcode" == "1" ]]; then
   command -v xcodebuild
   xcodebuild -version
   test -d "$developer_dir/Platforms/MacOSX.platform/Developer/SDKs"
-elif command -v xcodebuild >/dev/null; then
-  xcodebuild -version || true
 fi
+command -v xcrun
+xcrun --sdk macosx --show-sdk-path
+xcrun --find clang
+xcrun --find swift
+command -v clang
 command -v swift
 swift --version
 swift_version="$(swift --version | awk '{ for (i = 1; i < NF; i++) if ($i == "version") { print $(i + 1); exit } }')"
@@ -852,6 +855,19 @@ command -v git
 command -v rsync
 command -v curl
 command -v nc
+command -v brew
+brew --version
+brew --prefix
+command -v node
+node --version
+command -v npm
+npm --version
+command -v corepack
+corepack --version
+command -v pnpm
+pnpm --version
+command -v python3
+python3 --version
 test -d "$HOME/crabbox"
 test -w "$HOME/crabbox"
 sudo test -s /var/db/crabbox/vnc.password
