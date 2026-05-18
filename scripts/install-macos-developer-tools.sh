@@ -184,6 +184,8 @@ link_common_tools() {
   link_tool shellcheck "$brew_prefix/bin"
   link_tool shfmt "$brew_prefix/bin"
   link_tool python3 "$python_bin" "$brew_prefix/bin"
+  export PATH="/usr/local/bin:$PATH"
+  hash -r 2>/dev/null || true
 }
 
 prepare_cache_dirs() {
