@@ -726,6 +726,85 @@ func TestRunArtifactCollectScriptWarnsOnEmptyMatches(t *testing.T) {
 	}
 }
 
+func TestRunArtifactCollectScriptRecursiveGlobIncludesZeroDepthMatches(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".artifacts", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".artifacts", "result.xml"), []byte("<root />\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".artifacts", "nested", "result.xml"), []byte("<nested />\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(dir, ".crabbox", "artifacts.tgz")
+	script := runArtifactCollectScript(dir, ".crabbox/artifacts.tgz", []string{".artifacts/**/*.xml"})
+	if out, err := exec.Command("bash", "-lc", script).CombinedOutput(); err != nil {
+		t.Fatalf("collect script failed: %v\n%s", err, out)
+	}
+	names := tarGzNames(t, archivePath)
+	if !stringSliceContains(names, ".artifacts/result.xml") {
+		t.Fatalf("archive missing zero-depth recursive match: %#v", names)
+	}
+	if !stringSliceContains(names, ".artifacts/nested/result.xml") {
+		t.Fatalf("archive missing nested recursive match: %#v", names)
+	}
+}
+
+func TestRunArtifactCollectScriptRecursiveGlobPreservesPathSegments(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{
+		filepath.Join("foo", "bar"),
+		filepath.Join("foo", "x", "bar"),
+		filepath.Join("foo", "bar", "baz"),
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join("foo", "bar", "file.txt"):       "zero depth\n",
+		filepath.Join("foo", "x", "bar", "file.txt"):  "nested\n",
+		filepath.Join("foo", "bar", "baz", "qux.txt"): "outside\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archivePath := filepath.Join(dir, ".crabbox", "artifacts.tgz")
+	script := runArtifactCollectScript(dir, ".crabbox/artifacts.tgz", []string{"foo/**/bar/*.txt"})
+	if out, err := exec.Command("bash", "-lc", script).CombinedOutput(); err != nil {
+		t.Fatalf("collect script failed: %v\n%s", err, out)
+	}
+	names := tarGzNames(t, archivePath)
+	if !stringSliceContains(names, "foo/bar/file.txt") {
+		t.Fatalf("archive missing zero-depth path match: %#v", names)
+	}
+	if !stringSliceContains(names, "foo/x/bar/file.txt") {
+		t.Fatalf("archive missing nested path match: %#v", names)
+	}
+	if stringSliceContains(names, "foo/bar/baz/qux.txt") {
+		t.Fatalf("archive included path outside requested segment glob: %#v", names)
+	}
+}
+
+func TestArtifactGlobSearchRootUsesLiteralPrefix(t *testing.T) {
+	tests := map[string]string{
+		".artifacts/**/*.xml": ".artifacts",
+		"foo/**/bar/*.txt":    "foo",
+		"foo/bar*.txt":        "foo",
+		"foo*/*.txt":          ".",
+		"**/*.xml":            ".",
+		"result.xml":          ".",
+	}
+	for glob, want := range tests {
+		if got := artifactGlobSearchRoot(glob); got != want {
+			t.Fatalf("artifactGlobSearchRoot(%q)=%q, want %q", glob, got, want)
+		}
+	}
+}
+
 func tarGzNames(t *testing.T, path string) []string {
 	t.Helper()
 	file, err := os.Open(path)

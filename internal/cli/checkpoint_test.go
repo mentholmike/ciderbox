@@ -327,7 +327,7 @@ func TestCheckpointCreateModePrefersDiskSnapshotLinuxNative(t *testing.T) {
 	}
 }
 
-func TestCheckpointCreateModeSupportsAWSMacOSNativeSnapshots(t *testing.T) {
+func TestCheckpointCreateModeSupportsAWSMacOSAMIBackedCheckpoints(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Provider = "aws"
 	cfg.Coordinator = "https://coordinator.example"
@@ -336,11 +336,14 @@ func TestCheckpointCreateModeSupportsAWSMacOSNativeSnapshots(t *testing.T) {
 	server := Server{Provider: "aws", CloudID: "i-123"}
 	target := SSHTarget{TargetOS: targetMacOS}
 
-	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindAWSEBS {
-		t.Fatalf("mode=%q, want %q", got, checkpointKindAWSEBS)
+	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
 	if got := checkpointCreateMode("native", "image", cfg, server, target, false); got != checkpointKindAWSAMI {
 		t.Fatalf("image strategy mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("snapshot", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("snapshot mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
 }
 
@@ -377,6 +380,174 @@ func TestCheckpointCreateModeAutoFallsBackForDirectAWS(t *testing.T) {
 	}
 }
 
+func TestCheckpointCreateModeNativeSupportsDirectAWSAMI(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = ""
+	cfg.TargetOS = targetMacOS
+	server := Server{Provider: "aws", CloudID: "i-123"}
+	target := SSHTarget{TargetOS: targetMacOS}
+
+	if got := checkpointCreateMode("native", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("native mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("native", "image", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("native image mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("auto", "image", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("auto image mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("image", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("image mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+	if got := checkpointCreateMode("snapshot", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("snapshot mode=%q, want %q", got, checkpointKindAWSAMI)
+	}
+}
+
+func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
+	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CRABBOX_CONFIG", cfgPath)
+	record := checkpointRecord{
+		Kind:     checkpointKindAWSAMI,
+		Provider: "aws",
+	}
+	record.Native.Provider = "aws"
+	record.Native.Region = "eu-west-1"
+	record.Native.Direct = true
+
+	cfg, ok := directAWSCheckpointConfig(record)
+	if !ok {
+		t.Fatal("direct AWS checkpoint config not detected")
+	}
+	if cfg.AWSRegion != "eu-west-1" {
+		t.Fatalf("AWSRegion=%q, want record region", cfg.AWSRegion)
+	}
+
+	if err := os.WriteFile(cfgPath, []byte("provider: aws\ncoordinator: https://coordinator.example\naws:\n  region: us-east-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok = directAWSCheckpointConfig(record)
+	if !ok {
+		t.Fatal("direct AWS checkpoint should still use direct cleanup when a coordinator is configured later")
+	}
+	if cfg.Coordinator == "" {
+		t.Fatal("expected loaded config to preserve coordinator for unrelated settings")
+	}
+
+	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record.Native.Direct = false
+	if _, ok := directAWSCheckpointConfig(record); ok {
+		t.Fatal("brokered AWS checkpoint should not use direct AWS cleanup")
+	}
+}
+
+func TestVerifyDirectAWSCheckpointRefusesAccountMismatchBeforeNotFound(t *testing.T) {
+	var describeHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		switch action := r.Form.Get("Action"); action {
+		case "GetCallerIdentity":
+			writeSTSXML(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>999999999999</Account><Arn>arn:aws:iam::999999999999:user/test</Arn><UserId>AIDAEXAMPLE</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>`)
+		case "DescribeImages":
+			describeHits++
+			writeEC2Error(w, "InvalidAMIID.NotFound", "image not found", http.StatusBadRequest)
+		default:
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	audit := verifyDirectAWSCheckpointWithClient(context.Background(), checkpointAudit{}, testAWSClient(server.URL), "ami-12345678", "123456789012")
+	if audit.ProviderState != "unknown" || audit.NextAction != "check_auth_or_provider" {
+		t.Fatalf("audit=%#v, want account mismatch auth/provider state", audit)
+	}
+	if !strings.Contains(audit.Error, "account mismatch") {
+		t.Fatalf("error=%q, want account mismatch", audit.Error)
+	}
+	if describeHits != 0 {
+		t.Fatalf("DescribeImages called %d time(s), want zero", describeHits)
+	}
+}
+
+func TestCreateDirectAWSAMICheckpointValidatesConfigBeforePreparingSource(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = ""
+	cfg.AWSRegion = ""
+	target := SSHTarget{User: "nobody", Host: "127.0.0.1", Port: "1", TargetOS: targetMacOS}
+	app := App{Stderr: io.Discard}
+
+	_, err := app.createDirectAWSAMICheckpoint(context.Background(), cfg, Server{Provider: "aws", CloudID: "i-123"}, target, "cbx_test", "", "repo", false, false, time.Minute)
+	if err == nil {
+		t.Fatal("expected missing AWS region error")
+	}
+	if !strings.Contains(err.Error(), "CRABBOX_AWS_REGION or AWS_REGION is required") {
+		t.Fatalf("err=%v, want AWS config validation before source preparation", err)
+	}
+	if strings.Contains(err.Error(), "prepare native checkpoint source") {
+		t.Fatalf("source was prepared before AWS config validation: %v", err)
+	}
+}
+
+func TestWaitForDirectAWSImagePreservesAccountID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if action := r.Form.Get("Action"); action != "DescribeImages" {
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+			return
+		}
+		writeEC2XML(w, `<DescribeImagesResponse><imagesSet><item><imageId>ami-12345678</imageId><name>checkpoint</name><imageState>available</imageState></item></imagesSet></DescribeImagesResponse>`)
+	}))
+	defer server.Close()
+
+	image, err := waitForDirectAWSImage(context.Background(), testAWSClient(server.URL), "ami-12345678", "123456789012", time.Second, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image.AccountID != "123456789012" {
+		t.Fatalf("AccountID=%q, want preserved caller account", image.AccountID)
+	}
+}
+
+func TestApplyNativeImageCheckpointRecordPersistsSnapshotIDs(t *testing.T) {
+	record := checkpointRecord{Kind: checkpointKindArchive, Provider: "aws"}
+	applyNativeImageCheckpointRecord(&record, CoordinatorImage{
+		ID:          "ami-12345678",
+		Name:        "checkpoint",
+		State:       "available",
+		Provider:    "aws",
+		Kind:        checkpointKindAWSAMI,
+		Region:      "eu-west-1",
+		AccountID:   "123456789012",
+		ResourceID:  "ami-12345678",
+		SnapshotIDs: []string{"snap-1", "snap-2"},
+		Direct:      true,
+	}, true)
+
+	if record.Kind != checkpointKindAWSAMI {
+		t.Fatalf("Kind=%q, want %q", record.Kind, checkpointKindAWSAMI)
+	}
+	if got := strings.Join(record.Native.SnapshotIDs, ","); got != "snap-1,snap-2" {
+		t.Fatalf("snapshot IDs=%q, want snap-1,snap-2", got)
+	}
+	if record.Native.AccountID != "123456789012" {
+		t.Fatalf("AccountID=%q, want caller account", record.Native.AccountID)
+	}
+	if !record.Native.Direct {
+		t.Fatal("direct marker was not persisted")
+	}
+}
+
 func TestCheckpointCreateModeNativeUsesResolvedProvider(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Provider = "aws"
@@ -384,6 +555,21 @@ func TestCheckpointCreateModeNativeUsesResolvedProvider(t *testing.T) {
 	server := Server{Provider: "hetzner", CloudID: "123"}
 	if got := checkpointCreateMode("native", "", cfg, server, SSHTarget{TargetOS: targetLinux}, false); got != "unsupported" {
 		t.Fatalf("mode=%q, want unsupported", got)
+	}
+}
+
+func TestCheckpointCreateModeDirectAWSMacOSDiskSnapshotUsesAMI(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = ""
+	cfg.TargetOS = targetMacOS
+	server := Server{Provider: "aws", CloudID: "i-1234567890abcdef0"}
+	target := SSHTarget{TargetOS: targetMacOS}
+
+	for _, mode := range []string{"native", "snapshot"} {
+		if got := checkpointCreateMode(mode, checkpointStrategyDiskSnapshot, cfg, server, target, false); got != checkpointKindAWSAMI {
+			t.Fatalf("mode=%s got %q, want %q", mode, got, checkpointKindAWSAMI)
+		}
 	}
 }
 
@@ -590,6 +776,65 @@ func TestCheckpointInspectVerifyResourceOnlyNativeDoesNotUseCoordinator(t *testi
 	}
 }
 
+func TestCheckpointInspectVerifyDirectAWSUsesLocalPathBeforeCoordinator(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_AWS_REGION", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	var coordinatorHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		coordinatorHits++
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	t.Setenv("CRABBOX_COORDINATOR", server.URL)
+	t.Setenv("CRABBOX_COORDINATOR_ADMIN_TOKEN", "admin")
+	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
+	if err := os.WriteFile(cfgPath, []byte("provider: aws\ncoordinator: "+server.URL+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CRABBOX_CONFIG", cfgPath)
+
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{
+		ID:        "chk_direct_aws",
+		Kind:      checkpointKindAWSAMI,
+		Provider:  "aws",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		TargetOS:  targetMacOS,
+	}
+	record.Native.Provider = "aws"
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "not a valid region"
+	record.Native.Direct = true
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.checkpointInspect(context.Background(), []string{record.ID, "--verify", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var audit checkpointAudit
+	if err := json.Unmarshal(stdout.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if coordinatorHits != 0 {
+		t.Fatalf("direct AWS verification hit coordinator %d time(s)", coordinatorHits)
+	}
+	if audit.ProviderState != "unknown" || audit.NextAction != "check_auth_or_provider" {
+		t.Fatalf("audit=%#v", audit)
+	}
+	if audit.Error == "" {
+		t.Fatal("expected local AWS verification error")
+	}
+}
+
 func TestCheckpointDeleteResourceOnlyNativeDeletesProviderResource(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
@@ -728,6 +973,66 @@ func TestApplyAWSAMICheckpointForkConfigRecomputesServerType(t *testing.T) {
 	}
 	if cfg.ServerType != "c7a.48xlarge" {
 		t.Fatalf("ServerType=%q, want AWS beast default", cfg.ServerType)
+	}
+}
+
+func TestApplyAWSAMICheckpointForkConfigKeepsDirectRecordsOffCoordinator(t *testing.T) {
+	fs := newFlagSet("checkpoint fork", io.Discard)
+	_ = fs.String("type", "", "provider type")
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = "https://coordinator.example"
+	cfg.CoordToken = "user-token"
+	cfg.CoordAdminToken = "admin-token"
+	record := checkpointRecord{Kind: checkpointKindAWSAMI, TargetOS: targetLinux, WindowsMode: windowsModeNormal}
+	record.Native.Provider = "aws"
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "eu-west-1"
+	record.Native.Direct = true
+
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Coordinator != "" || cfg.CoordToken != "" {
+		t.Fatalf("direct checkpoint fork kept coordinator: coordinator=%q token=%q", cfg.Coordinator, cfg.CoordToken)
+	}
+	if cfg.AWSAMI != "ami-12345678" || cfg.AWSRegion != "eu-west-1" {
+		t.Fatalf("direct AWS image config not applied: %#v", cfg)
+	}
+}
+
+func TestApplyAWSAMICheckpointForkConfigPreservesDirectMacHostPin(t *testing.T) {
+	fs := newFlagSet("checkpoint fork", io.Discard)
+	_ = fs.String("type", "", "provider type")
+	_ = fs.String("market", "spot", "capacity market")
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = "https://coordinator.example"
+	cfg.TargetOS = targetLinux
+	record := checkpointRecord{
+		Kind:        checkpointKindAWSAMI,
+		TargetOS:    targetMacOS,
+		WindowsMode: windowsModeNormal,
+		ServerType:  "mac2.metal",
+		HostID:      "h-000000000001",
+	}
+	record.Native.Provider = "aws"
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "eu-west-1"
+	record.Native.Direct = true
+
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Coordinator != "" {
+		t.Fatalf("direct checkpoint fork kept coordinator: %q", cfg.Coordinator)
+	}
+	if cfg.HostID != "h-000000000001" || cfg.AWSMacHostID != "h-000000000001" {
+		t.Fatalf("host pin not preserved: hostID=%q awsMacHostID=%q", cfg.HostID, cfg.AWSMacHostID)
+	}
+	if cfg.Capacity.Market != "on-demand" {
+		t.Fatalf("market=%q, want on-demand", cfg.Capacity.Market)
 	}
 }
 

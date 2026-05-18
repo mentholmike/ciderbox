@@ -95,12 +95,76 @@ func runArtifactCollectScript(workdir, remotePath string, globs []string) string
 	b.WriteString("set -euo pipefail\n")
 	b.WriteString("cd " + shellQuote(workdir) + "\n")
 	b.WriteString("mkdir -p .crabbox\n")
-	b.WriteString("shopt -s globstar nullglob dotglob\n")
+	b.WriteString("shopt -s nullglob dotglob\n")
 	b.WriteString("files=()\n")
+	b.WriteString("add_artifact_file() { local f=\"$1\" rel existing; { [ -f \"$f\" ] || [ -L \"$f\" ]; } || return 0; rel=${f#./}; case \"$rel\" in .git|.git/*|.crabbox|.crabbox/*|" + remotePath + ") return 0;; esac; if [ ${#files[@]} -gt 0 ]; then for existing in \"${files[@]}\"; do [ \"$existing\" = \"$rel\" ] && return 0; done; fi; files+=(\"$rel\"); }\n")
 	for _, glob := range globs {
-		b.WriteString("for f in " + glob + "; do { [ -f \"$f\" ] || [ -L \"$f\" ]; } || continue; rel=${f#./}; case \"$rel\" in .git|.git/*|.crabbox|.crabbox/*|" + remotePath + ") continue;; esac; files+=(\"$rel\"); done\n")
+		b.WriteString("for f in " + glob + "; do add_artifact_file \"$f\"; done\n")
+		if strings.Contains(glob, "**") {
+			if strings.Contains(glob, "**/") {
+				b.WriteString("for f in " + strings.Replace(glob, "**/", "", 1) + "; do add_artifact_file \"$f\"; done\n")
+			}
+			searchRoot := artifactGlobSearchRoot(glob)
+			b.WriteString("artifact_regex=" + shellQuote(artifactGlobRegex(glob)) + "; artifact_root=" + shellQuote(searchRoot) + "; if [ -e \"$artifact_root\" ]; then while IFS= read -r -d '' f; do rel=${f#./}; if [[ \"$rel\" =~ $artifact_regex || \"./$rel\" =~ $artifact_regex ]]; then add_artifact_file \"$f\"; fi; done < <(find \"$artifact_root\" \\( -path './.git' -o -path './.git/*' -o -path './.crabbox' -o -path './.crabbox/*' -o -path '.git' -o -path '.git/*' -o -path '.crabbox' -o -path '.crabbox/*' \\) -prune -o \\( -type f -o -type l \\) -print0); fi\n")
+		}
 	}
 	b.WriteString("if [ ${#files[@]} -eq 0 ]; then printf 'warning: no artifact matches\\n' >&2; tar -czf " + shellQuote(remotePath) + " --files-from /dev/null; else tar -czf " + shellQuote(remotePath) + " -- \"${files[@]}\"; fi\n")
+	return b.String()
+}
+
+func artifactGlobSearchRoot(glob string) string {
+	glob = strings.TrimSpace(filepath.ToSlash(glob))
+	glob = strings.TrimPrefix(glob, "./")
+	if glob == "" {
+		return "."
+	}
+	firstMeta := strings.IndexAny(glob, "*?")
+	if firstMeta < 0 {
+		dir := filepath.ToSlash(filepath.Dir(glob))
+		if dir == "" {
+			return "."
+		}
+		return dir
+	}
+	prefix := strings.TrimRight(glob[:firstMeta], "/")
+	if prefix == "" {
+		return "."
+	}
+	dir := filepath.ToSlash(filepath.Dir(prefix))
+	if dir == "." && strings.HasSuffix(glob[:firstMeta], "/") {
+		return prefix
+	}
+	if dir == "." && !strings.Contains(prefix, "/") {
+		return "."
+	}
+	return dir
+}
+
+func artifactGlobRegex(glob string) string {
+	var b strings.Builder
+	b.WriteByte('^')
+	for i := 0; i < len(glob); {
+		if strings.HasPrefix(glob[i:], "**/") {
+			b.WriteString("(.*/)?")
+			i += 3
+			continue
+		}
+		if strings.HasPrefix(glob[i:], "**") {
+			b.WriteString(".*")
+			i += 2
+			continue
+		}
+		switch glob[i] {
+		case '*':
+			b.WriteString("[^/]*")
+		case '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(glob[i])))
+		}
+		i++
+	}
+	b.WriteByte('$')
 	return b.String()
 }
 

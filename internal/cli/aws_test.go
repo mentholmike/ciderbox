@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 func TestApplyAWSRunInstanceTargetOptionsEnablesNestedVirtualizationForWSL2(t *testing.T) {
@@ -37,6 +39,177 @@ func TestApplyAWSRunInstanceTargetOptionsLeavesNativeWindowsDefault(t *testing.T
 	})
 	if input.CpuOptions != nil {
 		t.Fatalf("CpuOptions=%#v, want nil", input.CpuOptions)
+	}
+}
+
+func TestAWSInstanceToServerPreservesHostID(t *testing.T) {
+	server := awsInstanceToServer(types.Instance{
+		InstanceId:   aws.String("i-1234567890abcdef0"),
+		InstanceType: types.InstanceTypeMac2Metal,
+		Placement:    &types.Placement{HostId: aws.String("h-000000000001")},
+		State:        &types.InstanceState{Name: types.InstanceStateNameRunning},
+	})
+
+	if server.HostID != "h-000000000001" {
+		t.Fatalf("HostID=%q, want h-000000000001", server.HostID)
+	}
+}
+
+func TestRetryableAWSSnapshotDeleteError(t *testing.T) {
+	for _, message := range []string{
+		"InvalidSnapshot.InUse: snapshot is currently in use by ami-123",
+		"RequestLimitExceeded: request rate exceeded",
+		"ThrottlingException: slow down",
+		"ServiceUnavailable: try again",
+		"InternalError: internal failure",
+		"http 500: server error",
+		"Snapshot snap-123 is currently in use",
+	} {
+		if !isRetryableAWSSnapshotDeleteError(message) {
+			t.Fatalf("message %q should be retryable", message)
+		}
+	}
+	if isRetryableAWSSnapshotDeleteError("AuthFailure: not authorized") {
+		t.Fatal("AuthFailure should not be retryable")
+	}
+}
+
+func TestCreateImageCheckpointRecordsCallerAccount(t *testing.T) {
+	var sawCreate bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		switch action := r.Form.Get("Action"); action {
+		case "GetCallerIdentity":
+			writeSTSXML(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>123456789012</Account><Arn>arn:aws:iam::123456789012:user/test</Arn><UserId>AIDAEXAMPLE</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>`)
+		case "CreateImage":
+			sawCreate = true
+			writeEC2XML(w, `<CreateImageResponse><imageId>ami-12345678</imageId></CreateImageResponse>`)
+		default:
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := testAWSClient(server.URL)
+	image, err := client.CreateImageCheckpoint(context.Background(), "i-1234567890abcdef0", "checkpoint", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawCreate {
+		t.Fatal("CreateImage was not called")
+	}
+	if image.AccountID != "123456789012" {
+		t.Fatalf("AccountID=%q, want caller account", image.AccountID)
+	}
+}
+
+func TestValidateImageCheckpointSourceChecksAccountAndInstance(t *testing.T) {
+	var actions []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		action := r.Form.Get("Action")
+		actions = append(actions, action)
+		switch action {
+		case "GetCallerIdentity":
+			writeSTSXML(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>123456789012</Account><Arn>arn:aws:iam::123456789012:user/test</Arn><UserId>AIDAEXAMPLE</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>`)
+		case "DescribeInstances":
+			writeEC2XML(w, `<DescribeInstancesResponse><reservationSet><item><instancesSet><item><instanceId>i-1234567890abcdef0</instanceId><instanceType>t3.micro</instanceType><ipAddress>203.0.113.44</ipAddress><instanceState><name>running</name></instanceState></item></instancesSet></item></reservationSet></DescribeInstancesResponse>`)
+		case "CreateImage":
+			t.Fatal("CreateImage must not be part of source validation")
+		default:
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	accountID, err := testAWSClient(server.URL).ValidateImageCheckpointSource(context.Background(), "i-1234567890abcdef0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accountID != "123456789012" {
+		t.Fatalf("accountID=%q, want caller account", accountID)
+	}
+	if got := strings.Join(actions, ","); got != "GetCallerIdentity,DescribeInstances" {
+		t.Fatalf("actions=%s, want GetCallerIdentity,DescribeInstances", got)
+	}
+}
+
+func TestValidateImageCheckpointSourceRejectsMissingInstance(t *testing.T) {
+	var sawDescribe bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		switch action := r.Form.Get("Action"); action {
+		case "GetCallerIdentity":
+			writeSTSXML(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>123456789012</Account><Arn>arn:aws:iam::123456789012:user/test</Arn><UserId>AIDAEXAMPLE</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>`)
+		case "DescribeInstances":
+			sawDescribe = true
+			writeEC2XML(w, `<DescribeInstancesResponse><reservationSet></reservationSet></DescribeInstancesResponse>`)
+		case "CreateImage":
+			t.Fatal("CreateImage must not run when the source instance is missing")
+		default:
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	_, err := testAWSClient(server.URL).ValidateImageCheckpointSource(context.Background(), "i-missing")
+	if err == nil || !strings.Contains(err.Error(), "aws instance not found") {
+		t.Fatalf("err=%v, want missing instance validation error", err)
+	}
+	if !sawDescribe {
+		t.Fatal("DescribeInstances was not called")
+	}
+}
+
+func TestDeleteImageCheckpointRefusesNotFoundWithoutAccountID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if action := r.Form.Get("Action"); action != "DescribeImages" {
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+			return
+		}
+		writeEC2Error(w, "InvalidAMIID.NotFound", "image not found", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	err := testAWSClient(server.URL).DeleteImageCheckpoint(context.Background(), "ami-12345678", nil, "")
+	if err == nil || !strings.Contains(err.Error(), "checkpoint record has no accountId") {
+		t.Fatalf("err=%v, want account guard error", err)
+	}
+}
+
+func TestDeleteImageCheckpointRefusesAccountMismatchBeforeDescribe(t *testing.T) {
+	var describeHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		switch action := r.Form.Get("Action"); action {
+		case "GetCallerIdentity":
+			writeSTSXML(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Account>999999999999</Account><Arn>arn:aws:iam::999999999999:user/test</Arn><UserId>AIDAEXAMPLE</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>`)
+		case "DescribeImages":
+			describeHits++
+			writeEC2XML(w, `<DescribeImagesResponse><imagesSet></imagesSet></DescribeImagesResponse>`)
+		default:
+			writeEC2Error(w, "Unexpected", action, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	err := testAWSClient(server.URL).DeleteImageCheckpoint(context.Background(), "ami-12345678", nil, "123456789012")
+	if err == nil || !strings.Contains(err.Error(), "account mismatch") {
+		t.Fatalf("err=%v, want account mismatch", err)
+	}
+	if describeHits != 0 {
+		t.Fatalf("DescribeImages called %d time(s), want zero", describeHits)
 	}
 }
 
@@ -247,7 +420,25 @@ func TestAWSMacOSAMIQueryForInstanceType(t *testing.T) {
 	}
 }
 
+func testAWSClient(endpoint string) *AWSClient {
+	cfg := aws.Config{
+		Region:       "eu-west-1",
+		Credentials:  credentials.NewStaticCredentialsProvider("test", "secret", ""),
+		BaseEndpoint: aws.String(endpoint),
+	}
+	return &AWSClient{
+		ec2:    ec2.NewFromConfig(cfg),
+		sts:    sts.NewFromConfig(cfg),
+		region: "eu-west-1",
+	}
+}
+
 func writeEC2XML(w http.ResponseWriter, body string) {
+	w.Header().Set("content-type", "text/xml")
+	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` + body))
+}
+
+func writeSTSXML(w http.ResponseWriter, body string) {
 	w.Header().Set("content-type", "text/xml")
 	_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` + body))
 }

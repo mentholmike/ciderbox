@@ -13,6 +13,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 const (
@@ -20,8 +21,18 @@ const (
 	awsSSHIngressDescription = "Crabbox SSH"
 )
 
+var awsSnapshotDeleteBackoff = []time.Duration{
+	1 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	15 * time.Second,
+	30 * time.Second,
+}
+
 type AWSClient struct {
 	ec2    *ec2.Client
+	sts    *sts.Client
 	region string
 }
 
@@ -37,7 +48,7 @@ func newAWSClientForRegion(ctx context.Context, cfg Config, region string) (*AWS
 	if err != nil {
 		return nil, err
 	}
-	return &AWSClient{ec2: ec2.NewFromConfig(awsCfg), region: region}, nil
+	return &AWSClient{ec2: ec2.NewFromConfig(awsCfg), sts: sts.NewFromConfig(awsCfg), region: region}, nil
 }
 
 func NewAWSClient(ctx context.Context, cfg Config) (*AWSClient, error) {
@@ -390,6 +401,195 @@ func (c *AWSClient) DeleteServer(ctx context.Context, id string) error {
 	return err
 }
 
+func (c *AWSClient) CreateImageCheckpoint(ctx context.Context, instanceID, name string, noReboot bool) (CoordinatorImage, error) {
+	accountID, err := c.CallerAccountID(ctx)
+	if err != nil {
+		return CoordinatorImage{}, err
+	}
+	tags := awsTagsWithName(map[string]string{
+		"crabbox":           "true",
+		"created_by":        "crabbox",
+		"crabbox:source_id": instanceID,
+	}, name)
+	out, err := c.ec2.CreateImage(ctx, &ec2.CreateImageInput{
+		InstanceId: aws.String(instanceID),
+		Name:       aws.String(name),
+		NoReboot:   aws.Bool(noReboot),
+		TagSpecifications: []types.TagSpecification{
+			{ResourceType: types.ResourceTypeImage, Tags: tags},
+			{ResourceType: types.ResourceTypeSnapshot, Tags: tags},
+		},
+	})
+	if err != nil {
+		return CoordinatorImage{}, err
+	}
+	imageID := aws.ToString(out.ImageId)
+	if imageID == "" {
+		return CoordinatorImage{}, exit(5, "aws returned no image id")
+	}
+	return CoordinatorImage{
+		ID:         imageID,
+		Name:       name,
+		State:      "pending",
+		Provider:   "aws",
+		Kind:       checkpointKindAWSAMI,
+		Region:     c.region,
+		ResourceID: imageID,
+		AccountID:  accountID,
+		Direct:     true,
+	}, nil
+}
+
+func (c *AWSClient) ValidateImageCheckpointSource(ctx context.Context, instanceID string) (string, error) {
+	accountID, err := c.CallerAccountID(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.GetServer(ctx, instanceID); err != nil {
+		return "", err
+	}
+	return accountID, nil
+}
+
+func (c *AWSClient) GetImageCheckpoint(ctx context.Context, imageID string) (CoordinatorImage, error) {
+	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		ImageIds: []string{imageID},
+	})
+	if err != nil {
+		return CoordinatorImage{}, err
+	}
+	if len(out.Images) == 0 {
+		return CoordinatorImage{}, exit(4, "aws image not found: %s", imageID)
+	}
+	image := out.Images[0]
+	return CoordinatorImage{
+		ID:           aws.ToString(image.ImageId),
+		Name:         aws.ToString(image.Name),
+		State:        string(image.State),
+		Provider:     "aws",
+		Kind:         checkpointKindAWSAMI,
+		Region:       c.region,
+		ResourceID:   aws.ToString(image.ImageId),
+		SnapshotIDs:  awsImageSnapshotIDs(image),
+		Direct:       true,
+		Architecture: string(image.Architecture),
+	}, nil
+}
+
+func (c *AWSClient) DeleteImageCheckpoint(ctx context.Context, imageID string, fallbackSnapshotIDs []string, expectedAccountID string) error {
+	if err := c.GuardAccount(ctx, expectedAccountID); err != nil {
+		return err
+	}
+	out, err := c.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		ImageIds: []string{imageID},
+	})
+	imageNotFound := err != nil && strings.Contains(err.Error(), "InvalidAMIID.NotFound")
+	if err != nil {
+		if !imageNotFound {
+			return err
+		}
+		if expectedAccountID == "" {
+			return exit(3, "cannot confirm direct AWS checkpoint delete for %s: image not found and checkpoint record has no accountId; switch to the original AWS account or use --local-only", imageID)
+		}
+	}
+	snapshotIDs := append([]string(nil), fallbackSnapshotIDs...)
+	if err == nil && len(out.Images) > 0 {
+		snapshotIDs = append(snapshotIDs, awsImageSnapshotIDs(out.Images[0])...)
+	}
+	snapshotIDs = uniqueStrings(snapshotIDs)
+	if _, err := c.ec2.DeregisterImage(ctx, &ec2.DeregisterImageInput{ImageId: aws.String(imageID)}); err != nil && !strings.Contains(err.Error(), "InvalidAMIID.NotFound") {
+		return err
+	}
+	for _, snapshotID := range snapshotIDs {
+		if err := c.deleteSnapshotWithRetry(ctx, snapshotID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *AWSClient) CallerAccountID(ctx context.Context) (string, error) {
+	if c.sts == nil {
+		return "", exit(3, "aws sts client is unavailable")
+	}
+	out, err := c.sts.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", err
+	}
+	accountID := aws.ToString(out.Account)
+	if accountID == "" {
+		return "", exit(3, "aws returned no caller account id")
+	}
+	return accountID, nil
+}
+
+func (c *AWSClient) GuardAccount(ctx context.Context, expectedAccountID string) error {
+	expectedAccountID = strings.TrimSpace(expectedAccountID)
+	if expectedAccountID == "" {
+		return nil
+	}
+	accountID, err := c.CallerAccountID(ctx)
+	if err != nil {
+		return err
+	}
+	if accountID != expectedAccountID {
+		return exit(3, "direct AWS checkpoint account mismatch: current account %s does not match checkpoint account %s", accountID, expectedAccountID)
+	}
+	return nil
+}
+
+func (c *AWSClient) deleteSnapshotWithRetry(ctx context.Context, snapshotID string) error {
+	var lastErr error
+	for attempt := 0; attempt <= len(awsSnapshotDeleteBackoff); attempt++ {
+		if _, err := c.ec2.DeleteSnapshot(ctx, &ec2.DeleteSnapshotInput{SnapshotId: aws.String(snapshotID)}); err != nil {
+			message := err.Error()
+			if strings.Contains(message, "InvalidSnapshot.NotFound") {
+				return nil
+			}
+			if !isRetryableAWSSnapshotDeleteError(message) {
+				return err
+			}
+			lastErr = err
+		} else {
+			return nil
+		}
+		if attempt >= len(awsSnapshotDeleteBackoff) {
+			break
+		}
+		timer := time.NewTimer(awsSnapshotDeleteBackoff[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func awsImageSnapshotIDs(image types.Image) []string {
+	var snapshotIDs []string
+	for _, mapping := range image.BlockDeviceMappings {
+		if mapping.Ebs == nil {
+			continue
+		}
+		if snapshotID := aws.ToString(mapping.Ebs.SnapshotId); snapshotID != "" {
+			snapshotIDs = append(snapshotIDs, snapshotID)
+		}
+	}
+	return uniqueStrings(snapshotIDs)
+}
+
+func isRetryableAWSSnapshotDeleteError(message string) bool {
+	return strings.Contains(message, "InvalidSnapshot.InUse") ||
+		strings.Contains(message, "RequestLimitExceeded") ||
+		strings.Contains(message, "Throttl") ||
+		strings.Contains(message, "ServiceUnavailable") ||
+		strings.Contains(message, "InternalError") ||
+		strings.Contains(message, "http 5") ||
+		strings.Contains(strings.ToLower(message), "currently in use")
+}
+
 func (c *AWSClient) SetTags(ctx context.Context, id string, labels map[string]string) error {
 	_, err := c.ec2.CreateTags(ctx, &ec2.CreateTagsInput{
 		Resources: []string{id},
@@ -688,6 +888,9 @@ func awsInstanceToServer(instance types.Instance) Server {
 		Name:     name,
 		Status:   string(instance.State.Name),
 		Labels:   labels,
+	}
+	if instance.Placement != nil {
+		server.HostID = aws.ToString(instance.Placement.HostId)
 	}
 	server.PublicNet.IPv4.IP = aws.ToString(instance.PublicIpAddress)
 	server.ServerType.Name = string(instance.InstanceType)

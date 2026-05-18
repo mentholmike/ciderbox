@@ -95,6 +95,10 @@ if [[ "$1" == "admin" && ( "$2" == "mac-hosts" || "$2" == "hosts" ) ]]; then
         fi
       else
         : >"$state_dir/host"
+        if [[ "\${CRABBOX_FAKE_ALLOCATE_FAIL:-0}" == "1" ]]; then
+          printf 'coordinator POST /v1/admin/hosts?provider=aws&region=%s&target=macos: http 502: {"error":"mac_host_allocation_failed","message":"aws AllocateHosts: http 500: service unavailable"}\\n' "$region" >&2
+          exit 1
+        fi
         printf '[{"id":"h-mock","instanceType":"%s","state":"available"}]\\n' "$type"
       fi
       ;;
@@ -158,11 +162,16 @@ case "$1" in
     ;;
   checkpoint)
     if [[ "$2" == "create" ]]; then
-      printf 'checkpoint created id=chk_macos kind=aws-ebs-snapshot resource=snap-mock state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
+      printf 'checkpoint created id=chk_macos kind=aws-ami resource=ami-checkpoint state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
     elif [[ "$2" == "fork" ]]; then
-      printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=snap-mock workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
+      if [[ "\${CRABBOX_FAKE_CHECKPOINT_FORK_FAIL_ONCE:-0}" == "1" && ! -f "$state_dir/checkpoint-fork-failed" ]]; then
+        : >"$state_dir/checkpoint-fork-failed"
+        printf 'coordinator POST /v1/leases: http 500: transient host recycle\\n' >&2
+        exit 42
+      fi
+      printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=ami-checkpoint workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
     elif [[ "$2" == "delete" ]]; then
-      printf 'checkpoint deleted id=%s kind=aws-ebs-snapshot\\n' "$3"
+      printf 'checkpoint deleted id=%s kind=aws-ami\\n' "$3"
     fi
     ;;
   stop)
@@ -179,7 +188,7 @@ function runLifecycle(env) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", [lifecycleScript], {
       cwd: repoRoot,
-      env: { ...process.env, ...env },
+      env: { ...process.env, CRABBOX_MACOS_HOST_WAIT_INTERVAL: "0s", ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -430,12 +439,48 @@ test("macOS lifecycle smoke blocks on missing Mac host quota before paid work", 
   assert.equal(summary.result, "blocked");
   assert.equal(summary.phase, "host-quota");
   assert.match(summary.blocker.message, /quota is below 1/);
+  assert.deepEqual(summary.blocker.commands, [
+    "crabbox admin providers identity --provider aws --region eu-west-1 --json > provider-identity.json",
+    "crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal --json > mac-host-quota.json",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region eu-west-1 --profile auto",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region eu-west-1 --profile auto --apply",
+    "scripts/macos-host-region-preflight.sh",
+  ]);
   await assertSummaryFileContains(run.artifacts, summary.evidence.hostQuota, /Running Dedicated mac2 Hosts/);
   assert.equal(summary.evidence.hostAllocate, null);
 
   const fakeLog = await readFile(run.fakeLog, "utf8");
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.doesNotMatch(fakeLog, /^admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2\.metal --force --json$/m);
+});
+
+test("macOS lifecycle smoke records paid host allocation failures", async () => {
+  const run = await setupRun();
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_FAKE_ALLOCATE_FAIL: "1",
+    CRABBOX_MACOS_ALLOCATE: "1",
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "allocation-blocked",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assert.equal(summary.result, "blocked");
+  assert.equal(summary.phase, "host-allocation");
+  assert.match(summary.blocker.message, /mac host allocation failed/);
+  assert.match(summary.blocker.message, /AllocateHosts/);
+  assert.match(summary.blocker.remediation, /Retry the allocation/);
+  assert.equal(summary.evidence.hostAllocate, "evidence/mac-host-allocate.json");
+  await assertSummaryFileContains(run.artifacts, summary.evidence.hostAllocate, /mac_host_allocation_failed/);
+
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  assert.match(fakeLog, /^admin hosts allocate --provider aws --target macos --region eu-west-1 --type mac2\.metal --force --json$/m);
+  assert.doesNotMatch(fakeLog, /^warmup /m);
 });
 
 test("macOS lifecycle smoke selects a dry-run-ready configured region before paid work", async () => {
@@ -571,11 +616,39 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal((fakeLog.match(/^warmup\b/gm) ?? []).length, 3);
   assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 4);
   assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
-  assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy disk-snapshot --wait --wait-timeout 60m$/m);
-  assert.match(fakeLog, /^checkpoint fork chk_macos$/m);
+  assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy image --wait --wait-timeout 60m$/m);
+  assert.match(fakeLog, /^checkpoint fork chk_macos --desktop$/m);
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.match(fakeLog, /^admin hosts release h-mock --provider aws --target macos --region eu-west-1 --force$/m);
+});
+
+test("macOS lifecycle smoke retries checkpoint fork after transient host recycle", async () => {
+  const run = await setupRun();
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_FAKE_CHECKPOINT_FORK_FAIL_ONCE: "1",
+    CRABBOX_MACOS_ALLOCATE: "1",
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "checkpoint-fork-retry",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /retrying checkpoint fork attempt 2\/2/);
+
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assert.equal(summary.result, "passed");
+  assert.equal(summary.phase, "candidate");
+  assert.equal(summary.leases.checkpointFork, "cbx_checkpoint");
+  await assertSummaryFileContains(run.artifacts, summary.evidence.hostWait.checkpointFork, /stable_count=2/);
+  await assertSummaryFileContains(run.artifacts, summary.evidence.checkpointFork, /cbx_checkpoint/);
+
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  assert.equal((fakeLog.match(/^checkpoint fork chk_macos --desktop$/gm) ?? []).length, 2);
 });
 
 test("macOS lifecycle smoke forwards the selected region into warmup", async () => {

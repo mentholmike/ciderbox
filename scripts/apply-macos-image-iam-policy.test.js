@@ -133,6 +133,18 @@ test("IAM apply helper auto-selects matching profile", async () => {
   assert.match(result.stdout, /dry-run: aws --profile prod iam put-user-policy/);
 });
 
+test("IAM apply helper auto-selects default credentials", async () => {
+  const ctx = await setup("user", "123456789012");
+  const result = await runApply(ctx, ["--profile", "auto"], {
+    CRABBOX_FAKE_AWS_PROFILES: "",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /checked_profile=default-credentials account=123456789012/);
+  assert.doesNotMatch(result.stdout, /aws_profile=/);
+  assert.match(result.stdout, /dry-run: aws iam put-user-policy/);
+});
+
 test("IAM apply helper reports when auto profile has no match", async () => {
   const ctx = await setup("user", "123456789012");
   const result = await runApply(ctx, ["--profile", "auto"], {
@@ -142,9 +154,10 @@ test("IAM apply helper reports when auto profile has no match", async () => {
   });
 
   assert.equal(result.code, 1);
+  assert.match(result.stderr, /checked_profile=default-credentials account=999999999999/);
   assert.match(result.stderr, /checked_profile=default status=unusable/);
   assert.match(result.stderr, /checked_profile=prod account=999999999999/);
-  assert.match(result.stderr, /no local AWS profile matches coordinator account 123456789012 after checking 2 profile\(s\)/);
+  assert.match(result.stderr, /no local AWS profile matches coordinator account 123456789012 after checking 3 profile\(s\)/);
   const log = await readFile(ctx.log, "utf8");
   assert.doesNotMatch(log, /put-user-policy/);
 });

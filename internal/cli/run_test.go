@@ -1573,6 +1573,36 @@ func TestApplyCapacityMarketFlag(t *testing.T) {
 	}
 }
 
+func TestApplyLeaseCreateFlagsForExistingAWSMacOSLeaseDefaultsOnDemand(t *testing.T) {
+	fs := newFlagSet("test", io.Discard)
+	values := registerLeaseCreateFlags(fs, defaultConfig())
+	if err := parseFlags(fs, []string{"--provider", "aws", "--target", "macos"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Coordinator = "https://broker.example.test"
+	if err := applyLeaseCreateFlagsForLease(&cfg, fs, values, "cbx_123"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Capacity.Market != "on-demand" {
+		t.Fatalf("market=%s want on-demand", cfg.Capacity.Market)
+	}
+}
+
+func TestApplyLeaseCreateFlagsForExistingAWSMacOSLeaseRejectsExplicitSpot(t *testing.T) {
+	fs := newFlagSet("test", io.Discard)
+	values := registerLeaseCreateFlags(fs, defaultConfig())
+	if err := parseFlags(fs, []string{"--provider", "aws", "--target", "macos", "--market", "spot"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Coordinator = "https://broker.example.test"
+	err := applyLeaseCreateFlagsForLease(&cfg, fs, values, "cbx_123")
+	if err == nil || !strings.Contains(err.Error(), "requires --market on-demand") {
+		t.Fatalf("err=%v, want explicit spot rejection", err)
+	}
+}
+
 func TestApplyServerTypeFlagOverridesUsesTargetAwareAWSDefaults(t *testing.T) {
 	tests := []struct {
 		name string

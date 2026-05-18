@@ -186,7 +186,8 @@ daemon stop
 
 Limitations:
 
-- Coordinator-backed Hetzner, AWS, and Azure Linux desktop leases are supported.
+- Coordinator-backed Hetzner, AWS, and Azure Linux desktop leases are supported,
+  along with coordinator-backed AWS macOS desktop leases.
 - Static SSH hosts are intentionally not supported yet because the portal cannot
   prove that host-managed VNC credentials and prompts are safe to expose.
 - Blacksmith Testbox still owns its own machine connectivity.

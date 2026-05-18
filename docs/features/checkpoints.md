@@ -26,14 +26,17 @@ leases.
 - Excludes `.crabbox/env` and `.crabbox/scripts` by default
 
 Default `auto` mode: native for brokered AWS Linux/macOS leases and Azure/GCP
-Linux leases, otherwise archive.
+Linux leases, otherwise archive. Direct AWS leases can force native AMI
+checkpoints with `--mode native` or `--strategy image`; direct AWS `auto` keeps
+the archive fallback.
 
 ## Native Checkpoint Strategies
 
 Native checkpoints use two provider primitives:
 
 **Disk-Snapshot Strategy (default)**
-- AWS: EBS snapshot (`aws-ebs-snapshot`)
+- AWS Linux: EBS snapshot (`aws-ebs-snapshot`)
+- AWS macOS: AMI-backed checkpoint (`aws-ami`) with AWS-managed backing EBS snapshots
 - Azure: Managed OS disk snapshot (`azure-os-disk-snapshot`)
 - GCP: Persistent disk snapshot (`gcp-disk-snapshot`)
 - Faster to create, boots with fresh SSH keys
@@ -53,6 +56,11 @@ stateless Azure leases where native checkpoint/fork support is not needed.
 - GCP: Machine image (`gcp-machine-image`)
 - Slower but preserves complete VM configuration
 - Best for distribution or long-term storage
+- Direct AWS Linux/macOS leases use this strategy for native checkpoints because
+  AMIs can be forked directly through `CRABBOX_AWS_AMI`
+- AWS macOS uses this AMI-backed path even when `disk-snapshot` is requested,
+  because raw registered EC2 Mac root snapshots do not preserve enough AWS
+  launch metadata to be a reliable fork source.
 
 **Metadata-Only (`recipe`)**
 - Records lease/repo/workdir info without creating artifacts

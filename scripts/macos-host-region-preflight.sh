@@ -6,6 +6,7 @@ CRABBOX_BIN="${CRABBOX_BIN:-$ROOT/bin/crabbox}"
 CRABBOX_REMEDIATION_BIN="${CRABBOX_REMEDIATION_BIN:-crabbox}"
 CRABBOX_REGION_PREFLIGHT_COMMAND="${CRABBOX_REGION_PREFLIGHT_COMMAND:-scripts/macos-host-region-preflight.sh}"
 CRABBOX_MACOS_IAM_APPLY_COMMAND="${CRABBOX_MACOS_IAM_APPLY_COMMAND:-scripts/apply-macos-image-iam-policy.sh}"
+CRABBOX_MACOS_QUOTA_REQUEST_COMMAND="${CRABBOX_MACOS_QUOTA_REQUEST_COMMAND:-scripts/request-macos-host-quota.sh}"
 CRABBOX_MACOS_KNOWN_TYPES="mac2.metal,mac2-m2.metal,mac2-m2pro.metal,mac-m4.metal,mac-m4pro.metal,mac-m4max.metal,mac2-m1ultra.metal,mac-m3ultra.metal,mac1.metal"
 
 if [[ -n "${CRABBOX_MACOS_TYPE:-}" ]]; then
@@ -111,7 +112,13 @@ done
 done
 
 instance_types_json="$(printf '%s\n' "${instance_types[@]}" | jq -R . | jq -s .)"
-remediation_region="${regions[0]}"
+read -r remediation_region remediation_type < <(
+  jq -s -r '
+    ([.[] | select(.dryRun.ok == true and .quota.ok == false)][0] // .[0])
+    | [.region, .instanceType]
+    | @tsv
+  ' "$tmp"
+)
 blocker_commands_json="$(
   printf '%s\n' \
     "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $remediation_region" \
@@ -119,6 +126,9 @@ blocker_commands_json="$(
     "$CRABBOX_REMEDIATION_BIN admin providers policy --provider aws --target macos > macos-image-policy.json" \
     "$CRABBOX_MACOS_IAM_APPLY_COMMAND --identity provider-identity.json --policy macos-image-policy.json --profile auto" \
     "$CRABBOX_MACOS_IAM_APPLY_COMMAND --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply" \
+    "$CRABBOX_REMEDIATION_BIN admin hosts quota --provider aws --target macos --region $remediation_region --type $remediation_type --json > mac-host-quota.json" \
+    "$CRABBOX_MACOS_QUOTA_REQUEST_COMMAND --identity provider-identity.json --quota mac-host-quota.json --region $remediation_region --profile auto" \
+    "$CRABBOX_MACOS_QUOTA_REQUEST_COMMAND --identity provider-identity.json --quota mac-host-quota.json --region $remediation_region --profile auto --apply" \
     "$CRABBOX_REGION_PREFLIGHT_COMMAND" |
     jq -R . |
     jq -s .

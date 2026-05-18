@@ -58,6 +58,9 @@ crabbox checkpoint create --id blue-lobster --mode archive
 # Use image strategy instead of disk-snapshot (AWS Linux/macOS, GCP Linux)
 crabbox checkpoint create --id blue-lobster --strategy image
 
+# Direct AWS leases can force native AMI checkpoints without a coordinator
+crabbox checkpoint create --provider aws --id blue-lobster --mode native
+
 # Custom workdir
 crabbox checkpoint create --id blue-lobster --workdir /work/cbx_123/my-app
 ```
@@ -79,7 +82,7 @@ crabbox checkpoint create --id blue-lobster --workdir /work/cbx_123/my-app
 
 **Strategy details**
 
-- `disk-snapshot`: EBS/Azure disk/GCP disk snapshot — faster, best for iteration
+- `disk-snapshot`: EBS/Azure disk/GCP disk snapshot; AWS macOS maps to AMI-backed checkpoints with backing EBS snapshots
 - `image`: AWS AMI/GCP machine image — slower, preserves full VM config
 - Azure managed images require stopped VMs, not created from active leases
 
@@ -255,7 +258,8 @@ they preserve to identify candidates for cleanup.
 **Native checkpoints**
 
 Default strategy `disk-snapshot`:
-- AWS Linux/macOS: EBS snapshot
+- AWS Linux: EBS snapshot
+- AWS macOS: AMI-backed checkpoint with backing EBS snapshots
 - Azure: Managed OS disk snapshot
 - GCP: Persistent disk snapshot
 
@@ -268,6 +272,13 @@ Opt-in strategy `--strategy image`:
 - AWS Linux/macOS: AMI (Amazon Machine Image)
 - Azure: Not created from active VMs (requires stopped/generalized source)
 - GCP Linux: Machine image
+
+AWS macOS uses AMI-backed native checkpoints even when `disk-snapshot` is
+requested, because relaunching EC2 Mac from a raw registered root EBS snapshot
+does not preserve enough AWS launch metadata. Direct AWS Linux/macOS leases use
+AMIs for native checkpoints. `--mode auto` still falls back to workspace
+archives without a coordinator, while `--mode native` or `--strategy image`
+creates an AMI in the configured AWS region.
 
 AWS macOS checkpoint forks still require EC2 Mac Dedicated Host capacity. Brokered
 mode can discover a host; host-pinned checkpoints reuse the recorded `hostId`.

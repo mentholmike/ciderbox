@@ -106,26 +106,43 @@ aws_account_for_profile() {
 
 if [[ "$profile" == "auto" ]]; then
   selected_profile=""
+  selected_default=0
   checked_profiles=0
-  while IFS= read -r candidate_profile; do
-    [[ -n "$candidate_profile" ]] || continue
+  if candidate_account="$(aws_account_for_profile "" 2>/dev/null)"; then
     checked_profiles=$((checked_profiles + 1))
-    if candidate_account="$(aws_account_for_profile "$candidate_profile" 2>/dev/null)"; then
-      printf 'checked_profile=%s account=%s\n' "$candidate_profile" "$candidate_account" >&2
-      if [[ "$candidate_account" == "$coordinator_account" ]]; then
-        selected_profile="$candidate_profile"
-        break
-      fi
-    else
-      printf 'checked_profile=%s status=unusable\n' "$candidate_profile" >&2
+    printf 'checked_profile=default-credentials account=%s\n' "$candidate_account" >&2
+    if [[ "$candidate_account" == "$coordinator_account" ]]; then
+      selected_default=1
     fi
-  done < <(aws configure list-profiles)
+  else
+    checked_profiles=$((checked_profiles + 1))
+    printf 'checked_profile=default-credentials status=unusable\n' >&2
+  fi
+  if [[ "$selected_default" != "1" ]]; then
+    while IFS= read -r candidate_profile; do
+      [[ -n "$candidate_profile" ]] || continue
+      checked_profiles=$((checked_profiles + 1))
+      if candidate_account="$(aws_account_for_profile "$candidate_profile" 2>/dev/null)"; then
+        printf 'checked_profile=%s account=%s\n' "$candidate_profile" "$candidate_account" >&2
+        if [[ "$candidate_account" == "$coordinator_account" ]]; then
+          selected_profile="$candidate_profile"
+          break
+        fi
+      else
+        printf 'checked_profile=%s status=unusable\n' "$candidate_profile" >&2
+      fi
+    done < <(aws configure list-profiles)
+  fi
 
-  if [[ -z "$selected_profile" ]]; then
+  if [[ -z "$selected_profile" && "$selected_default" != "1" ]]; then
     printf 'refusing to apply IAM policy: no local AWS profile matches coordinator account %s after checking %s profile(s)\n' "$coordinator_account" "$checked_profiles" >&2
     exit 1
   fi
-  profile="$selected_profile"
+  if [[ "$selected_default" == "1" ]]; then
+    profile=""
+  else
+    profile="$selected_profile"
+  fi
 fi
 
 aws_base=(aws)

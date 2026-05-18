@@ -167,19 +167,22 @@ type CoordinatorProviderReadiness struct {
 }
 
 type CoordinatorImage struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	State        string `json:"state"`
-	Provider     string `json:"provider,omitempty"`
-	Kind         string `json:"kind,omitempty"`
-	Region       string `json:"region,omitempty"`
-	Project      string `json:"project,omitempty"`
-	ResourceID   string `json:"resourceID,omitempty"`
-	Target       string `json:"target,omitempty"`
-	WindowsMode  string `json:"windowsMode,omitempty"`
-	ServerType   string `json:"serverType,omitempty"`
-	Architecture string `json:"architecture,omitempty"`
-	PromotedAt   string `json:"promotedAt,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	State        string   `json:"state"`
+	Provider     string   `json:"provider,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	Region       string   `json:"region,omitempty"`
+	AccountID    string   `json:"accountId,omitempty"`
+	Project      string   `json:"project,omitempty"`
+	ResourceID   string   `json:"resourceID,omitempty"`
+	SnapshotIDs  []string `json:"snapshotIds,omitempty"`
+	Direct       bool     `json:"direct,omitempty"`
+	Target       string   `json:"target,omitempty"`
+	WindowsMode  string   `json:"windowsMode,omitempty"`
+	ServerType   string   `json:"serverType,omitempty"`
+	Architecture string   `json:"architecture,omitempty"`
+	PromotedAt   string   `json:"promotedAt,omitempty"`
 }
 
 type CoordinatorMacHost struct {

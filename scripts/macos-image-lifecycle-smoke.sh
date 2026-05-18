@@ -11,6 +11,7 @@ region_preflight="${CRABBOX_MACOS_REGION_PREFLIGHT:-auto}"
 region_preflight_script="${CRABBOX_MACOS_REGION_PREFLIGHT_SCRIPT:-$ROOT/scripts/macos-host-region-preflight.sh}"
 region_preflight_command="${CRABBOX_MACOS_REGION_PREFLIGHT_COMMAND:-scripts/macos-host-region-preflight.sh}"
 iam_apply_command="${CRABBOX_MACOS_IAM_APPLY_COMMAND:-scripts/apply-macos-image-iam-policy.sh}"
+quota_request_command="${CRABBOX_MACOS_QUOTA_REQUEST_COMMAND:-scripts/request-macos-host-quota.sh}"
 instance_type="${CRABBOX_MACOS_TYPE:-mac2.metal}"
 image_name="${CRABBOX_MACOS_IMAGE_NAME:-crabbox-macos-arm64-$(date -u +%Y%m%d-%H%M)}"
 ttl="${CRABBOX_MACOS_TTL:-2h}"
@@ -18,6 +19,7 @@ idle_timeout="${CRABBOX_MACOS_IDLE_TIMEOUT:-30m}"
 image_wait_timeout="${CRABBOX_MACOS_IMAGE_WAIT_TIMEOUT:-60m}"
 host_wait_timeout="${CRABBOX_MACOS_HOST_WAIT_TIMEOUT:-5h}"
 host_wait_interval="${CRABBOX_MACOS_HOST_WAIT_INTERVAL:-2m}"
+host_available_stable_count="${CRABBOX_MACOS_HOST_AVAILABLE_STABLE_COUNT:-2}"
 webvnc_wait_timeout="${CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT:-2m}"
 webvnc_wait_interval="${CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL:-5s}"
 webvnc_start_grace="${CRABBOX_MACOS_WEBVNC_START_GRACE:-3s}"
@@ -99,6 +101,15 @@ run_tee() {
   printf ' %q' "$@"
   printf '\n'
   "$@" | tee "$out"
+}
+
+run_tee_combined() {
+  local out="$1"
+  shift
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@" > >(tee "$out") 2> >(tee -a "$out" >&2)
 }
 
 preflight_blocker_from_stderr() {
@@ -668,18 +679,28 @@ wait_for_host_available() {
   local host="$1"
   local label="$2"
   [[ -n "$host" ]] || return 0
-  local timeout_seconds interval_seconds deadline state log
+  local available_count available_needed timeout_seconds interval_seconds deadline state log
   log="$(log_for_label host-wait "$label")"
   : >"$log"
   timeout_seconds="$(duration_seconds "$host_wait_timeout")"
   interval_seconds="$(duration_seconds "$host_wait_interval")"
+  available_needed="$host_available_stable_count"
+  if ! [[ "$available_needed" =~ ^[0-9]+$ ]] || [[ "$available_needed" -lt 1 ]]; then
+    available_needed=1
+  fi
+  available_count=0
   deadline="$(($(date +%s) + timeout_seconds))"
-  log_line "$log" "waiting for EC2 Mac Dedicated Host $host to become available after $label lease stop; timeout=$host_wait_timeout interval=$host_wait_interval"
+  log_line "$log" "waiting for EC2 Mac Dedicated Host $host to become stably available after $label lease stop; timeout=$host_wait_timeout interval=$host_wait_interval stable_count=$available_needed"
   while true; do
     state="$(mac_host_state "$host")"
     if [[ "$state" == "available" ]]; then
-      log_line "$log" "host $host is available"
-      return 0
+      available_count="$((available_count + 1))"
+      log_line "$log" "host $host is available ($available_count/$available_needed)"
+      if [[ "$available_count" -ge "$available_needed" ]]; then
+        return 0
+      fi
+    else
+      available_count=0
     fi
     if [[ "$(date +%s)" -ge "$deadline" ]]; then
       log_line "$log" "timed out waiting for EC2 Mac Dedicated Host $host to become available; last state=${state:-missing}" >&2
@@ -792,7 +813,7 @@ create_checkpoint_from_source() {
     --id "$source_lease" \
     --name "$image_name-checkpoint" \
     --mode native \
-    --strategy disk-snapshot \
+    --strategy image \
     --wait \
     --wait-timeout "$image_wait_timeout"
   checkpoint_id="$(checkpoint_id_from_log "$checkpoint_create_log")"
@@ -806,9 +827,30 @@ create_checkpoint_from_source() {
 smoke_checkpoint_fork() {
   [[ "$checkpoint" == "1" ]] || return 0
   [[ -n "$checkpoint_id" ]] || return 0
+  local attempt max_attempts status
+  max_attempts="${CRABBOX_MACOS_CHECKPOINT_FORK_ATTEMPTS:-2}"
+  if ! [[ "$max_attempts" =~ ^[0-9]+$ ]] || [[ "$max_attempts" -lt 1 ]]; then
+    max_attempts=1
+  fi
   summary_phase="checkpoint-fork"
   checkpoint_fork_log="$evidence_dir/checkpoint-fork.log"
-  run_tee "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id"
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if [[ "$attempt" -gt 1 ]]; then
+      printf 'retrying checkpoint fork attempt %s/%s after host wait\n' "$attempt" "$max_attempts"
+      wait_for_host_available "$allocated_host" checkpoint
+    fi
+    set +e
+    run_tee_combined "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id" --desktop
+    status=$?
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      break
+    fi
+    if [[ "$attempt" -eq "$max_attempts" ]]; then
+      blocker_message="checkpoint fork failed after $max_attempts attempt(s)"
+      return "$status"
+    fi
+  done
   checkpoint_fork_lease="$(checkpoint_fork_lease_from_log "$checkpoint_fork_log")"
   checkpoint_fork_lease_id="$checkpoint_fork_lease"
   if [[ -z "$checkpoint_fork_lease" ]]; then
@@ -917,6 +959,12 @@ else
   if ! jq -e 'any(.[]; (.value // 0) >= 1)' "$quota_log" >/dev/null; then
     blocker_message="EC2 Mac Dedicated Host quota is below 1 for $instance_type in $region"
     blocker_remediation="Request or raise the AWS EC2 Mac Dedicated Host quota for the selected host family in $region, then rerun the no-spend Mac host preflight."
+    blocker_commands="$(printf '%s\n' \
+      "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $region --json > provider-identity.json" \
+      "$CRABBOX_REMEDIATION_BIN admin hosts quota --provider aws --target macos --region $region --type $instance_type --json > mac-host-quota.json" \
+      "$quota_request_command --identity provider-identity.json --quota mac-host-quota.json --region $region --profile auto" \
+      "$quota_request_command --identity provider-identity.json --quota mac-host-quota.json --region $region --profile auto --apply" \
+      "$region_preflight_command")"
     printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
     write_summary blocked host-quota
     exit 1
@@ -930,7 +978,17 @@ else
 
   summary_phase="host-allocation"
   allocate_log="$evidence_dir/mac-host-allocate.json"
-  run_tee "$allocate_log" "$CRABBOX_BIN" admin hosts allocate --provider aws --target macos --region "$region" --type "$instance_type" --force --json
+  set +e
+  capture_preflight_command host-allocation "mac host allocation" "$allocate_log" "$CRABBOX_BIN" admin hosts allocate --provider aws --target macos --region "$region" --type "$instance_type" --force --json
+  allocate_status=$?
+  set -e
+  if [[ "$allocate_status" -ne 0 ]]; then
+    preflight_blocker_from_stderr "mac host allocation" "${allocate_log}.stderr"
+    blocker_remediation="Retry the allocation if AWS reports a transient service error. If dry-run still succeeds but paid allocation keeps failing, use an existing available EC2 Mac Dedicated Host or try another host family/region with non-zero quota."
+    printf 'macOS lifecycle blocked during paid work: %s\n' "$blocker_message" >&2
+    write_summary blocked host-allocation
+    exit 1
+  fi
   allocated_host="$(jq -r '.[0].id // empty' "$allocate_log")"
   if [[ -z "$allocated_host" ]]; then
     blocker_message="mac host allocation did not return a host id"

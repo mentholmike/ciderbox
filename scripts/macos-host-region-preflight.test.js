@@ -203,9 +203,40 @@ test("macOS host region preflight blocks when dry-run succeeds but quota is unav
     "crabbox admin providers policy --provider aws --target macos > macos-image-policy.json",
     "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto",
     "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply",
+    "crabbox admin hosts quota --provider aws --target macos --region us-west-2 --type mac2.metal --json > mac-host-quota.json",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region us-west-2 --profile auto",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region us-west-2 --profile auto --apply",
     "scripts/macos-host-region-preflight.sh",
   ]);
   assert.match(summary.regions[0].quota.output, /Running Dedicated mac2 Hosts/);
+});
+
+test("macOS host region preflight points quota remediation at the dry-run-ready candidate", async () => {
+  const run = await setupRun();
+  const result = await runPreflight({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_MACOS_REGIONS: "eu-central-1,us-west-2",
+    CRABBOX_FAKE_DRY_REGION: "us-west-2",
+    CRABBOX_FAKE_QUOTA_ZERO_REGION: "us-west-2",
+  });
+
+  assert.equal(result.code, 1);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.result, "blocked");
+  assert.equal(summary.regions[0].dryRun.status, 1);
+  assert.equal(summary.regions[1].dryRun.ok, true);
+  assert.equal(summary.regions[1].quota.ok, false);
+  assert.deepEqual(summary.blocker.commands, [
+    "crabbox admin providers identity --provider aws --region us-west-2",
+    "crabbox admin providers identity --provider aws --region us-west-2 --json > provider-identity.json",
+    "crabbox admin providers policy --provider aws --target macos > macos-image-policy.json",
+    "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto",
+    "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply",
+    "crabbox admin hosts quota --provider aws --target macos --region us-west-2 --type mac2.metal --json > mac-host-quota.json",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region us-west-2 --profile auto",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region us-west-2 --profile auto --apply",
+    "scripts/macos-host-region-preflight.sh",
+  ]);
 });
 
 test("macOS host region preflight blocks when every region is unavailable", async () => {
@@ -229,6 +260,9 @@ test("macOS host region preflight blocks when every region is unavailable", asyn
     "crabbox admin providers policy --provider aws --target macos > macos-image-policy.json",
     "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto",
     "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply",
+    "crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal --json > mac-host-quota.json",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region eu-west-1 --profile auto",
+    "scripts/request-macos-host-quota.sh --identity provider-identity.json --quota mac-host-quota.json --region eu-west-1 --profile auto --apply",
     "scripts/macos-host-region-preflight.sh",
   ]);
 });
