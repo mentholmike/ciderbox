@@ -317,8 +317,8 @@ func TestWebVNCBridgeArgsCarriesNetworkOverride(t *testing.T) {
 }
 
 func TestWebVNCBridgePoolSizeForTarget(t *testing.T) {
-	if got := webVNCBridgePoolSizeForTarget(SSHTarget{TargetOS: targetMacOS}); got != 1 {
-		t.Fatalf("macOS pool size=%d, want 1", got)
+	if got := webVNCBridgePoolSizeForTarget(SSHTarget{TargetOS: targetMacOS}); got != 2 {
+		t.Fatalf("macOS pool size=%d, want 2", got)
 	}
 	if got := webVNCBridgePoolSizeForTarget(SSHTarget{TargetOS: targetLinux}); got != defaultWebVNCBridgePoolSize {
 		t.Fatalf("linux pool size=%d, want default", got)
