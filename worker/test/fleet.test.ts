@@ -1676,6 +1676,14 @@ describe("fleet lease identity and idle", () => {
               <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
               <tagSet><item><key>crabbox</key><value>true</value></item></tagSet>
             </item>
+            <item>
+              <hostId>h-000000000003</hostId>
+              <state>available</state>
+              <availabilityZone>eu-west-1c</availabilityZone>
+              <autoPlacement>on</autoPlacement>
+              <allocationTime>2026-05-18T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+            </item>
           </hostSet>
         </DescribeHostsResponse>`);
       },
@@ -1720,9 +1728,23 @@ describe("fleet lease identity and idle", () => {
         expiresAt: "2026-05-17T02:40:00.000Z",
       }),
     );
+    let startedConfig: LeaseConfig | undefined;
     const fleet = testFleet(
       storage,
-      {},
+      {
+        aws: fakeProvider(
+          (config) => {
+            startedConfig = config;
+          },
+          {
+            provider: "aws",
+            serverType: "mac2.metal",
+            hostID: "h-000000000003",
+            cloudID: "i-000000000101",
+            region: "eu-west-1",
+          },
+        ),
+      },
       {
         AWS_ACCESS_KEY_ID: "test",
         AWS_SECRET_ACCESS_KEY: "test",
@@ -1749,11 +1771,13 @@ describe("fleet lease identity and idle", () => {
     expect(body).toContain("/portal/hosts/aws/h-000000000001");
     expect(body).toContain("/portal/hosts/aws/h-000000000001/vnc");
     expect(body).toContain("/portal/hosts/aws/h-000000000002/vnc");
+    expect(body).toContain("/portal/hosts/aws/h-000000000003/vnc");
     expect(body).toContain("lease mac-mini");
     expect(body).toContain("lease mac-no-vnc");
     expect(body).toContain("mac2.metal");
     expect(body).toContain("eu-west-1a");
     expect(body).toContain("eu-west-1b");
+    expect(body).toContain("eu-west-1c");
     expect(body).toContain("available");
     expect(body).toContain("pending");
 
@@ -1807,6 +1831,55 @@ describe("fleet lease identity and idle", () => {
     expect(enabled.status).toBe(303);
     expect(enabled.headers.get("location")).toBe("/portal/leases/cbx_000000000100/vnc");
     expect(storage.value<LeaseRecord>("lease:cbx_000000000100")?.desktop).toBe(true);
+
+    const startPage = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000003/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(startPage.status).toBe(200);
+    const startBody = await startPage.text();
+    expect(startBody).toContain("start desktop lease");
+    expect(startBody).toContain('name="sshPublicKey"');
+    expect(startBody).toContain("host-pinned macOS run");
+
+    const missingKey = await fleet.fetch(
+      request("POST", "/portal/hosts/aws/h-000000000003/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+        body: {},
+      }),
+    );
+    expect(missingKey.status).toBe(400);
+    await expect(missingKey.text()).resolves.toContain("SSH public key");
+
+    const started = await fleet.fetch(
+      request("POST", "/portal/hosts/aws/h-000000000003/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+        body: { sshPublicKey: "ssh-ed25519 test portal@example.com" },
+      }),
+    );
+    expect(started.status).toBe(303);
+    expect(started.headers.get("location")).toMatch(/^\/portal\/leases\/cbx_[a-f0-9]{12}\/vnc$/);
+    expect(startedConfig).toMatchObject({
+      provider: "aws",
+      target: "macos",
+      desktop: true,
+      serverType: "mac2.metal",
+      serverTypeExplicit: true,
+      hostID: "h-000000000003",
+      awsRegion: "eu-west-1",
+      capacityMarket: "on-demand",
+      sshPublicKey: "ssh-ed25519 test portal@example.com",
+    });
   });
 
   it("syncs external runner visibility and marks missing runners stale", async () => {

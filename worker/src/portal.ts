@@ -434,7 +434,7 @@ export function portalMacHostDetail(
       ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/vnc">open VNC</a>`
       : activeLease
         ? `<form method="post" action="${macHostVNCPath(host)}"><button class="button" type="submit">enable VNC</button></form>`
-        : `<span class="muted">start desktop lease</span>`;
+        : `<a class="button" href="#start-desktop-lease">start lease</a>`;
   const codeAction =
     activeLease?.code === true
       ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/code/">open code</a>`
@@ -451,10 +451,13 @@ export function portalMacHostDetail(
       ]
         .filter(Boolean)
         .join("")
-    : commandBlock(
-        "host-pinned macOS run",
-        `CRABBOX_HOST_ID=${shellArg(host.id)} crabbox run --provider ${shellArg(host.provider)} --target macos --market on-demand --desktop -- <command>`,
-      );
+    : [
+        macHostStartDesktopForm(host),
+        commandBlock(
+          "host-pinned macOS run",
+          `CRABBOX_HOST_ID=${shellArg(host.id)} crabbox run --provider ${shellArg(host.provider)} --target macos --market on-demand --desktop -- <command>`,
+        ),
+      ].join("");
   return html(
     `${hostID} dedicated host`,
     `<main class="portal-shell runner-shell">
@@ -1581,6 +1584,16 @@ function macHostVNCPath(host: PortalMacHostRecord): string {
   return `/portal/hosts/${encodeURIComponent(host.provider)}/${encodeURIComponent(host.id)}/vnc`;
 }
 
+function macHostStartDesktopForm(host: PortalMacHostRecord): string {
+  return `<form id="start-desktop-lease" class="host-start-form" method="post" action="${macHostVNCPath(host)}">
+    <label>
+      <span>SSH public key</span>
+      <textarea name="sshPublicKey" rows="3" placeholder="ssh-ed25519 AAAA... alice@example.com" required></textarea>
+    </label>
+    <button class="button" type="submit">start desktop lease</button>
+  </form>`;
+}
+
 function shortHostID(value: string): string {
   if (value.length <= 12) {
     return value;
@@ -2413,6 +2426,10 @@ function html(
     .actions-stack small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }
     .external-access { flex-wrap:nowrap; }
     .external-access span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .host-start-form { display:grid; gap:8px; padding:10px; border:1px solid var(--line-soft); border-radius:7px; background:var(--panel-2); }
+    .host-start-form label { display:grid; gap:5px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+    .host-start-form textarea { width:100%; min-height:64px; resize:vertical; padding:8px; border:1px solid var(--line); border-radius:7px; background:#0c0e10; color:var(--fg); font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; text-transform:none; letter-spacing:0; }
+    .host-start-form textarea:focus { outline:2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:1px; border-color:color-mix(in srgb, var(--accent) 55%, var(--line)); }
     .capacity-row { background:color-mix(in srgb, var(--panel-2) 18%, transparent); }
     .dedicated-link { display:grid; grid-template-columns:18px minmax(0,1fr); align-items:center; }
     .dedicated-link .dedicated-mark { display:inline-flex; width:18px; height:18px; color:#fbbf24; }
