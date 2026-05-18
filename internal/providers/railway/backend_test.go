@@ -824,6 +824,48 @@ func TestRailwayListEnumeratesServices(t *testing.T) {
 	}
 }
 
+func TestRailwayDoctorRequiresProjectEnvironment(t *testing.T) {
+	cfg := Config{Provider: providerName}
+	cfg.Railway.APIToken = "test-token"
+	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"
+	backend := &railwayBackend{cfg: cfg, rt: Runtime{Stdout: io.Discard, Stderr: io.Discard}, client: &fakeRailwayAPI{}}
+	_, err := backend.Doctor(context.Background(), DoctorRequest{})
+	if err == nil || !strings.Contains(err.Error(), "--railway-project") {
+		t.Fatalf("err = %v, want missing project rejection", err)
+	}
+}
+
+func TestRailwayDoctorRequiresToken(t *testing.T) {
+	cfg := Config{Provider: providerName}
+	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"
+	cfg.Railway.ProjectID = "proj-1"
+	cfg.Railway.EnvironmentID = "env-1"
+	backend := &railwayBackend{cfg: cfg, rt: Runtime{Stdout: io.Discard, Stderr: io.Discard}}
+	_, err := backend.Doctor(context.Background(), DoctorRequest{})
+	if err == nil || !strings.Contains(err.Error(), "RAILWAY_API_TOKEN") {
+		t.Fatalf("err = %v, want missing token rejection", err)
+	}
+}
+
+func TestRailwayDoctorListsServices(t *testing.T) {
+	api := &fakeRailwayAPI{services: []railwayService{
+		{ID: "svc-1", Name: "api", ProjectID: "proj-1"},
+	}}
+	cfg := Config{Provider: providerName}
+	cfg.Railway.APIToken = "test-token"
+	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"
+	cfg.Railway.ProjectID = "proj-1"
+	cfg.Railway.EnvironmentID = "env-1"
+	backend := &railwayBackend{cfg: cfg, rt: Runtime{Stdout: io.Discard, Stderr: io.Discard}, client: api}
+	result, err := backend.Doctor(context.Background(), DoctorRequest{})
+	if err != nil {
+		t.Fatalf("Doctor err: %v", err)
+	}
+	if result.Provider != providerName || !strings.Contains(result.Message, "inventory=ready") || !strings.Contains(result.Message, "leases=1") {
+		t.Fatalf("Doctor result = %#v", result)
+	}
+}
+
 func TestRailwayFlagsApply(t *testing.T) {
 	cfg := Config{Provider: providerName}
 	cfg.Railway.APIURL = "https://backboard.railway.com/graphql/v2"

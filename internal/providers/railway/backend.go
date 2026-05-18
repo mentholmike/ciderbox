@@ -315,6 +315,17 @@ func (b *railwayBackend) List(ctx context.Context, req ListRequest) ([]LeaseView
 	return servers, nil
 }
 
+func (b *railwayBackend) Doctor(ctx context.Context, _ DoctorRequest) (DoctorResult, error) {
+	if _, _, err := b.requireProjectEnv(); err != nil {
+		return DoctorResult{}, err
+	}
+	servers, err := b.List(ctx, ListRequest{})
+	if err != nil {
+		return DoctorResult{}, err
+	}
+	return inventoryDoctorResult(providerName, len(servers)), nil
+}
+
 func (b *railwayBackend) Status(ctx context.Context, req StatusRequest) (StatusView, error) {
 	if req.ID == "" {
 		return StatusView{}, exit(2, "provider=%s status requires --id <railway-service-id>", providerName)
