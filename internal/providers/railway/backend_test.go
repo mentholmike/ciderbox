@@ -144,6 +144,25 @@ func TestRailwayClientAcceptsBooleanTriggerDeployResponse(t *testing.T) {
 	}
 }
 
+func TestRailwayClientRejectsFalseBooleanTriggerDeployResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":{"environmentTriggersDeploy":false}}`)
+	}))
+	defer server.Close()
+
+	cfg := Config{}
+	cfg.Railway.APIToken = "test-token"
+	cfg.Railway.APIURL = server.URL
+	client, err := newRailwayClient(cfg, Runtime{HTTP: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.TriggerDeploy(context.Background(), "proj-1", "env-1", "svc-1")
+	if err == nil || !strings.Contains(err.Error(), "environmentTriggersDeploy returned false") {
+		t.Fatalf("err = %v, want false trigger error", err)
+	}
+}
+
 func TestRailwayClientSurfacesNon2xxAsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden by token", http.StatusForbidden)

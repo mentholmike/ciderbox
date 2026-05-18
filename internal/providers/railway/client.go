@@ -259,6 +259,13 @@ func (c *railwayClient) TriggerDeploy(ctx context.Context, projectID, environmen
 	if err := json.Unmarshal(out.EnvironmentTriggersDeploy, &maybeObject); err == nil {
 		return strings.TrimSpace(maybeObject.ID), nil
 	}
+	var maybeOK bool
+	if err := json.Unmarshal(out.EnvironmentTriggersDeploy, &maybeOK); err == nil {
+		if !maybeOK {
+			return "", fmt.Errorf("environmentTriggersDeploy returned false")
+		}
+		return "", nil
+	}
 	return "", nil
 }
 
