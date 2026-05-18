@@ -651,6 +651,7 @@ func webVNCDaemonLogHasReady(path string) bool {
 }
 
 func webVNCDaemonSupervisorScript(exe string, args []string) string {
+	args = ensureWebVNCDaemonReclaimArg(args)
 	firstArgs := make([]string, 0, len(args)+1)
 	firstArgs = append(firstArgs, shellQuote(exe))
 	for _, arg := range args {
@@ -675,6 +676,16 @@ func webVNCDaemonSupervisorScript(exe string, args []string) string {
 		"  echo \"webvnc daemon supervisor: child exited code=$code; restarting in 1s\"\n" +
 		"  sleep 1\n" +
 		"done\n"
+}
+
+func ensureWebVNCDaemonReclaimArg(args []string) []string {
+	for _, arg := range args {
+		if arg == "--reclaim" || strings.HasPrefix(arg, "--reclaim=") {
+			return args
+		}
+	}
+	out := append([]string(nil), args...)
+	return append(out, "--reclaim")
 }
 
 func (a App) webVNCDaemonStatus(leaseID string) error {
