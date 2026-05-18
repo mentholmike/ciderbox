@@ -322,6 +322,41 @@ private prep hook only for organization-specific setup. Do not put Apple
 credentials, download tokens, or private package mirrors in this repository or
 in baked images.
 
+For the generic developer-tools image, prefer the small wrapper instead of
+remembering the lifecycle environment by hand:
+
+```bash
+scripts/mint-macos-devtools-image.sh
+```
+
+That default is no-spend: it runs coordinator, IAM, offering, quota, host list,
+and allocation dry-run checks, writes the usual lifecycle summary, and stops
+before lease creation. To mint from an already available host:
+
+```bash
+scripts/mint-macos-devtools-image.sh \
+  --region us-west-2 \
+  --type mac2.metal \
+  --use-existing
+```
+
+To allow paid host allocation when no reusable host exists:
+
+```bash
+scripts/mint-macos-devtools-image.sh \
+  --region us-west-2 \
+  --type mac2.metal \
+  --allocate
+```
+
+The wrapper sets `CRABBOX_MACOS_SOURCE_PREP_SCRIPT` to
+`scripts/install-macos-developer-tools.sh`, names images with the
+`crabbox-macos-devtools-<timestamp>` prefix, promotes the AMI after candidate
+proof, and keeps checkpoint fork proof enabled by default. Use
+`--no-promote` for a candidate-only run, `--no-checkpoint` to skip checkpoint
+fork proof, and `--release-host` only when the AWS Dedicated Host can be
+released safely.
+
 If an available EC2 Mac Dedicated Host already exists, the script still stops
 after preflight unless `CRABBOX_MACOS_RUN=1` or `CRABBOX_MACOS_ALLOCATE=1` is
 set.
