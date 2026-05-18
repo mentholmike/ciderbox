@@ -139,6 +139,14 @@ func clearConfigEnv(t *testing.T) {
 		"CRABBOX_EXE_DEV_USER",
 		"CRABBOX_EXE_DEV_WORK_ROOT",
 		"CRABBOX_EXE_DEV_NO_EMAIL",
+		"CRABBOX_RAILWAY_API_TOKEN",
+		"RAILWAY_API_TOKEN",
+		"CRABBOX_RAILWAY_API_URL",
+		"RAILWAY_API_URL",
+		"CRABBOX_RAILWAY_PROJECT_ID",
+		"RAILWAY_PROJECT_ID",
+		"CRABBOX_RAILWAY_ENVIRONMENT_ID",
+		"RAILWAY_ENVIRONMENT_ID",
 	} {
 		t.Setenv(key, "")
 	}
@@ -312,6 +320,10 @@ e2b:
   template: crabbox-ready
   workdir: work/repo
   user: sandbox
+railway:
+  apiUrl: https://railway.example.test/graphql/v2
+  projectId: project-file
+  environmentId: environment-file
 islo:
   baseUrl: https://islo.example.test
   image: docker.io/library/ubuntu:24.04
@@ -467,6 +479,9 @@ ssh:
 	}
 	if cfg.E2B.APIURL != "https://api.e2b.example.test" || cfg.E2B.Domain != "e2b.example.test" || cfg.E2B.Template != "crabbox-ready" || cfg.E2B.Workdir != "work/repo" || cfg.E2B.User != "sandbox" {
 		t.Fatalf("e2b config not loaded: %#v", cfg.E2B)
+	}
+	if cfg.Railway.APIURL != "https://railway.example.test/graphql/v2" || cfg.Railway.ProjectID != "project-file" || cfg.Railway.EnvironmentID != "environment-file" {
+		t.Fatalf("railway config not loaded: %#v", cfg.Railway)
 	}
 	if cfg.Islo.BaseURL != "https://islo.example.test" || cfg.Islo.Image != "docker.io/library/ubuntu:24.04" || cfg.Islo.Workdir != "crabbox" || cfg.Islo.GatewayProfile != "default" || cfg.Islo.SnapshotName != "snap-ready" || cfg.Islo.VCPUs != 4 || cfg.Islo.MemoryMB != 8192 || cfg.Islo.DiskGB != 40 {
 		t.Fatalf("islo config not loaded: %#v", cfg.Islo)
@@ -645,6 +660,14 @@ func TestEnvOverridesConfig(t *testing.T) {
 	t.Setenv("CRABBOX_E2B_TEMPLATE", "template-env")
 	t.Setenv("CRABBOX_E2B_WORKDIR", "env-workdir")
 	t.Setenv("CRABBOX_E2B_USER", "sandbox-env")
+	t.Setenv("RAILWAY_API_TOKEN", "railway-token-file")
+	t.Setenv("CRABBOX_RAILWAY_API_TOKEN", "railway-token-env")
+	t.Setenv("RAILWAY_API_URL", "https://railway-file.example/graphql/v2")
+	t.Setenv("CRABBOX_RAILWAY_API_URL", "https://railway-env.example/graphql/v2")
+	t.Setenv("RAILWAY_PROJECT_ID", "railway-project-file")
+	t.Setenv("CRABBOX_RAILWAY_PROJECT_ID", "railway-project-env")
+	t.Setenv("RAILWAY_ENVIRONMENT_ID", "railway-environment-file")
+	t.Setenv("CRABBOX_RAILWAY_ENVIRONMENT_ID", "railway-environment-env")
 	t.Setenv("ISLO_API_KEY", "islo-api-file")
 	t.Setenv("CRABBOX_ISLO_API_KEY", "islo-api-env")
 	t.Setenv("ISLO_BASE_URL", "https://islo-file.example")
@@ -797,6 +820,9 @@ func TestEnvOverridesConfig(t *testing.T) {
 	}
 	if cfg.E2B.APIKey != "e2b-api-env" || cfg.E2B.APIURL != "https://api.e2b-env.example" || cfg.E2B.Domain != "e2b-env.example" || cfg.E2B.Template != "template-env" || cfg.E2B.Workdir != "env-workdir" || cfg.E2B.User != "sandbox-env" {
 		t.Fatalf("unexpected e2b env: %#v", cfg.E2B)
+	}
+	if cfg.Railway.APIToken != "railway-token-env" || cfg.Railway.APIURL != "https://railway-env.example/graphql/v2" || cfg.Railway.ProjectID != "railway-project-env" || cfg.Railway.EnvironmentID != "railway-environment-env" {
+		t.Fatalf("unexpected railway env: %#v", cfg.Railway)
 	}
 	if cfg.Islo.APIKey != "islo-api-env" || cfg.Islo.BaseURL != "https://islo-env.example" || cfg.Islo.Image != "ubuntu:env" || cfg.Islo.Workdir != "env-workdir" || cfg.Islo.GatewayProfile != "env-gateway" || cfg.Islo.SnapshotName != "env-snapshot" || cfg.Islo.VCPUs != 8 || cfg.Islo.MemoryMB != 16384 || cfg.Islo.DiskGB != 80 {
 		t.Fatalf("unexpected islo env: %#v", cfg.Islo)
