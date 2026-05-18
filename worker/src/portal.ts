@@ -27,10 +27,23 @@ export interface PortalLeaseBridgeStatus {
   };
 }
 
+export interface PortalMacHostRecord {
+  id: string;
+  provider: string;
+  target: string;
+  state: string;
+  region: string;
+  availabilityZone: string;
+  instanceType: string;
+  autoPlacement: string;
+  allocationTime?: string;
+}
+
 export function portalHome(
   leases: LeaseRecord[],
   runners: ExternalRunnerRecord[],
   request: Request,
+  macHosts: PortalMacHostRecord[] = [],
 ): Response {
   const sortedLeases = leases.toSorted((a, b) => leaseSortTime(b).localeCompare(leaseSortTime(a)));
   const active = sortedLeases.filter((lease) => lease.state === "active");
@@ -81,6 +94,10 @@ export function portalHome(
         : externalRunnerLeaseRow(row.runner, { admin, owner, org }),
     )
     .join("");
+  const macHostRows = macHosts.map((host) => macHostRow(host)).join("");
+  const macHostSummary = macHosts.length
+    ? `${macHosts.filter((host) => host.state === "available").length} available / ${macHosts.length} total`
+    : "no hosts";
   const summary = admin
     ? `${active.length + activeRunners.length} active / ${ended} ended / ${sortedRunners.length} external / ${system} system`
     : `${active.length + activeRunners.length} active / ${ended} ended / ${sortedRunners.length} external`;
@@ -96,6 +113,30 @@ export function portalHome(
           <h2>leases</h2>
           <span>${escapeHTML(summary)}</span>
         </div>
+        ${
+          macHosts.length > 0
+            ? `<div class="capacity-panel">
+                <div class="section-head">
+                  <h3>mac hosts</h3>
+                  <span>${escapeHTML(macHostSummary)}</span>
+                </div>
+                <table class="lease-table capacity-table">
+                  <thead>
+                    <tr>
+                      <th>host</th>
+                      <th>state</th>
+                      <th>provider</th>
+                      <th>target</th>
+                      <th>type</th>
+                      <th>placement</th>
+                      <th>allocated</th>
+                    </tr>
+                  </thead>
+                  <tbody>${macHostRows}</tbody>
+                </table>
+              </div>`
+            : ""
+        }
         <table class="lease-table" data-portal-table data-page-size="12" data-search-placeholder="search leases" data-filter-buttons="${escapeHTML(filterButtons)}" data-filter-default="${defaultFilter}">
           <thead>
             <tr>
@@ -1403,6 +1444,37 @@ function leaseRow(
   </tr>`;
 }
 
+function macHostRow(host: PortalMacHostRecord): string {
+  const stateTone = macHostStateTone(host.state);
+  return `<tr class="capacity-row">
+    <td><span class="lease-link"><strong>${escapeHTML(shortHostID(host.id))}</strong><small>${escapeHTML(host.region)}</small></span></td>
+    <td><span class="pill" data-tone="${stateTone}">${escapeHTML(host.state || "-")}</span></td>
+    <td>${providerBadge(host.provider)}</td>
+    <td>${targetBadge(host.target)}</td>
+    <td>${escapeHTML(host.instanceType || "-")}</td>
+    <td>${escapeHTML([host.availabilityZone, host.autoPlacement].filter(Boolean).join(" · ") || "-")}</td>
+    ${timeCell(host.allocationTime)}
+  </tr>`;
+}
+
+function shortHostID(value: string): string {
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function macHostStateTone(value: string): "ok" | "warn" | "bad" {
+  switch (value) {
+    case "available":
+      return "ok";
+    case "pending":
+      return "warn";
+    default:
+      return "bad";
+  }
+}
+
 function externalRunnerLeaseRow(
   runner: ExternalRunnerRecord,
   context: { admin: boolean; owner: string; org: string },
@@ -2213,6 +2285,16 @@ function html(
     .actions-stack small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }
     .external-access { flex-wrap:nowrap; }
     .external-access span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .capacity-panel { border-bottom:1px solid var(--line-soft); }
+    .capacity-panel .section-head { border-top:1px solid var(--line-soft); background:color-mix(in srgb, var(--panel-2) 72%, transparent); }
+    .capacity-panel h3 { margin:0; font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+    .capacity-table { border-top:1px solid var(--line-soft); }
+    .capacity-table th:nth-child(1) { width:18%; }
+    .capacity-table th:nth-child(2) { width:86px; }
+    .capacity-table th:nth-child(3),.capacity-table th:nth-child(4) { width:104px; }
+    .capacity-table th:nth-child(5) { width:120px; }
+    .capacity-row { background:color-mix(in srgb, var(--panel-2) 34%, transparent); }
+    .capacity-row .lease-link { pointer-events:none; color:#cbd5e1; }
     .access-icon { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:1px solid var(--line); color:#cbd5e1; background:#0c0e10; text-decoration:none; }
     .access-icon svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
     .access-icon[data-access="vscode"] { color:#d8b4fe; }

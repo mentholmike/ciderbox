@@ -29,6 +29,7 @@ import {
   portalRunDetail,
   portalShareLease,
   portalVNC,
+  type PortalMacHostRecord,
   webVNCBridgeCommand,
 } from "./portal";
 import { leaseSlugFromID, normalizeLeaseSlug, slugWithCollisionSuffix } from "./slug";
@@ -1335,11 +1336,12 @@ export class FleetDurableObject implements DurableObject {
   private async portalRoute(request: Request, parts: string[]): Promise<Response> {
     const method = request.method.toUpperCase();
     if (method === "GET" && parts.length === 1) {
-      const [leases, runners] = await Promise.all([
+      const [leases, runners, macHosts] = await Promise.all([
         this.portalLeases(request),
         this.visibleExternalRunners(request),
+        this.portalMacHosts(),
       ]);
-      return portalHome(leases, runners, request);
+      return portalHome(leases, runners, request, macHosts);
     }
     if (method === "GET" && parts[1] === "runs" && parts[2]) {
       return await this.portalRunRoute(request, parts[2], parts[3]);
@@ -1432,6 +1434,33 @@ export class FleetDurableObject implements DurableObject {
     return isAdminRequest(request)
       ? this.filterLeases(leases, request)
       : this.filterLeasesForRequest(leases, request);
+  }
+
+  private async portalMacHosts(): Promise<PortalMacHostRecord[]> {
+    if (!this.env.AWS_ACCESS_KEY_ID || !this.env.AWS_SECRET_ACCESS_KEY) {
+      return [];
+    }
+    const region = sanitizeAWSRegion(this.env.CRABBOX_AWS_REGION || "eu-west-1");
+    if (!region) {
+      return [];
+    }
+    try {
+      const hosts = await new EC2SpotClient(this.env, region).listMacHosts();
+      return hosts.map((host) => ({
+        id: host.id,
+        provider: "aws",
+        target: "macos",
+        state: host.state,
+        region: host.region,
+        availabilityZone: host.availabilityZone,
+        instanceType: host.instanceType,
+        autoPlacement: host.autoPlacement,
+        ...(host.allocationTime ? { allocationTime: host.allocationTime } : {}),
+      }));
+    } catch (error) {
+      console.warn(`portal mac host inventory unavailable: ${errorMessage(error)}`);
+      return [];
+    }
   }
 
   private async resolvePortalLease(

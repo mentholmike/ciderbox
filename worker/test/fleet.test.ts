@@ -1651,6 +1651,66 @@ describe("fleet lease identity and idle", () => {
     expect(body).not.toContain("amber-krill");
   });
 
+  it("renders AWS mac host capacity on the portal when configured", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const params = new URLSearchParams(await requestBodyForTest(input, init));
+        expect(params.get("Action")).toBe("DescribeHosts");
+        return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+        <DescribeHostsResponse>
+          <hostSet>
+            <item>
+              <hostId>h-000000000001</hostId>
+              <state>available</state>
+              <availabilityZone>eu-west-1a</availabilityZone>
+              <autoPlacement>on</autoPlacement>
+              <allocationTime>2026-05-15T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+            </item>
+            <item>
+              <hostId>h-000000000002</hostId>
+              <state>pending</state>
+              <availabilityZone>eu-west-1b</availabilityZone>
+              <autoPlacement>off</autoPlacement>
+              <allocationTime>2026-05-17T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+              <tagSet><item><key>crabbox</key><value>true</value></item></tagSet>
+            </item>
+          </hostSet>
+        </DescribeHostsResponse>`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("GET", "/portal", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("mac hosts");
+    expect(body).toContain("1 available / 2 total");
+    expect(body).toContain("mac2.metal");
+    expect(body).toContain("eu-west-1a");
+    expect(body).toContain("eu-west-1b");
+    expect(body).toContain("available");
+    expect(body).toContain("pending");
+  });
+
   it("syncs external runner visibility and marks missing runners stale", async () => {
     const storage = new MemoryStorage();
     const fleet = testFleet(storage);
