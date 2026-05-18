@@ -361,7 +361,7 @@ describe("aws provider", () => {
     const hostMiss =
       "no available EC2 Mac Dedicated Host found in eu-west-1 for mac2.metal; allocate a host or set CRABBOX_HOST_ID";
     const imageMiss =
-      "no AWS AMI found in eu-west-2 for name=amzn-ec2-macos-15.*-arm64 architecture=arm64_mac";
+      "no AWS AMI found in eu-west-2 for name=amzn-ec2-macos-14.*-arm64 architecture=arm64_mac";
 
     expect(awsProvisioningErrorCategory(hostMiss)).toBe("capacity");
     expect(isRetryableAWSProvisioningError(hostMiss)).toBe(true);
@@ -473,6 +473,7 @@ describe("aws provider", () => {
     );
 
     expect(imageQueries).toEqual([
+      "amzn-ec2-macos-14.*-arm64:arm64_mac",
       "amzn-ec2-macos-15.*-arm64:arm64_mac",
       "amzn-ec2-macos-14.*:x86_64_mac",
     ]);

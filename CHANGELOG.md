@@ -13,8 +13,8 @@
 ### Changed
 
 - Clarified WebVNC docs to include coordinator-backed AWS macOS desktop leases in the supported portal bridge surface.
-- Changed AWS macOS AMI selection so Apple silicon EC2 Mac leases default to macOS 15 images, keeping only legacy `mac1.metal` on macOS 14 x86 images.
-- Hardened macOS image lifecycle smoke so source, candidate, and promoted images must expose macOS 15+, Command Line Tools-compatible Apple developer tools, Swift tools 6.2+, Homebrew, and common Node/pnpm developer tooling before promotion.
+- Changed AWS macOS AMI selection so newer `mac-m*` EC2 Mac leases use macOS 15 images while `mac2*` and legacy `mac1.metal` continue using launchable macOS 14 images.
+- Hardened macOS image lifecycle smoke so source, candidate, and promoted images must expose Command Line Tools-compatible Apple developer tools, Swift, Homebrew, and common Node/pnpm developer tooling before promotion, with stricter macOS 15 and Swift tools 6.2 defaults for `mac-m*` host families.
 
 ### Fixed
 

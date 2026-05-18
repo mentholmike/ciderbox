@@ -272,18 +272,19 @@ scripts/macos-image-lifecycle-smoke.sh
 ```
 
 The script warms a macOS desktop lease, verifies SSH/sync/VNC prerequisites,
-requires the image to expose macOS 15 or newer, an active Apple developer tools
-directory, a macOS SDK through `xcrun`, Swift tools 6.2 or newer, Homebrew,
-Node/npm/corepack/pnpm, and Python 3, starts WebVNC, waits for the portal
-bridge to report `connected=true`, collects desktop artifacts, creates a
-candidate AMI with a rebooting image capture, boots and smokes the candidate,
-then promotes and smokes the promoted image when `CRABBOX_MACOS_PROMOTE=1`.
-Command Line Tools are enough by default; full Xcode is not required unless
-`CRABBOX_MACOS_REQUIRE_XCODE=1` is set. Tune the toolchain gates with
-`CRABBOX_MACOS_REQUIRED_MAJOR` and `CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS`. The
-defaults match Swift package lanes that require `swift-tools-version: 6.2`,
-macOS 15 SDKs, and common developer/OpenClaw JavaScript tooling. Tune the
-WebVNC bridge wait with
+requires an active Apple developer tools directory, a macOS SDK through
+`xcrun`, Swift, Homebrew, Node/npm/corepack/pnpm, and Python 3, starts WebVNC,
+waits for the portal bridge to report `connected=true`, collects desktop
+artifacts, creates a candidate AMI with a rebooting image capture, boots and
+smokes the candidate, then promotes and smokes the promoted image when
+`CRABBOX_MACOS_PROMOTE=1`. Command Line Tools are enough by default; full Xcode
+is not required unless `CRABBOX_MACOS_REQUIRE_XCODE=1` is set. For `mac2*`
+families the default gates are macOS 14+ and Swift tools 6.0+ because those are
+the launchable hosts commonly available today. For newer `mac-m*` families the
+defaults are macOS 15+ and Swift tools 6.2+, which matches Swift package lanes
+that require `swift-tools-version: 6.2` and macOS 15 SDKs. Tune the toolchain
+gates with `CRABBOX_MACOS_REQUIRED_MAJOR` and
+`CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS`. Tune the WebVNC bridge wait with
 `CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT` and
 `CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL`; tune the post-start grace period with
 `CRABBOX_MACOS_WEBVNC_START_GRACE`. EC2 Mac Dedicated Hosts have

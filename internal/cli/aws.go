@@ -634,7 +634,10 @@ func awsMacOSAMIQueryForInstanceType(instanceType string) (string, string) {
 	if strings.HasPrefix(instanceType, "mac1.") {
 		return "amzn-ec2-macos-14.*", "x86_64_mac"
 	}
-	return "amzn-ec2-macos-15.*-arm64", "arm64_mac"
+	if strings.HasPrefix(instanceType, "mac-m") {
+		return "amzn-ec2-macos-15.*-arm64", "arm64_mac"
+	}
+	return "amzn-ec2-macos-14.*-arm64", "arm64_mac"
 }
 
 func (c *AWSClient) resolveLatestAmazonAMI(ctx context.Context, name, architecture string) (string, error) {

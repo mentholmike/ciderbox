@@ -1724,7 +1724,10 @@ function awsMacOSAMIQuery(serverType: string): {
   if (serverType.startsWith("mac1.")) {
     return { name: "amzn-ec2-macos-14.*", architecture: "x86_64_mac" };
   }
-  return { name: "amzn-ec2-macos-15.*-arm64", architecture: "arm64_mac" };
+  if (serverType.startsWith("mac-m")) {
+    return { name: "amzn-ec2-macos-15.*-arm64", architecture: "arm64_mac" };
+  }
+  return { name: "amzn-ec2-macos-14.*-arm64", architecture: "arm64_mac" };
 }
 
 function awsServiceQuotaFromRecord(value: unknown): AWSServiceQuota | undefined {

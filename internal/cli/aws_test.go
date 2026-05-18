@@ -359,11 +359,11 @@ func TestAWSMacOSFallbackResolvesAMIForEachInstanceType(t *testing.T) {
 	if serverRecord.ServerType.Name != "mac1.metal" || resolved.ServerType != "mac1.metal" {
 		t.Fatalf("server type=%q resolved=%q, want mac1.metal", serverRecord.ServerType.Name, resolved.ServerType)
 	}
-	if len(runImages) != len(awsMacOSInstanceTypeCandidates()) || runImages[0] != "ami-m4" || runImages[len(runImages)-1] != "ami-x86" {
+	if len(runImages) != len(awsMacOSInstanceTypeCandidates()) || runImages[0] != "ami-arm64" || runImages[len(runImages)-1] != "ami-x86" {
 		t.Fatalf("run image sequence=%v, want arm64 candidates ending with x86 mac1 AMI", runImages)
 	}
-	if slices.Contains(runImages[:len(runImages)-1], "ami-arm64") {
-		t.Fatalf("run image sequence=%v, want Apple silicon candidates to use macOS 15 AMI", runImages)
+	if !slices.Contains(runImages, "ami-m4") {
+		t.Fatalf("run image sequence=%v, want M-series mac-m candidates to use macOS 15 AMI", runImages)
 	}
 	wantQueries := make([]string, 0, len(awsMacOSInstanceTypeCandidates()))
 	for _, instanceType := range awsMacOSInstanceTypeCandidates() {
@@ -388,13 +388,13 @@ func TestAWSMacOSAMIQueryForInstanceType(t *testing.T) {
 		{
 			name:             "m1",
 			instanceType:     "mac2.metal",
-			wantName:         "amzn-ec2-macos-15.*-arm64",
+			wantName:         "amzn-ec2-macos-14.*-arm64",
 			wantArchitecture: "arm64_mac",
 		},
 		{
 			name:             "m2",
 			instanceType:     "mac2-m2pro.metal",
-			wantName:         "amzn-ec2-macos-15.*-arm64",
+			wantName:         "amzn-ec2-macos-14.*-arm64",
 			wantArchitecture: "arm64_mac",
 		},
 		{

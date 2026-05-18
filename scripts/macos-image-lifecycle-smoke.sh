@@ -32,8 +32,20 @@ open_webvnc="${CRABBOX_MACOS_OPEN_WEBVNC:-0}"
 keep_lease="${CRABBOX_MACOS_KEEP_LEASE:-0}"
 keep_checkpoint="${CRABBOX_MACOS_KEEP_CHECKPOINT:-0}"
 release_host="${CRABBOX_MACOS_RELEASE_HOST:-0}"
-required_macos_major="${CRABBOX_MACOS_REQUIRED_MAJOR:-15}"
-required_swift_tools="${CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS:-6.2}"
+if [[ -n "${CRABBOX_MACOS_REQUIRED_MAJOR:-}" ]]; then
+  required_macos_major="$CRABBOX_MACOS_REQUIRED_MAJOR"
+elif [[ "$instance_type" == mac-m* ]]; then
+  required_macos_major="15"
+else
+  required_macos_major="14"
+fi
+if [[ -n "${CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS:-}" ]]; then
+  required_swift_tools="$CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS"
+elif [[ "$instance_type" == mac-m* ]]; then
+  required_swift_tools="6.2"
+else
+  required_swift_tools="6.0"
+fi
 require_xcode="${CRABBOX_MACOS_REQUIRE_XCODE:-0}"
 source_prep_script="${CRABBOX_MACOS_SOURCE_PREP_SCRIPT:-}"
 artifact_root="${CRABBOX_MACOS_ARTIFACT_DIR:-$ROOT/.crabbox/macos-image-smoke/$image_name}"
