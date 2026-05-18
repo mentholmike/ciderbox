@@ -432,7 +432,9 @@ export function portalMacHostDetail(
   const vncAction =
     activeLease?.desktop === true
       ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/vnc">open VNC</a>`
-      : `<span class="muted">${activeLease ? "no desktop" : "no active lease"}</span>`;
+      : activeLease
+        ? `<form method="post" action="${macHostVNCPath(host)}"><button class="button" type="submit">enable VNC</button></form>`
+        : `<span class="muted">start desktop lease</span>`;
   const codeAction =
     activeLease?.code === true
       ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/code/">open code</a>`
@@ -491,6 +493,7 @@ export function portalMacHostDetail(
                   ${metaRow("lease", activeLease.slug ? `${activeLease.slug} / ${activeLease.id}` : activeLease.id)}
                   ${metaRow("host", activeLease.host || "pending")}
                   ${metaRow("ssh", activeLease.sshPort ? `${activeLease.sshUser || "crabbox"}@${activeLease.host || "host"}:${activeLease.sshPort}` : "pending")}
+                  ${metaRow("desktop", activeLease.desktop ? "enabled" : "disabled")}
                   ${metaRow("expires", shortTime(activeLease.expiresAt))}
                 </dl>`
               : `<p class="detail-note">No active Crabbox lease is attached to this Dedicated Host. It is still usable as macOS capacity for a host-pinned run.</p>`
@@ -1567,12 +1570,15 @@ function macHostAccessCell(host: PortalMacHostRecord, detailPath: string): strin
       `<a class="access-icon" data-access="vscode" href="${detailPath}/code/" title="VS Code" aria-label="open VS Code">${codeIcon}</a>`,
     );
   }
-  if (activeLease?.desktop) {
-    pieces.push(
-      `<a class="access-icon" data-access="vnc" href="${detailPath}/vnc" title="VNC" aria-label="open VNC">${vncIcon}</a>`,
-    );
-  }
+  const vncTitle = activeLease?.desktop ? "VNC" : activeLease ? "enable VNC" : "start VNC lease";
+  pieces.push(
+    `<a class="access-icon" data-access="vnc" href="${macHostVNCPath(host)}" title="${vncTitle}" aria-label="${vncTitle}">${vncIcon}</a>`,
+  );
   return `<div class="access-cell">${pieces.join("")}</div>`;
+}
+
+function macHostVNCPath(host: PortalMacHostRecord): string {
+  return `/portal/hosts/${encodeURIComponent(host.provider)}/${encodeURIComponent(host.id)}/vnc`;
 }
 
 function shortHostID(value: string): string {

@@ -1376,6 +1376,16 @@ export class FleetDurableObject implements DurableObject {
     ) {
       return await this.portalMacHostLeaseRedirect(request, parts[2], parts[3], "vnc");
     }
+    if (
+      method === "POST" &&
+      parts[1] === "hosts" &&
+      parts[2] &&
+      parts[3] &&
+      parts[4] === "vnc" &&
+      parts[5] === undefined
+    ) {
+      return await this.portalEnableMacHostVNC(request, parts[2], parts[3]);
+    }
     if (method === "GET" && parts[1] === "hosts" && parts[2] && parts[3] && parts[4] === "code") {
       return await this.portalMacHostLeaseRedirect(request, parts[2], parts[3], "code");
     }
@@ -1538,14 +1548,27 @@ export class FleetDurableObject implements DurableObject {
   ): Promise<Response> {
     const host = await this.resolvePortalMacHost(request, provider, hostID);
     const lease = host?.lease?.state === "active" ? host.lease : undefined;
-    if (!host || !lease) {
+    if (!host) {
       return portalError(
         action === "vnc" ? "WebVNC unavailable" : "Code unavailable",
+        "That dedicated host is not visible or the provider is not configured.",
+        404,
+      );
+    }
+    if (!lease) {
+      if (action === "vnc") {
+        return portalMacHostDetail(host, undefined);
+      }
+      return portalError(
+        "Code unavailable",
         "No active Crabbox lease is attached to that dedicated host.",
         409,
       );
     }
     const error = action === "vnc" ? webVNCLeaseError(lease) : codeLeaseError(lease);
+    if (action === "vnc" && error === "lease was not created with desktop=true") {
+      return portalMacHostDetail(host, this.leaseBridgeStatus(lease));
+    }
     if (error) {
       return portalError(action === "vnc" ? "WebVNC unavailable" : "Code unavailable", error, 409);
     }
@@ -1557,6 +1580,42 @@ export class FleetDurableObject implements DurableObject {
             ? `/portal/leases/${encodeURIComponent(lease.id)}/vnc`
             : `/portal/leases/${encodeURIComponent(lease.id)}/code/`,
       },
+    });
+  }
+
+  private async portalEnableMacHostVNC(
+    request: Request,
+    provider: string,
+    hostID: string,
+  ): Promise<Response> {
+    const host = await this.resolvePortalMacHost(request, provider, hostID);
+    const lease = host?.lease?.state === "active" ? host.lease : undefined;
+    if (!host) {
+      return portalError(
+        "WebVNC unavailable",
+        "That dedicated host is not visible or the provider is not configured.",
+        404,
+      );
+    }
+    if (!lease) {
+      return portalError(
+        "WebVNC unavailable",
+        "Start a host-pinned macOS desktop lease first; browser sessions cannot mint your local SSH key.",
+        409,
+      );
+    }
+    if (!this.leaseManageableByRequest(lease, request, isAdminRequest(request))) {
+      return portalError("WebVNC unavailable", "Lease manage access is required.", 403);
+    }
+    if (lease.target !== "macos") {
+      return portalError("WebVNC unavailable", "Only macOS host leases can be enabled here.", 409);
+    }
+    lease.desktop = true;
+    lease.updatedAt = new Date().toISOString();
+    await this.putLease(lease);
+    return new Response(null, {
+      status: 303,
+      headers: { location: `/portal/leases/${encodeURIComponent(lease.id)}/vnc` },
     });
   }
 

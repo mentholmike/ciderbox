@@ -1701,6 +1701,25 @@ describe("fleet lease identity and idle", () => {
         expiresAt: "2026-05-17T02:20:00.000Z",
       }),
     );
+    storage.seed(
+      "lease:cbx_000000000100",
+      testLease({
+        id: "cbx_000000000100",
+        slug: "mac-no-vnc",
+        provider: "aws",
+        target: "macos",
+        desktop: false,
+        class: "mac",
+        serverType: "mac2.metal",
+        hostId: "h-000000000002",
+        cloudID: "i-000000000100",
+        region: "eu-west-1",
+        createdAt: "2026-05-17T00:30:00.000Z",
+        updatedAt: "2026-05-17T00:40:00.000Z",
+        lastTouchedAt: "2026-05-17T00:40:00.000Z",
+        expiresAt: "2026-05-17T02:40:00.000Z",
+      }),
+    );
     const fleet = testFleet(
       storage,
       {},
@@ -1729,7 +1748,9 @@ describe("fleet lease identity and idle", () => {
     expect(body).toContain('data-filter-tags="active mine dedicated host aws macos available');
     expect(body).toContain("/portal/hosts/aws/h-000000000001");
     expect(body).toContain("/portal/hosts/aws/h-000000000001/vnc");
+    expect(body).toContain("/portal/hosts/aws/h-000000000002/vnc");
     expect(body).toContain("lease mac-mini");
+    expect(body).toContain("lease mac-no-vnc");
     expect(body).toContain("mac2.metal");
     expect(body).toContain("eu-west-1a");
     expect(body).toContain("eu-west-1b");
@@ -1761,6 +1782,31 @@ describe("fleet lease identity and idle", () => {
     );
     expect(vnc.status).toBe(303);
     expect(vnc.headers.get("location")).toBe("/portal/leases/cbx_000000000099/vnc");
+
+    const enablePage = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000002/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(enablePage.status).toBe(200);
+    const enableBody = await enablePage.text();
+    expect(enableBody).toContain("enable VNC");
+    expect(enableBody).toContain("desktop</dt><dd>disabled");
+
+    const enabled = await fleet.fetch(
+      request("POST", "/portal/hosts/aws/h-000000000002/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/portal/leases/cbx_000000000100/vnc");
+    expect(storage.value<LeaseRecord>("lease:cbx_000000000100")?.desktop).toBe(true);
   });
 
   it("syncs external runner visibility and marks missing runners stale", async () => {
