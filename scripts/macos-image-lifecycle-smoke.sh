@@ -32,6 +32,22 @@ open_webvnc="${CRABBOX_MACOS_OPEN_WEBVNC:-0}"
 keep_lease="${CRABBOX_MACOS_KEEP_LEASE:-0}"
 keep_checkpoint="${CRABBOX_MACOS_KEEP_CHECKPOINT:-0}"
 release_host="${CRABBOX_MACOS_RELEASE_HOST:-0}"
+if [[ -n "${CRABBOX_MACOS_REQUIRED_MAJOR:-}" ]]; then
+  required_macos_major="$CRABBOX_MACOS_REQUIRED_MAJOR"
+elif [[ "$instance_type" == mac-m* ]]; then
+  required_macos_major="15"
+else
+  required_macos_major="14"
+fi
+if [[ -n "${CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS:-}" ]]; then
+  required_swift_tools="$CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS"
+elif [[ "$instance_type" == mac-m* ]]; then
+  required_swift_tools="6.2"
+else
+  required_swift_tools="6.0"
+fi
+require_xcode="${CRABBOX_MACOS_REQUIRE_XCODE:-0}"
+source_prep_script="${CRABBOX_MACOS_SOURCE_PREP_SCRIPT:-}"
 artifact_root="${CRABBOX_MACOS_ARTIFACT_DIR:-$ROOT/.crabbox/macos-image-smoke/$image_name}"
 summary_file="$artifact_root/summary.json"
 evidence_dir="$artifact_root/evidence"
@@ -75,6 +91,7 @@ source_host_wait_log=""
 checkpoint_host_wait_log=""
 candidate_host_wait_log=""
 promoted_host_wait_log=""
+source_prep_log=""
 source_warmup_log=""
 candidate_warmup_log=""
 promoted_warmup_log=""
@@ -254,6 +271,7 @@ write_summary() {
   local dry_log_path allocate_log_path image_create_log_path image_promote_log_path
   local checkpoint_create_log_path checkpoint_fork_log_path checkpoint_delete_log_path
   local quota_log_path
+  local source_prep_log_path
   local source_artifact_dir_path checkpoint_artifact_dir_path candidate_artifact_dir_path promoted_artifact_dir_path
   local source_host_wait_log_path checkpoint_host_wait_log_path candidate_host_wait_log_path promoted_host_wait_log_path
   local source_warmup_log_path candidate_warmup_log_path promoted_warmup_log_path
@@ -277,6 +295,7 @@ write_summary() {
   checkpoint_create_log_path="$(existing_file_or_empty "$checkpoint_create_log")"
   checkpoint_fork_log_path="$(existing_file_or_empty "$checkpoint_fork_log")"
   checkpoint_delete_log_path="$(existing_file_or_empty "$checkpoint_delete_log")"
+  source_prep_log_path="$(existing_file_or_empty "$source_prep_log")"
   source_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/source")"
   checkpoint_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/checkpoint")"
   candidate_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/candidate")"
@@ -338,6 +357,7 @@ write_summary() {
     --arg checkpointCreateLog "$checkpoint_create_log_path" \
     --arg checkpointForkLog "$checkpoint_fork_log_path" \
     --arg checkpointDeleteLog "$checkpoint_delete_log_path" \
+    --arg sourcePrepLog "$source_prep_log_path" \
     --arg sourceArtifactDir "$source_artifact_dir_path" \
     --arg checkpointArtifactDir "$checkpoint_artifact_dir_path" \
     --arg candidateArtifactDir "$candidate_artifact_dir_path" \
@@ -418,6 +438,7 @@ write_summary() {
         checkpointCreate: maybe_path($checkpointCreateLog),
         checkpointFork: maybe_path($checkpointForkLog),
         checkpointDelete: maybe_path($checkpointDeleteLog),
+        sourcePrep: maybe_path($sourcePrepLog),
         hostWait: {
           source: maybe_path($sourceHostWaitLog),
           checkpointFork: maybe_path($checkpointHostWaitLog),
@@ -758,30 +779,120 @@ warmup_macos() {
   lease_from_log "$log"
 }
 
+run_source_prep() {
+  local lease="$1"
+  [[ -n "$source_prep_script" ]] || return 0
+  if [[ ! -f "$source_prep_script" ]]; then
+    blocker_message="macOS source prep script not found: $source_prep_script"
+    printf '%s\n' "$blocker_message" >&2
+    exit 1
+  fi
+  source_prep_log="$evidence_dir/source-prep.log"
+  run_tee_combined "$source_prep_log" "$CRABBOX_BIN" run \
+    --provider aws \
+    --target macos \
+    --id "$lease" \
+    --no-sync \
+    --script "$source_prep_script"
+}
+
 smoke_macos_lease() {
   local lease="$1"
   local label="$2"
   local out_dir="$artifact_root/$label"
-  local daemon_log webvnc_grace_seconds
-  # shellcheck disable=SC2016
+  local daemon_log webvnc_grace_seconds remote probe
+  printf -v remote 'set -euo pipefail\nrequired_macos_major=%q\nrequired_swift_tools=%q\nrequire_xcode=%q\n' \
+    "$required_macos_major" \
+    "$required_swift_tools" \
+    "$require_xcode"
+  IFS= read -r -d '' probe <<'REMOTE' || true
+echo macos-smoke-ok
+product_version="$(sw_vers -productVersion)"
+product_major="${product_version%%.*}"
+sw_vers
+case "$product_major" in
+  ""|*[!0-9]*)
+    echo "could not parse macOS major version from $product_version" >&2
+    exit 1
+    ;;
+esac
+if (( product_major < required_macos_major )); then
+  echo "macOS ${required_macos_major}+ required, got $product_version" >&2
+  exit 1
+fi
+developer_dir="$(xcode-select -p 2>/dev/null || true)"
+echo "developer_dir=$developer_dir"
+if [[ -z "$developer_dir" ]]; then
+  echo "xcode-select has no active developer directory" >&2
+  exit 1
+fi
+if [[ "$require_xcode" == "1" ]]; then
+  case "$developer_dir" in
+    *CommandLineTools*)
+      echo "full Xcode developer directory required, got Command Line Tools: $developer_dir" >&2
+      exit 1
+      ;;
+  esac
+  command -v xcodebuild
+  xcodebuild -version
+  test -d "$developer_dir/Platforms/MacOSX.platform/Developer/SDKs"
+fi
+command -v xcrun
+xcrun --sdk macosx --show-sdk-path
+xcrun --find clang
+xcrun --find swift
+command -v clang
+command -v swift
+swift --version
+swift_version="$(swift --version | awk '{ for (i = 1; i < NF; i++) if ($i == "version") { print $(i + 1); exit } }')"
+if [[ -z "$swift_version" ]]; then
+  echo "could not parse Swift version" >&2
+  exit 1
+fi
+awk -v have="$swift_version" -v want="$required_swift_tools" '
+  BEGIN {
+    haveParts = split(have, h, ".")
+    wantParts = split(want, w, ".")
+    haveMajor = h[1] + 0
+    haveMinor = haveParts > 1 ? h[2] + 0 : 0
+    wantMajor = w[1] + 0
+    wantMinor = wantParts > 1 ? w[2] + 0 : 0
+    if (haveMajor < wantMajor || (haveMajor == wantMajor && haveMinor < wantMinor)) {
+      printf("Swift tools %s+ required, got %s\n", want, have) > "/dev/stderr"
+      exit 1
+    }
+  }'
+command -v ssh
+command -v git
+command -v rsync
+command -v curl
+command -v nc
+command -v brew
+brew --version
+brew --prefix
+command -v node
+node --version
+command -v npm
+npm --version
+command -v corepack
+corepack --version
+command -v pnpm
+pnpm --version
+command -v python3
+python3 --version
+test -d "$HOME/crabbox"
+test -w "$HOME/crabbox"
+sudo test -s /var/db/crabbox/vnc.password
+nc -z 127.0.0.1 5900
+REMOTE
+  remote+="$probe"
   run "$CRABBOX_BIN" run \
     --provider aws \
     --target macos \
     --id "$lease" \
     --no-sync \
     --shell -- \
-    'set -euo pipefail
-     echo macos-smoke-ok
-     sw_vers
-     command -v ssh
-     command -v git
-     command -v rsync
-     command -v curl
-     command -v nc
-     test -d "$HOME/crabbox"
-     test -w "$HOME/crabbox"
-     sudo test -s /var/db/crabbox/vnc.password
-     nc -z 127.0.0.1 5900'
+    "$remote"
 
   daemon_log="$(log_for_label webvnc-daemon "$label")"
   if [[ "$open_webvnc" == "1" ]]; then
@@ -1012,6 +1123,10 @@ fi
 write_summary running source-warmup
 source_lease="$(warmup_macos source)"
 source_lease_id="$source_lease"
+if [[ -n "$source_prep_script" ]]; then
+  write_summary running source-prep
+  run_source_prep "$source_lease"
+fi
 write_summary running source-smoke
 smoke_macos_lease "$source_lease" source
 create_checkpoint_from_source

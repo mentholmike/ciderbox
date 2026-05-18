@@ -616,11 +616,82 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal((fakeLog.match(/^warmup\b/gm) ?? []).length, 3);
   assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 4);
   assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
+  assert.match(fakeLog, /required_macos_major=14/);
+  assert.match(fakeLog, /required_swift_tools=6\.0/);
+  assert.match(fakeLog, /require_xcode=0/);
+  assert.match(fakeLog, /xcode-select -p/);
+  assert.match(fakeLog, /xcrun --sdk macosx --show-sdk-path/);
+  assert.match(fakeLog, /Swift tools %s\+ required/);
+  assert.match(fakeLog, /command -v brew/);
+  assert.match(fakeLog, /command -v node/);
+  assert.match(fakeLog, /command -v corepack/);
+  assert.match(fakeLog, /command -v pnpm/);
   assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy image --wait --wait-timeout 60m$/m);
   assert.match(fakeLog, /^checkpoint fork chk_macos --desktop$/m);
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.match(fakeLog, /^admin hosts release h-mock --provider aws --target macos --region eu-west-1 --force$/m);
+});
+
+test("macOS lifecycle smoke uses stricter defaults for mac-m host families", async () => {
+  const run = await setupRun();
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_MACOS_ALLOCATE: "1",
+    CRABBOX_MACOS_CREATE_IMAGE: "0",
+    CRABBOX_MACOS_TYPE: "mac-m4.metal",
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "m4-toolchain",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  assert.match(fakeLog, /required_macos_major=15/);
+  assert.match(fakeLog, /required_swift_tools=6\.2/);
+});
+
+test("macOS lifecycle smoke runs source prep before the source smoke", async () => {
+  const run = await setupRun();
+  const prep = path.join(run.dir, "prep.sh");
+  await writeFile(
+    prep,
+    `#!/usr/bin/env bash
+set -euo pipefail
+echo prep-ok
+`,
+  );
+  await chmod(prep, 0o755);
+
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_MACOS_ALLOCATE: "1",
+    CRABBOX_MACOS_CREATE_IMAGE: "0",
+    CRABBOX_MACOS_SOURCE_PREP_SCRIPT: prep,
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "source-prep",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assert.equal(summary.result, "passed");
+  assert.equal(summary.phase, "source");
+  assert.equal(summary.evidence.sourcePrep, "evidence/source-prep.log");
+  await assertSummaryFileContains(run.artifacts, summary.evidence.sourcePrep, /macos-smoke-ok/);
+
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  const prepIndex = fakeLog.indexOf(`run --provider aws --target macos --id cbx_source --no-sync --script ${prep}`);
+  const smokeIndex = fakeLog.indexOf("run --provider aws --target macos --id cbx_source --no-sync --shell --");
+  assert.notEqual(prepIndex, -1);
+  assert.notEqual(smokeIndex, -1);
+  assert.equal(prepIndex < smokeIndex, true);
 });
 
 test("macOS lifecycle smoke retries checkpoint fork after transient host recycle", async () => {

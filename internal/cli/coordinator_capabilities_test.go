@@ -34,3 +34,14 @@ func TestValidateCoordinatorLeaseCapabilitiesAcceptsRequestedCapabilities(t *tes
 		t.Fatalf("validateCoordinatorLeaseCapabilities error: %v", err)
 	}
 }
+
+func TestEnforceManagedLeaseCapabilitiesAllowsMacOSScreenSharing(t *testing.T) {
+	err := enforceManagedLeaseCapabilities(
+		Config{Desktop: true},
+		Server{Labels: map[string]string{"target": targetMacOS}},
+		"cbx_test",
+	)
+	if err != nil {
+		t.Fatalf("enforceManagedLeaseCapabilities error: %v", err)
+	}
+}

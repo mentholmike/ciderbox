@@ -3,6 +3,7 @@ import type { ExternalRunnerRecord, LeaseRecord, RunEventRecord, RunRecord } fro
 const novncModuleURL = "/portal/assets/novnc/rfb.js";
 const copyIcon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>`;
 const serverIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>`;
+const dedicatedHostIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M7 7V4h10v3"/><rect x="5" y="7" width="14" height="13" rx="2"/><path d="M9 11h6M9 15h3"/></svg>`;
 const vncIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>`;
 const codeIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 8-4 4 4 4"/><path d="m15 8 4 4-4 4"/><path d="m13 5-2 14"/></svg>`;
 const shareIcon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4"/><path d="m8.6 13.5 6.8 4"/></svg>`;
@@ -33,10 +34,24 @@ export interface PortalLeaseBridgeStatus {
   };
 }
 
+export interface PortalMacHostRecord {
+  id: string;
+  provider: string;
+  target: string;
+  state: string;
+  region: string;
+  availabilityZone: string;
+  instanceType: string;
+  autoPlacement: string;
+  allocationTime?: string;
+  lease?: LeaseRecord;
+}
+
 export function portalHome(
   leases: LeaseRecord[],
   runners: ExternalRunnerRecord[],
   request: Request,
+  macHosts: PortalMacHostRecord[] = [],
 ): Response {
   const sortedLeases = leases.toSorted((a, b) => leaseSortTime(b).localeCompare(leaseSortTime(a)));
   const active = sortedLeases.filter((lease) => lease.state === "active");
@@ -45,6 +60,7 @@ export function portalHome(
     runnerSortTime(b).localeCompare(runnerSortTime(a)),
   );
   const activeRunners = sortedRunners.filter((runner) => !runner.stale);
+  const activeMacHosts = macHosts.filter((host) => host.state !== "released");
   const admin = request.headers.get("x-crabbox-admin") === "true";
   const owner = request.headers.get("x-crabbox-owner") || "";
   const org = request.headers.get("x-crabbox-org") || "";
@@ -55,11 +71,13 @@ export function portalHome(
     ? sortedRunners.filter((runner) => runnerOwnership(runner, owner, org) === "system").length
     : 0;
   const system = systemLeases + systemRunners;
-  const defaultFilter = active.length + activeRunners.length > 0 ? "active" : "all";
+  const defaultFilter =
+    active.length + activeRunners.length + activeMacHosts.length > 0 ? "active" : "all";
   const filterButtons = [
     "active:active",
     "ended:ended",
     "external:external",
+    "dedicated:dedicated",
     "stale:stale",
     "stuck:stuck",
     ...(admin ? ["mine:mine", "system:system"] : []),
@@ -79,17 +97,24 @@ export function portalHome(
       sort: runnerSortTime(runner),
       runner,
     })),
+    ...macHosts.map((host) => ({
+      kind: "mac-host" as const,
+      sort: macHostSortTime(host),
+      host,
+    })),
   ]
     .toSorted((a, b) => b.sort.localeCompare(a.sort))
     .map((row) =>
       row.kind === "lease"
         ? leaseRow(row.lease, { admin, owner, org })
-        : externalRunnerLeaseRow(row.runner, { admin, owner, org }),
+        : row.kind === "runner"
+          ? externalRunnerLeaseRow(row.runner, { admin, owner, org })
+          : macHostRow(row.host, { admin, owner, org }),
     )
     .join("");
   const summary = admin
-    ? `${active.length + activeRunners.length} active / ${ended} ended / ${sortedRunners.length} external / ${system} system`
-    : `${active.length + activeRunners.length} active / ${ended} ended / ${sortedRunners.length} external`;
+    ? `${active.length + activeRunners.length + activeMacHosts.length} active / ${ended} ended / ${sortedRunners.length} external / ${system} system`
+    : `${active.length + activeRunners.length + activeMacHosts.length} active / ${ended} ended / ${sortedRunners.length} external`;
   return html(
     "Crabbox Portal",
     `<main class="portal-shell">
@@ -402,6 +427,108 @@ export function portalExternalRunnerDetail(
   );
 }
 
+export function portalMacHostDetail(
+  host: PortalMacHostRecord,
+  bridgeStatus: PortalLeaseBridgeStatus | undefined,
+): Response {
+  const lease = host.lease;
+  const activeLease = lease?.state === "active" ? lease : undefined;
+  const stateTone = macHostStateTone(host.state);
+  const hostID = shortHostID(host.id);
+  const startDesktopCommand = activeLease ? "" : macHostStartDesktopCommand(host);
+  const activeLeaseVNC = activeLease
+    ? activeLease.desktop === true || activeLease.target === "macos"
+    : false;
+  const vncAction =
+    activeLease && activeLeaseVNC
+      ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/vnc">open VNC</a>`
+      : activeLease
+        ? `<form method="post" action="${macHostVNCPath(host)}"><button class="button" type="submit">enable VNC</button></form>`
+        : `<button class="button" type="button" data-copy-value="${escapeHTML(startDesktopCommand)}">copy start command</button>`;
+  const codeAction =
+    activeLease?.code === true
+      ? `<a class="button" href="/portal/leases/${encodeURIComponent(activeLease.id)}/code/">open code</a>`
+      : `<span class="muted">${activeLease ? "no code" : "no active lease"}</span>`;
+  const commands = activeLease
+    ? [
+        commandBlock("shell", `crabbox ssh --id ${shellArg(activeLease.slug || activeLease.id)}`),
+        commandBlock(
+          "run",
+          `crabbox run --id ${shellArg(activeLease.slug || activeLease.id)} -- <command>`,
+        ),
+        activeLeaseVNC ? commandBlock("WebVNC bridge", webVNCBridgeCommand(activeLease)) : "",
+        activeLease.code ? commandBlock("code bridge", codeBridgeCommand(activeLease)) : "",
+      ]
+        .filter(Boolean)
+        .join("")
+    : [
+        commandBlock("start desktop lease", startDesktopCommand),
+        commandBlock("open WebVNC", "crabbox webvnc --id <lease-id-or-slug> --open"),
+        commandBlock(
+          "host-pinned macOS run",
+          `CRABBOX_HOST_ID=${shellArg(host.id)} crabbox run --provider ${shellArg(host.provider)} --target macos --market on-demand --desktop -- <command>`,
+        ),
+      ].join("");
+  return html(
+    `${hostID} dedicated host`,
+    `<main class="portal-shell runner-shell">
+      ${portalHeader({
+        meta: `${escapeHTML(host.id)} · ${escapeHTML(host.provider)} ${escapeHTML(host.target)} dedicated host`,
+        actions: `
+          <a class="button secondary" href="/portal">leases</a>
+          <a class="button secondary" href="/portal/logout">log out</a>
+        `,
+      })}
+      <section class="detail-grid">
+        <div class="panel detail-card">
+          <div class="section-head">
+            <h2>dedicated host</h2>
+            <span class="pill" data-tone="${stateTone}">${escapeHTML(host.state || "-")}</span>
+          </div>
+          <dl class="meta-grid">
+            ${metaRow("id", host.id)}
+            ${metaHTMLRow("provider", providerBadge(host.provider))}
+            ${metaHTMLRow("target", targetBadge(host.target))}
+            ${metaRow("type", host.instanceType)}
+            ${metaRow("region", host.region)}
+            ${metaRow("zone", host.availabilityZone)}
+            ${metaRow("placement", host.autoPlacement)}
+            ${metaRow("allocated", host.allocationTime ? shortTime(host.allocationTime) : undefined)}
+          </dl>
+        </div>
+        <div class="panel detail-card">
+          <div class="section-head">
+            <h2>attached lease</h2>
+            <span>${activeLease ? escapeHTML(activeLease.slug || activeLease.id) : "none"}</span>
+          </div>
+          ${
+            activeLease
+              ? `<dl class="meta-grid">
+                  ${metaRow("lease", activeLease.slug ? `${activeLease.slug} / ${activeLease.id}` : activeLease.id)}
+                  ${metaRow("host", activeLease.host || "pending")}
+                  ${metaRow("ssh", activeLease.sshPort ? `${activeLease.sshUser || "crabbox"}@${activeLease.host || "host"}:${activeLease.sshPort}` : "pending")}
+                  ${metaRow("desktop", activeLeaseVNC ? "enabled" : "disabled")}
+                  ${metaRow("expires", shortTime(activeLease.expiresAt))}
+                </dl>`
+              : `<p class="detail-note">No active Crabbox lease is attached to this Dedicated Host. It is still usable as macOS capacity for a host-pinned run.</p>`
+          }
+        </div>
+      </section>
+      <section class="panel detail-card">
+        <div class="section-head">
+          <h2>access</h2>
+          <span>${activeLease ? "copy locally" : "host pin"}</span>
+        </div>
+        <div class="bridge-grid">
+          ${bridgeRow("WebVNC", activeLeaseVNC, bridgeStatus?.webVNCBridgeConnected ?? false, bridgeStatus?.webVNCViewerConnected ?? false, vncAction)}
+          ${bridgeRow("code", activeLease?.code === true, bridgeStatus?.codeBridgeConnected ?? false, false, codeAction)}
+        </div>
+        <div id="access-commands" class="access-commands">${commands}</div>
+      </section>
+    </main>`,
+  );
+}
+
 export function portalRunDetail(
   run: RunRecord,
   events: RunEventRecord[],
@@ -654,6 +781,8 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       if (username) credentials.username = username;
       if (password) credentials.password = password;
       const options = Object.keys(credentials).length ? { credentials } : {};
+      const missingVNCCredentialMessage = "VNC credentials missing; open WebVNC from crabbox webvnc status";
+      const failedVNCCredentialMessage = "VNC authentication failed; reopen WebVNC from crabbox webvnc status";
       function setStatus(value, tone = "") {
         status.textContent = value;
         status.dataset.tone = tone;
@@ -668,6 +797,8 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       let controllerLabel = "";
       let isController = false;
       let takeControlAttempted = false;
+      let credentialsSent = false;
+      let authenticationFailed = false;
       const terminalStatusCodes = new Set([403, 404, 409, 410]);
       function focusVNC() {
         if (!isController) return;
@@ -820,6 +951,8 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
       async function connect() {
         if (stopped) return;
         connected = false;
+        credentialsSent = false;
+        authenticationFailed = false;
         screen.replaceChildren();
         try {
           const state = await bridgeState();
@@ -839,6 +972,10 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
             scheduleRetry(state.message || "waiting for an available WebVNC observer slot");
             return;
           }
+          if (target === "macos" && !password) {
+            stopPolling(missingVNCCredentialMessage);
+            return;
+          }
           setStatus(retryAttempt ? "bridge connected; opening viewer" : "connecting");
           rfb = new RFB(screen, wsURL.toString(), options);
           rfb.showDotCursor = true;
@@ -846,6 +983,10 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
           rfb.scaleViewport = true;
           rfb.resizeSession = false;
           rfb.viewOnly = true;
+          if (target === "macos") {
+            rfb.compressionLevel = 1;
+            rfb.qualityLevel = 2;
+          }
           rfb.addEventListener("connect", () => {
             connected = true;
             retryAttempt = 0;
@@ -866,23 +1007,36 @@ export function portalVNC(lease: LeaseRecord, options: { canManage?: boolean } =
             }
           });
           rfb.addEventListener("disconnect", () => {
+            if (stopped) return;
+            if (!connected && (authenticationFailed || credentialsSent)) {
+              stopPolling(authenticationFailed ? failedVNCCredentialMessage : "VNC authentication timed out; reopen WebVNC from crabbox webvnc status");
+              return;
+            }
             scheduleRetry(connected ? "VNC bridge disconnected" : "waiting for VNC bridge");
           });
           rfb.addEventListener("credentialsrequired", (event) => {
             const types = event.detail?.types || ["password"];
             const values = {};
             if (types.includes("username")) {
-              values.username = username || window.prompt("VNC username") || "";
+              if (!username) {
+                stopPolling(missingVNCCredentialMessage);
+                return;
+              }
+              values.username = username;
             }
             if (types.includes("password")) {
-              values.password = password || window.prompt("VNC password") || "";
+              if (!password) {
+                stopPolling(missingVNCCredentialMessage);
+                return;
+              }
+              values.password = password;
             }
+            credentialsSent = true;
             rfb.sendCredentials(values);
           });
           rfb.addEventListener("securityfailure", () => {
-            stopped = true;
-            window.clearTimeout(retryTimer);
-            setStatus("VNC authentication failed; reopen WebVNC or copy the password from crabbox webvnc status", "bad");
+            authenticationFailed = true;
+            stopPolling(failedVNCCredentialMessage);
           });
         } catch (error) {
           scheduleRetry(error instanceof Error ? error.message : String(error));
@@ -1409,6 +1563,97 @@ function leaseRow(
   </tr>`;
 }
 
+function macHostRow(
+  host: PortalMacHostRecord,
+  context: { admin: boolean; owner: string; org: string },
+): string {
+  const stateTone = macHostStateTone(host.state);
+  const lease = host.lease;
+  const activeLease = lease?.state === "active" ? lease : undefined;
+  const detailPath = `/portal/hosts/${encodeURIComponent(host.provider)}/${encodeURIComponent(host.id)}`;
+  const ownership =
+    activeLease && context.admin ? leaseOwnership(activeLease, context.owner, context.org) : "mine";
+  const tags = [
+    host.state === "released" ? "ended" : "active",
+    ownership,
+    "dedicated",
+    "host",
+    host.provider,
+    host.target,
+    host.state,
+    host.instanceType,
+    host.region,
+    host.availabilityZone,
+    activeLease ? "attached" : undefined,
+  ];
+  const leaseMeta = activeLease
+    ? `lease ${activeLease.slug || activeLease.id}`
+    : [host.region, host.availabilityZone].filter(Boolean).join(" · ");
+  return `<tr class="capacity-row" data-filter-tags="${escapeHTML(tags.filter(Boolean).join(" "))}">
+    <td><a class="lease-link dedicated-link" href="${detailPath}"><span class="dedicated-mark" title="dedicated host" aria-label="dedicated host">${dedicatedHostIcon}</span><span><strong>${escapeHTML(shortHostID(host.id))}</strong><small>${escapeHTML(leaseMeta || host.id)}</small></span></a></td>
+    <td><span class="pill" data-tone="${stateTone}">${escapeHTML(host.state || "-")}</span></td>
+    <td>${providerBadge(host.provider)}</td>
+    <td>${targetBadge(host.target)}</td>
+    <td><span title="${escapeHTML([host.availabilityZone, host.autoPlacement].filter(Boolean).join(" · ") || "Dedicated Host")}">${escapeHTML(host.instanceType || "dedicated")}</span></td>
+    <td>${macHostAccessCell(host, detailPath)}</td>
+    ${timeCell(host.allocationTime)}
+    <td></td>
+  </tr>`;
+}
+
+function macHostAccessCell(host: PortalMacHostRecord, detailPath: string): string {
+  const activeLease = host.lease?.state === "active" ? host.lease : undefined;
+  const pieces = [
+    `<a class="access-icon" href="${detailPath}" title="dedicated host" aria-label="dedicated host">${dedicatedHostIcon}</a>`,
+  ];
+  if (activeLease?.code) {
+    pieces.push(
+      `<a class="access-icon" data-access="vscode" href="${detailPath}/code/" title="VS Code" aria-label="open VS Code">${codeIcon}</a>`,
+    );
+  }
+  const vncTitle = activeLease?.desktop ? "VNC" : activeLease ? "enable VNC" : "start locally";
+  pieces.push(
+    `<a class="access-icon" data-access="vnc" href="${macHostVNCPath(host)}" title="${vncTitle}" aria-label="${vncTitle}">${vncIcon}</a>`,
+  );
+  return `<div class="access-cell">${pieces.join("")}</div>`;
+}
+
+function macHostVNCPath(host: PortalMacHostRecord): string {
+  return `/portal/hosts/${encodeURIComponent(host.provider)}/${encodeURIComponent(host.id)}/vnc`;
+}
+
+function macHostStartDesktopCommand(host: PortalMacHostRecord): string {
+  return [
+    `CRABBOX_HOST_ID=${shellArg(host.id)}`,
+    "crabbox warmup",
+    `--provider ${shellArg(host.provider)}`,
+    `--target ${shellArg(host.target || "macos")}`,
+    "--market on-demand",
+    host.instanceType ? `--type ${shellArg(host.instanceType)}` : "",
+    "--desktop",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function shortHostID(value: string): string {
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function macHostStateTone(value: string): "ok" | "warn" | "bad" {
+  switch (value) {
+    case "available":
+      return "ok";
+    case "pending":
+      return "warn";
+    default:
+      return "bad";
+  }
+}
+
 function externalRunnerLeaseRow(
   runner: ExternalRunnerRecord,
   context: { admin: boolean; owner: string; org: string },
@@ -1623,6 +1868,10 @@ function runnerOwnership(
 
 function runnerSortTime(runner: ExternalRunnerRecord): string {
   return runner.lastSeenAt || runner.updatedAt || runner.createdAt || runner.firstSeenAt;
+}
+
+function macHostSortTime(host: PortalMacHostRecord): string {
+  return host.lease?.lastTouchedAt || host.lease?.updatedAt || host.allocationTime || "";
 }
 
 function runRow(run: RunRecord): string {
@@ -2153,13 +2402,14 @@ function html(
     .section-head { display:flex; justify-content:space-between; align-items:center; min-height:34px; padding:7px 10px; border-bottom:1px solid var(--line); }
     .section-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; color:var(--muted); }
     .section-actions span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .button { display:inline-flex; align-items:center; justify-content:center; min-height:28px; padding:0 10px; border-radius:7px; background:var(--accent); color:var(--accent-fg); text-decoration:none; font-size:12px; font-weight:700; white-space:nowrap; }
+    .button { display:inline-flex; align-items:center; justify-content:center; min-height:28px; padding:0 10px; border-radius:7px; border:1px solid transparent; background:var(--accent); color:var(--accent-fg); text-decoration:none; font-size:12px; font-weight:700; white-space:nowrap; cursor:pointer; }
     .button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); font-weight:500; }
     .button.secondary:hover { background:var(--hover); border-color:var(--hover-line); }
     .button.action { min-width:56px; border:1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); background:color-mix(in srgb, var(--accent) 10%, transparent); color:var(--accent-soft-fg); }
     .button.action:hover { background:color-mix(in srgb, var(--accent) 16%, transparent); border-color:color-mix(in srgb, var(--accent) 58%, var(--line)); }
     .button:disabled { opacity:0.45; cursor:not-allowed; }
     .button.danger { border:1px solid color-mix(in srgb, var(--bad) 42%, var(--line)); background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--danger-fg); cursor:pointer; }
+    .button[data-state="ok"] { border-color:color-mix(in srgb, var(--ok) 45%, var(--line)); color:var(--ok); background:color-mix(in srgb, var(--ok) 12%, transparent); }
     .lease-link { display:block; min-width:0; text-decoration:none; overflow:hidden; text-overflow:ellipsis; }
     .lease-link strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .mono { font-family:var(--mono); }
@@ -2236,6 +2486,10 @@ function html(
     .actions-stack small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }
     .external-access { flex-wrap:nowrap; }
     .external-access span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .capacity-row { background:color-mix(in srgb, var(--panel-2) 18%, transparent); }
+    .dedicated-link { display:grid; grid-template-columns:18px minmax(0,1fr); align-items:center; }
+    .dedicated-link .dedicated-mark { display:inline-flex; width:18px; height:18px; color:#fbbf24; }
+    .dedicated-link .dedicated-mark svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
     .access-icon { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:6px; border:1px solid var(--line); color:var(--icon); background:var(--inset); text-decoration:none; }
     .access-icon svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
     .access-icon[data-access="vscode"] { color:#d8b4fe; }

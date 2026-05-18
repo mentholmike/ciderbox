@@ -26,9 +26,12 @@ import {
   portalExternalRunnerDetail,
   portalHome,
   portalLeaseDetail,
+  portalMacHostDetail,
   portalRunDetail,
   portalShareLease,
   portalVNC,
+  type PortalLeaseBridgeStatus,
+  type PortalMacHostRecord,
   webVNCBridgeCommand,
 } from "./portal";
 import { leaseSlugFromID, normalizeLeaseSlug, slugWithCollisionSuffix } from "./slug";
@@ -1136,7 +1139,7 @@ export class FleetDurableObject implements DurableObject {
         idleTimeoutSeconds?: number;
         telemetry?: Partial<LeaseTelemetry>;
       }>(request);
-      await this.applyLeaseHeartbeat(lease, body);
+      await this.applyLeaseHeartbeat(lease, body, request);
       return json({ lease });
     }
     if (method === "POST" && action === "tailscale") {
@@ -1165,6 +1168,7 @@ export class FleetDurableObject implements DurableObject {
       idleTimeoutSeconds?: number;
       telemetry?: Partial<LeaseTelemetry>;
     },
+    request?: Request,
   ): Promise<void> {
     const now = new Date();
     const requestedIdleTimeoutSeconds = input.idleTimeoutSeconds;
@@ -1185,7 +1189,41 @@ export class FleetDurableObject implements DurableObject {
     lease.expiresAt = recomputeLeaseExpiresAt(lease, now).toISOString();
     clearLeaseCleanupMetadata(lease);
     await this.putLease(lease);
+    await this.refreshLeaseSSHIngress(lease, request);
     await this.scheduleAlarm();
+  }
+
+  private async refreshLeaseSSHIngress(lease: LeaseRecord, request: Request | undefined) {
+    if (!request || lease.provider !== "aws" || lease.state !== "active") {
+      return;
+    }
+    const cidrs = requestSourceCIDRs(request);
+    if (cidrs.length === 0) {
+      return;
+    }
+    try {
+      const config = leaseConfig({
+        provider: "aws",
+        target: lease.target,
+        windowsMode: lease.windowsMode ?? "normal",
+        class: lease.class,
+        serverType: lease.serverType,
+        awsSSHCIDRs: cidrs,
+        capacity: { market: lease.market === "spot" ? "spot" : "on-demand" },
+        providerKey: lease.providerKey,
+        sshUser: lease.sshUser,
+        sshPort: lease.sshPort,
+        sshFallbackPorts: lease.sshFallbackPorts ?? [],
+        sshPublicKey: "ssh-ed25519 heartbeat-refresh",
+        workRoot: lease.workRoot,
+        ...(lease.hostId || lease.hostID ? { hostId: lease.hostId || lease.hostID } : {}),
+        ...(lease.region ? { awsRegion: lease.region } : {}),
+      });
+      const provider = this.provider("aws", lease.region || config.awsRegion);
+      await provider.refreshSSHIngress?.(config);
+    } catch (error) {
+      console.warn(`refresh AWS SSH ingress failed for ${lease.id}: ${errorMessage(error)}`);
+    }
   }
 
   private async prepareTailscaleConfig(
@@ -1335,11 +1373,12 @@ export class FleetDurableObject implements DurableObject {
   private async portalRoute(request: Request, parts: string[]): Promise<Response> {
     const method = request.method.toUpperCase();
     if (method === "GET" && parts.length === 1) {
-      const [leases, runners] = await Promise.all([
+      const [leases, runners, macHosts] = await Promise.all([
         this.portalLeases(request),
         this.visibleExternalRunners(request),
+        this.portalMacHosts(),
       ]);
-      return portalHome(leases, runners, request);
+      return portalHome(leases, runners, request, this.attachPortalMacHostLeases(macHosts, leases));
     }
     if (method === "GET" && parts[1] === "runs" && parts[2]) {
       return await this.portalRunRoute(request, parts[2], parts[3]);
@@ -1352,6 +1391,38 @@ export class FleetDurableObject implements DurableObject {
       parts[4] === undefined
     ) {
       return await this.portalExternalRunnerPage(request, parts[2], parts[3]);
+    }
+    if (
+      method === "GET" &&
+      parts[1] === "hosts" &&
+      parts[2] &&
+      parts[3] &&
+      parts[4] === undefined
+    ) {
+      return await this.portalMacHostPage(request, parts[2], parts[3]);
+    }
+    if (
+      method === "GET" &&
+      parts[1] === "hosts" &&
+      parts[2] &&
+      parts[3] &&
+      parts[4] === "vnc" &&
+      parts[5] === undefined
+    ) {
+      return await this.portalMacHostLeaseRedirect(request, parts[2], parts[3], "vnc");
+    }
+    if (
+      method === "POST" &&
+      parts[1] === "hosts" &&
+      parts[2] &&
+      parts[3] &&
+      parts[4] === "vnc" &&
+      parts[5] === undefined
+    ) {
+      return await this.portalEnableMacHostVNC(request, parts[2], parts[3]);
+    }
+    if (method === "GET" && parts[1] === "hosts" && parts[2] && parts[3] && parts[4] === "code") {
+      return await this.portalMacHostLeaseRedirect(request, parts[2], parts[3], "code");
     }
     if (method === "GET" && parts[1] === "leases" && parts[2] && parts[3] === undefined) {
       return await this.portalLeasePage(request, parts[2]);
@@ -1434,6 +1505,155 @@ export class FleetDurableObject implements DurableObject {
       : this.filterLeasesForRequest(leases, request);
   }
 
+  private async portalMacHosts(): Promise<PortalMacHostRecord[]> {
+    if (!this.env.AWS_ACCESS_KEY_ID || !this.env.AWS_SECRET_ACCESS_KEY) {
+      return [];
+    }
+    const region = sanitizeAWSRegion(this.env.CRABBOX_AWS_REGION || "eu-west-1");
+    if (!region) {
+      return [];
+    }
+    try {
+      const hosts = await new EC2SpotClient(this.env, region).listMacHosts();
+      return hosts.map((host) => ({
+        id: host.id,
+        provider: "aws",
+        target: "macos",
+        state: host.state,
+        region: host.region,
+        availabilityZone: host.availabilityZone,
+        instanceType: host.instanceType,
+        autoPlacement: host.autoPlacement,
+        ...(host.allocationTime ? { allocationTime: host.allocationTime } : {}),
+      }));
+    } catch (error) {
+      console.warn(`portal mac host inventory unavailable: ${errorMessage(error)}`);
+      return [];
+    }
+  }
+
+  private attachPortalMacHostLeases(
+    hosts: PortalMacHostRecord[],
+    leases: LeaseRecord[],
+  ): PortalMacHostRecord[] {
+    const activeMacLeases = leases.filter(
+      (lease) => lease.state === "active" && lease.target === "macos",
+    );
+    return hosts.map((host) => {
+      const lease = activeMacLeases.find((item) => leaseHostID(item) === host.id);
+      return lease ? { ...host, lease } : host;
+    });
+  }
+
+  private async resolvePortalMacHost(
+    request: Request,
+    provider: string,
+    hostID: string,
+  ): Promise<PortalMacHostRecord | undefined> {
+    if (provider !== "aws") {
+      return undefined;
+    }
+    const [leases, hosts] = await Promise.all([this.portalLeases(request), this.portalMacHosts()]);
+    return this.attachPortalMacHostLeases(hosts, leases).find(
+      (host) => host.provider === provider && host.id === hostID,
+    );
+  }
+
+  private async portalMacHostPage(
+    request: Request,
+    provider: string,
+    hostID: string,
+  ): Promise<Response> {
+    const host = await this.resolvePortalMacHost(request, provider, hostID);
+    if (!host) {
+      return portalError(
+        "Host not found",
+        "That dedicated host is not visible or the provider is not configured.",
+        404,
+      );
+    }
+    return portalMacHostDetail(host, host.lease ? this.leaseBridgeStatus(host.lease) : undefined);
+  }
+
+  private async portalMacHostLeaseRedirect(
+    request: Request,
+    provider: string,
+    hostID: string,
+    action: "vnc" | "code",
+  ): Promise<Response> {
+    const host = await this.resolvePortalMacHost(request, provider, hostID);
+    const lease = host?.lease?.state === "active" ? host.lease : undefined;
+    if (!host) {
+      return portalError(
+        action === "vnc" ? "WebVNC unavailable" : "Code unavailable",
+        "That dedicated host is not visible or the provider is not configured.",
+        404,
+      );
+    }
+    if (!lease) {
+      if (action === "vnc") {
+        return portalMacHostDetail(host, undefined);
+      }
+      return portalError(
+        "Code unavailable",
+        "No active Crabbox lease is attached to that dedicated host.",
+        409,
+      );
+    }
+    const error = action === "vnc" ? webVNCLeaseError(lease) : codeLeaseError(lease);
+    if (action === "vnc" && error === "lease was not created with desktop=true") {
+      return portalMacHostDetail(host, this.leaseBridgeStatus(lease));
+    }
+    if (error) {
+      return portalError(action === "vnc" ? "WebVNC unavailable" : "Code unavailable", error, 409);
+    }
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location:
+          action === "vnc"
+            ? `/portal/leases/${encodeURIComponent(lease.id)}/vnc`
+            : `/portal/leases/${encodeURIComponent(lease.id)}/code/`,
+      },
+    });
+  }
+
+  private async portalEnableMacHostVNC(
+    request: Request,
+    provider: string,
+    hostID: string,
+  ): Promise<Response> {
+    const host = await this.resolvePortalMacHost(request, provider, hostID);
+    const lease = host?.lease?.state === "active" ? host.lease : undefined;
+    if (!host) {
+      return portalError(
+        "WebVNC unavailable",
+        "That dedicated host is not visible or the provider is not configured.",
+        404,
+      );
+    }
+    if (!lease) {
+      return portalError(
+        "WebVNC unavailable",
+        "No active Crabbox lease is attached to that dedicated host. Start a host-pinned desktop lease from the CLI, then open WebVNC for the new lease.",
+        409,
+      );
+    }
+    if (!this.leaseManageableByRequest(lease, request, isAdminRequest(request))) {
+      return portalError("WebVNC unavailable", "Lease manage access is required.", 403);
+    }
+    if (lease.target !== "macos") {
+      return portalError("WebVNC unavailable", "Only macOS host leases can be enabled here.", 409);
+    }
+    lease.desktop = true;
+    lease.updatedAt = new Date().toISOString();
+    await this.putLease(lease);
+    return new Response(null, {
+      status: 303,
+      headers: { location: `/portal/leases/${encodeURIComponent(lease.id)}/vnc` },
+    });
+  }
+
   private async resolvePortalLease(
     identifier: string,
     request: Request,
@@ -1454,6 +1674,12 @@ export class FleetDurableObject implements DurableObject {
       .filter((run) => run.leaseID === lease.id && this.runVisibleToRequest(run, request))
       .toSorted((a, b) => b.startedAt.localeCompare(a.startedAt))
       .slice(0, 12);
+    return portalLeaseDetail(lease, runs, this.leaseBridgeStatus(lease), {
+      canManage: this.leaseManageableByRequest(lease, request, isAdminRequest(request)),
+    });
+  }
+
+  private leaseBridgeStatus(lease: LeaseRecord): PortalLeaseBridgeStatus {
     const egress = this.egressSessions.get(lease.id);
     const egressKey = egress ? egressSocketKey(lease.id, egress.sessionID) : undefined;
     const bridgeStatus = {
@@ -1461,27 +1687,22 @@ export class FleetDurableObject implements DurableObject {
       webVNCViewerConnected: this.openWebVNCViewers(lease.id).length > 0,
       codeBridgeConnected: this.codeAgents.get(lease.id)?.readyState === WebSocket.OPEN,
     };
-    return portalLeaseDetail(
-      lease,
-      runs,
-      egress
-        ? {
-            ...bridgeStatus,
-            egress: {
-              profile: egress.profile ?? "",
-              allow: egress.allow,
-              hostConnected: egressKey
-                ? this.egressHosts.get(egressKey)?.readyState === WebSocket.OPEN
-                : false,
-              clientConnected: egressKey
-                ? this.egressClients.get(egressKey)?.readyState === WebSocket.OPEN
-                : false,
-              updatedAt: egress.updatedAt,
-            },
-          }
-        : bridgeStatus,
-      { canManage: this.leaseManageableByRequest(lease, request, isAdminRequest(request)) },
-    );
+    return egress
+      ? {
+          ...bridgeStatus,
+          egress: {
+            profile: egress.profile ?? "",
+            allow: egress.allow,
+            hostConnected: egressKey
+              ? this.egressHosts.get(egressKey)?.readyState === WebSocket.OPEN
+              : false,
+            clientConnected: egressKey
+              ? this.egressClients.get(egressKey)?.readyState === WebSocket.OPEN
+              : false,
+            updatedAt: egress.updatedAt,
+          },
+        }
+      : bridgeStatus;
   }
 
   private async portalReleaseLease(request: Request, identifier: string): Promise<Response> {
@@ -4797,7 +5018,7 @@ function webVNCLeaseError(lease: LeaseRecord): string {
   if (lease.state !== "active") {
     return "lease is not active";
   }
-  if (!lease.desktop) {
+  if (!lease.desktop && lease.target !== "macos") {
     return "lease was not created with desktop=true";
   }
   if (!lease.host) {
@@ -4983,6 +5204,10 @@ function identifierMatchesLease(identifier: string, lease: LeaseRecord): boolean
   return (
     identifier === lease.id || normalizeLeaseSlug(identifier) === normalizeLeaseSlug(lease.slug)
   );
+}
+
+function leaseHostID(lease: LeaseRecord): string {
+  return lease.hostId || lease.hostID || "";
 }
 
 export interface WebVNCBuffer {
@@ -5870,6 +6095,7 @@ function parseProviderLabelTime(value: string | undefined): number {
 interface CloudProvider {
   listCrabboxServers(): Promise<ProviderMachine[]>;
   getServer?(id: string): Promise<ProviderMachine>;
+  refreshSSHIngress?(config: ReturnType<typeof leaseConfig>): Promise<void>;
   createServerWithFallback(
     config: ReturnType<typeof leaseConfig>,
     leaseID: string,
@@ -6086,6 +6312,12 @@ class AWSProvider implements CloudProvider {
 
   getServer(id: string): Promise<ProviderMachine> {
     return this.client.getServer(id);
+  }
+
+  refreshSSHIngress(config: ReturnType<typeof leaseConfig>): Promise<void> {
+    const region = config.awsRegion || this.region;
+    const client = region === this.region ? this.client : new EC2SpotClient(this.env, region);
+    return client.refreshSSHIngress(config);
   }
 
   async createServerWithFallback(

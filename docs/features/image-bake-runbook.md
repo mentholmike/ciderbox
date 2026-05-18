@@ -32,7 +32,7 @@ Bake machine capabilities:
 - Xvfb/slim XFCE/VNC for desktop leases;
 - Chrome/Chromium for browser leases;
 - `ffmpeg`, `ffprobe`, `scrot`, `xdotool`, and other capture helpers;
-- Node 22, npm, corepack, pnpm;
+- Node 24, npm, corepack, pnpm;
 - build-essential, Python, and common native-addon headers;
 - empty cache directories such as `/var/cache/crabbox/pnpm`.
 
@@ -272,10 +272,19 @@ scripts/macos-image-lifecycle-smoke.sh
 ```
 
 The script warms a macOS desktop lease, verifies SSH/sync/VNC prerequisites,
-starts WebVNC, waits for the portal bridge to report `connected=true`, collects
-desktop artifacts, creates a candidate AMI with a rebooting image capture,
-boots and smokes the candidate, then promotes and smokes the promoted image
-when `CRABBOX_MACOS_PROMOTE=1`. Tune the WebVNC bridge wait with
+requires an active Apple developer tools directory, a macOS SDK through
+`xcrun`, Swift, Homebrew, Node/npm/corepack/pnpm, and Python 3, starts WebVNC,
+waits for the portal bridge to report `connected=true`, collects desktop
+artifacts, creates a candidate AMI with a rebooting image capture, boots and
+smokes the candidate, then promotes and smokes the promoted image when
+`CRABBOX_MACOS_PROMOTE=1`. Command Line Tools are enough by default; full Xcode
+is not required unless `CRABBOX_MACOS_REQUIRE_XCODE=1` is set. For `mac2*`
+families the default gates are macOS 14+ and Swift tools 6.0+ because those are
+the launchable hosts commonly available today. For newer `mac-m*` families the
+defaults are macOS 15+ and Swift tools 6.2+, which matches Swift package lanes
+that require `swift-tools-version: 6.2` and macOS 15 SDKs. Tune the toolchain
+gates with `CRABBOX_MACOS_REQUIRED_MAJOR` and
+`CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS`. Tune the WebVNC bridge wait with
 `CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT` and
 `CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL`; tune the post-start grace period with
 `CRABBOX_MACOS_WEBVNC_START_GRACE`. EC2 Mac Dedicated Hosts have
@@ -294,6 +303,24 @@ wait, warmup, WebVNC daemon, and WebVNC status evidence under the run's
 `evidence/` directory.
 Override the directory with
 `CRABBOX_MACOS_ARTIFACT_DIR`.
+
+If the source lease needs operator-specific setup before smoking, pass a local
+prep script:
+
+```bash
+CRABBOX_MACOS_SOURCE_PREP_SCRIPT=scripts/install-macos-developer-tools.sh \
+CRABBOX_MACOS_ALLOCATE=1 \
+scripts/macos-image-lifecycle-smoke.sh
+```
+
+The bundled developer-tool prep script keeps the image generic: it verifies
+Command Line Tools, installs Homebrew when missing, installs common developer
+packages such as Git, GitHub CLI, jq/yq, ripgrep, fd, ShellCheck, shfmt, Python,
+Node 24, and activates pnpm through corepack. It also creates `/usr/local/bin`
+shims so non-login SSH commands can find those tools after the AMI boots. Use a
+private prep hook only for organization-specific setup. Do not put Apple
+credentials, download tokens, or private package mirrors in this repository or
+in baked images.
 
 If an available EC2 Mac Dedicated Host already exists, the script still stops
 after preflight unless `CRABBOX_MACOS_RUN=1` or `CRABBOX_MACOS_ALLOCATE=1` is

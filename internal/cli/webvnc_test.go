@@ -316,6 +316,15 @@ func TestWebVNCBridgeArgsCarriesNetworkOverride(t *testing.T) {
 	}
 }
 
+func TestWebVNCBridgePoolSizeForTarget(t *testing.T) {
+	if got := webVNCBridgePoolSizeForTarget(SSHTarget{TargetOS: targetMacOS}); got != 2 {
+		t.Fatalf("macOS pool size=%d, want 2", got)
+	}
+	if got := webVNCBridgePoolSizeForTarget(SSHTarget{TargetOS: targetLinux}); got != defaultWebVNCBridgePoolSize {
+		t.Fatalf("linux pool size=%d, want default", got)
+	}
+}
+
 func TestEnsureOpenWebVNCPortalAccessSharesOrgUse(t *testing.T) {
 	var putBody CoordinatorShare
 	var gotPut bool
@@ -428,10 +437,10 @@ func TestWebVNCDaemonSupervisorRestartsWithoutReopeningPortal(t *testing.T) {
 		"pearl-krill",
 		"--open",
 	})
-	if !strings.Contains(got, "/tmp/crabbox' 'webvnc' '--provider' 'hetzner' '--id' 'pearl-krill' '--open'") {
+	if !strings.Contains(got, "/tmp/crabbox' 'webvnc' '--provider' 'hetzner' '--id' 'pearl-krill' '--open' '--reclaim'") {
 		t.Fatalf("first daemon command missing --open: %s", got)
 	}
-	if !strings.Contains(got, "/tmp/crabbox' 'webvnc' '--provider' 'hetzner' '--id' 'pearl-krill'\n") {
+	if !strings.Contains(got, "/tmp/crabbox' 'webvnc' '--provider' 'hetzner' '--id' 'pearl-krill' '--reclaim'\n") {
 		t.Fatalf("restart daemon command should strip --open: %s", got)
 	}
 	if strings.Count(got, "--open") != 1 {
@@ -439,6 +448,20 @@ func TestWebVNCDaemonSupervisorRestartsWithoutReopeningPortal(t *testing.T) {
 	}
 	if !strings.Contains(got, "webvnc daemon supervisor: child exited code=$code; restarting in 1s") {
 		t.Fatalf("daemon supervisor missing restart log: %s", got)
+	}
+}
+
+func TestWebVNCDaemonSupervisorKeepsExistingReclaim(t *testing.T) {
+	got := webVNCDaemonSupervisorScript("/tmp/crabbox", []string{
+		"webvnc",
+		"--provider",
+		"aws",
+		"--id",
+		"pearl-krill",
+		"--reclaim",
+	})
+	if strings.Count(got, "--reclaim") != 2 {
+		t.Fatalf("daemon supervisor should keep one reclaim flag per command: %s", got)
 	}
 }
 

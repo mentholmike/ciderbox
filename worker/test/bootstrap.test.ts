@@ -330,6 +330,12 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain("set +o pipefail");
     expect(got).toContain("set -o pipefail");
     expect(got).toContain("failed to generate vnc password");
+    expect(got).toContain("crabbox_public_key='ssh-ed25519 test'");
+    expect(got).toContain("authorized_keys");
+    expect(got).toContain("crabbox_ssh_ports=('2222' '22')");
+    expect(got).toContain("printf 'Port %s\\n' \"$port\"");
+    expect(got).toContain("systemsetup -setremotelogin on");
+    expect(got).toContain("com.openssh.sshd");
     expect(got).toContain("com.apple.screensharing");
     expect(got).toContain("/usr/local/bin/crabbox-ready");
   });

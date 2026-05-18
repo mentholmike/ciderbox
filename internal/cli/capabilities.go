@@ -63,7 +63,7 @@ func enforceManagedLeaseCapabilities(cfg Config, server Server, leaseID string) 
 	if isStaticProvider(cfg.Provider) || server.Provider == staticProvider {
 		return nil
 	}
-	if cfg.Desktop && !labelBool(server.Labels["desktop"]) {
+	if cfg.Desktop && !labelBool(server.Labels["desktop"]) && !macOSScreenSharingLease(cfg, server) {
 		return exit(2, "lease %s was not created with desktop=true; warm a new lease with --desktop", leaseID)
 	}
 	if cfg.Browser && !labelBool(server.Labels["browser"]) {
@@ -73,6 +73,10 @@ func enforceManagedLeaseCapabilities(cfg Config, server Server, leaseID string) 
 		return exit(2, "lease %s was not created with code=true; warm a new lease with --code", leaseID)
 	}
 	return nil
+}
+
+func macOSScreenSharingLease(cfg Config, server Server) bool {
+	return cfg.TargetOS == targetMacOS || strings.EqualFold(server.Labels["target"], targetMacOS)
 }
 
 func labelBool(value string) bool {
@@ -246,6 +250,7 @@ func waitForLoopbackVNC(ctx context.Context, target *SSHTarget) error {
 		for _, port := range sshPortCandidates(target.Port, target.FallbackPorts) {
 			probe := *target
 			probe.Port = port
+			probe.FallbackPorts = []string{}
 			if err := probeLoopbackVNC(ctx, probe, "2", "1"); err == nil {
 				target.Port = port
 				return nil

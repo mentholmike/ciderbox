@@ -228,6 +228,59 @@ describe("fleet lease identity and idle", () => {
     expect(storage.alarm()).toBe(Date.parse(lease.expiresAt));
   });
 
+  it("refreshes AWS SSH ingress from the heartbeat request source", async () => {
+    const storage = new MemoryStorage();
+    const refreshed: LeaseConfig[] = [];
+    const fleet = testFleet(storage, {
+      aws: fakeProvider(undefined, {
+        provider: "aws",
+        onRefreshSSHIngress(config) {
+          refreshed.push(config);
+        },
+      }),
+    });
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        provider: "aws",
+        target: "macos",
+        owner: "alice@example.com",
+        org: "example-org",
+        region: "eu-west-1",
+        serverType: "mac2.metal",
+        providerKey: "crabbox-cbx-000000000001",
+        sshUser: "ec2-user",
+        sshPort: "2222",
+        sshFallbackPorts: ["22"],
+        workRoot: "/Users/ec2-user/crabbox",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+
+    const heartbeat = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "cf-connecting-ip": "198.51.100.44",
+          "x-crabbox-owner": "alice@example.com",
+          "x-crabbox-org": "example-org",
+        },
+        body: {},
+      }),
+    );
+
+    expect(heartbeat.status).toBe(200);
+    expect(refreshed).toHaveLength(1);
+    expect(refreshed[0]).toMatchObject({
+      provider: "aws",
+      target: "macos",
+      awsRegion: "eu-west-1",
+      awsSSHCIDRs: ["198.51.100.44/32"],
+      sshPort: "2222",
+      sshFallbackPorts: ["22"],
+    });
+  });
+
   it("does not postpone the first AWS orphan sweep alarm on repeated scheduling", async () => {
     const storage = new MemoryStorage();
     storage.seed(
@@ -1603,7 +1656,7 @@ describe("fleet lease identity and idle", () => {
     expect(body).toContain("table-scroll");
     expect(body).toContain(".lease-table th:nth-child(1)");
     expect(body).toContain(
-      'data-filter-buttons="active:active,ended:ended,external:external,stale:stale,stuck:stuck,aws:aws,azure:azure,hetzner:hetzner,blacksmith-testbox:blacksmith,linux:linux,macos:macos,windows:windows,all:all"',
+      'data-filter-buttons="active:active,ended:ended,external:external,dedicated:dedicated,stale:stale,stuck:stuck,aws:aws,azure:azure,hetzner:hetzner,blacksmith-testbox:blacksmith,linux:linux,macos:macos,windows:windows,all:all"',
     );
     expect(body).toContain('data-filter-default="active"');
     expect(body).not.toContain("external runners");
@@ -1649,6 +1702,219 @@ describe("fleet lease identity and idle", () => {
     expect(body).toContain("/portal/leases/cbx_000000000001/vnc");
     expect(body).toContain("/portal/leases/cbx_000000000001/code/");
     expect(body).not.toContain("amber-krill");
+  });
+
+  it("renders AWS mac host capacity on the portal when configured", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const params = new URLSearchParams(await requestBodyForTest(input, init));
+        expect(params.get("Action")).toBe("DescribeHosts");
+        return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+        <DescribeHostsResponse>
+          <hostSet>
+            <item>
+              <hostId>h-000000000001</hostId>
+              <state>available</state>
+              <availabilityZone>eu-west-1a</availabilityZone>
+              <autoPlacement>on</autoPlacement>
+              <allocationTime>2026-05-15T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+            </item>
+            <item>
+              <hostId>h-000000000002</hostId>
+              <state>pending</state>
+              <availabilityZone>eu-west-1b</availabilityZone>
+              <autoPlacement>off</autoPlacement>
+              <allocationTime>2026-05-17T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+              <tagSet><item><key>crabbox</key><value>true</value></item></tagSet>
+            </item>
+            <item>
+              <hostId>h-000000000003</hostId>
+              <state>available</state>
+              <availabilityZone>eu-west-1c</availabilityZone>
+              <autoPlacement>on</autoPlacement>
+              <allocationTime>2026-05-18T00:00:00Z</allocationTime>
+              <hostProperties><instanceType>mac2.metal</instanceType></hostProperties>
+            </item>
+          </hostSet>
+        </DescribeHostsResponse>`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const storage = new MemoryStorage();
+    storage.seed(
+      "lease:cbx_000000000099",
+      testLease({
+        id: "cbx_000000000099",
+        slug: "mac-mini",
+        provider: "aws",
+        target: "macos",
+        desktop: true,
+        class: "mac",
+        serverType: "mac2.metal",
+        hostId: "h-000000000001",
+        cloudID: "i-000000000099",
+        region: "eu-west-1",
+        createdAt: "2026-05-17T00:10:00.000Z",
+        updatedAt: "2026-05-17T00:20:00.000Z",
+        lastTouchedAt: "2026-05-17T00:20:00.000Z",
+        expiresAt: "2026-05-17T02:20:00.000Z",
+      }),
+    );
+    storage.seed(
+      "lease:cbx_000000000100",
+      testLease({
+        id: "cbx_000000000100",
+        slug: "mac-no-vnc",
+        provider: "aws",
+        target: "macos",
+        desktop: false,
+        class: "mac",
+        serverType: "mac2.metal",
+        hostId: "h-000000000002",
+        cloudID: "i-000000000100",
+        region: "eu-west-1",
+        createdAt: "2026-05-17T00:30:00.000Z",
+        updatedAt: "2026-05-17T00:40:00.000Z",
+        lastTouchedAt: "2026-05-17T00:40:00.000Z",
+        expiresAt: "2026-05-17T02:40:00.000Z",
+      }),
+    );
+    const fleet = testFleet(
+      storage,
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("GET", "/portal", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).not.toContain("mac hosts");
+    expect(body).not.toContain("1 available / 2 total");
+    expect(body).toContain('class="capacity-row"');
+    expect(body).toContain("dedicated");
+    expect(body).toContain('data-filter-tags="active mine dedicated host aws macos available');
+    expect(body).toContain("/portal/hosts/aws/h-000000000001");
+    expect(body).toContain("/portal/hosts/aws/h-000000000001/vnc");
+    expect(body).toContain("/portal/hosts/aws/h-000000000002/vnc");
+    expect(body).toContain("/portal/hosts/aws/h-000000000003/vnc");
+    expect(body).toContain("lease mac-mini");
+    expect(body).toContain("lease mac-no-vnc");
+    expect(body).toContain("mac2.metal");
+    expect(body).toContain("eu-west-1a");
+    expect(body).toContain("eu-west-1b");
+    expect(body).toContain("eu-west-1c");
+    expect(body).toContain("available");
+    expect(body).toContain("pending");
+
+    const detail = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000001", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.text();
+    expect(detailBody).toContain("dedicated host");
+    expect(detailBody).toContain("attached lease");
+    expect(detailBody).toContain("mac-mini / cbx_000000000099");
+    expect(detailBody).toContain("/portal/leases/cbx_000000000099/vnc");
+
+    const vnc = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000001/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(vnc.status).toBe(303);
+    expect(vnc.headers.get("location")).toBe("/portal/leases/cbx_000000000099/vnc");
+
+    const enablePage = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000002", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(enablePage.status).toBe(200);
+    const enableBody = await enablePage.text();
+    expect(enableBody).toContain("open VNC");
+    expect(enableBody).toContain("desktop</dt><dd>enabled");
+
+    const macVNC = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000002/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(macVNC.status).toBe(303);
+    expect(macVNC.headers.get("location")).toBe("/portal/leases/cbx_000000000100/vnc");
+
+    const enabled = await fleet.fetch(
+      request("POST", "/portal/hosts/aws/h-000000000002/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(enabled.status).toBe(303);
+    expect(enabled.headers.get("location")).toBe("/portal/leases/cbx_000000000100/vnc");
+    expect(storage.value<LeaseRecord>("lease:cbx_000000000100")?.desktop).toBe(true);
+
+    const startPage = await fleet.fetch(
+      request("GET", "/portal/hosts/aws/h-000000000003/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    expect(startPage.status).toBe(200);
+    const startBody = await startPage.text();
+    expect(startBody).toContain("start desktop lease");
+    expect(startBody).not.toContain('name="sshPublicKey"');
+    expect(startBody).toContain(
+      "CRABBOX_HOST_ID=h-000000000003 crabbox warmup --provider aws --target macos --market on-demand --type mac2.metal --desktop",
+    );
+    expect(startBody).toContain(
+      'data-copy-value="CRABBOX_HOST_ID=h-000000000003 crabbox warmup --provider aws --target macos --market on-demand --type mac2.metal --desktop"',
+    );
+    expect(startBody).toContain("copy start command");
+    expect(startBody).toContain("crabbox webvnc --id &lt;lease-id-or-slug&gt; --open");
+    expect(startBody).toContain("host-pinned macOS run");
+
+    const idlePost = await fleet.fetch(
+      request("POST", "/portal/hosts/aws/h-000000000003/vnc", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+        body: {},
+      }),
+    );
+    expect(idlePost.status).toBe(409);
+    await expect(idlePost.text()).resolves.toContain("No active Crabbox lease");
   });
 
   it("syncs external runner visibility and marks missing runners stale", async () => {
@@ -2493,6 +2759,8 @@ describe("fleet lease identity and idle", () => {
     expect(pageBody).toContain("clipboardPasteFrom");
     expect(pageBody).toContain("rfb.showDotCursor = true");
     expect(pageBody).toContain('target === "macos"');
+    expect(pageBody).toContain("rfb.compressionLevel = 1");
+    expect(pageBody).toContain("rfb.qualityLevel = 2");
     expect(pageBody).toContain("MetaLeft");
     expect(pageBody).toContain("ControlLeft");
     expect(pageBody).toContain("position:sticky");
@@ -2529,6 +2797,16 @@ describe("fleet lease identity and idle", () => {
     expect(pageBody).toContain("stopPolling(state.message");
     expect(pageBody).toContain('fragment.get("username")');
     expect(pageBody).toContain('types.includes("username")');
+    expect(pageBody).toContain("VNC credentials missing; open WebVNC from crabbox webvnc status");
+    expect(pageBody).toContain(
+      "VNC authentication failed; reopen WebVNC from crabbox webvnc status",
+    );
+    expect(pageBody).toContain(
+      "VNC authentication timed out; reopen WebVNC from crabbox webvnc status",
+    );
+    expect(pageBody).toContain("credentialsSent = true");
+    expect(pageBody).not.toContain('window.prompt("VNC username")');
+    expect(pageBody).not.toContain('window.prompt("VNC password")');
     expect(pageBody).not.toContain("cdn.jsdelivr.net");
 
     const friendPage = await fleet.fetch(
@@ -5463,6 +5741,7 @@ function fakeProvider(
     ) => void;
     onGetImage?: (imageID: string, kind?: string) => Promise<ProviderImage> | ProviderImage;
     onDeleteImage?: (imageID: string, kind?: string) => void;
+    onRefreshSSHIngress?: (config: LeaseConfig) => void;
   } = {},
   onDelete?: (id: string) => Promise<void>,
   onGet?: (id: string) => Promise<ProviderMachine> | ProviderMachine,
@@ -5486,6 +5765,9 @@ function fakeProvider(
         host: "192.0.2.10",
         labels: {},
       };
+    },
+    async refreshSSHIngress(config: LeaseConfig) {
+      result.onRefreshSSHIngress?.(config);
     },
     async createServerWithFallback(config: LeaseConfig, _leaseID: string, slug: string) {
       onCreate?.(config);
