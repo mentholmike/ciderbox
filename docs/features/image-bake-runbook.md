@@ -16,6 +16,8 @@ Use names that identify owner, purpose, and UTC bake time:
 
 ```text
 crabbox-linux-desktop-browser-YYYYMMDD-HHMM
+crabbox-linux-devtools-YYYYMMDD-HHMM
+crabbox-windows-devtools-YYYYMMDD-HHMM
 crabbox-macos-arm64-YYYYMMDD-HHMM
 ```
 
@@ -33,6 +35,8 @@ Bake machine capabilities:
 - Chrome/Chromium for browser leases;
 - `ffmpeg`, `ffprobe`, `scrot`, `xdotool`, and other capture helpers;
 - Node 24, npm, corepack, pnpm;
+- Docker Engine plus the Compose and buildx plugins where the platform supports
+  them;
 - build-essential, Python, and common native-addon headers;
 - empty cache directories such as `/var/cache/crabbox/pnpm`.
 
@@ -172,6 +176,85 @@ crabbox run \
 Keep the previous promoted AMI available until at least one normal brokered
 lease and one relevant QA lane pass on the new image.
 
+## Linux And Windows Developer Images
+
+For generic AWS Linux and Windows developer AMIs, use the guarded wrapper
+instead of hand-running the prep and image commands:
+
+```bash
+scripts/mint-aws-devtools-image.sh --target linux
+scripts/mint-aws-devtools-image.sh --target windows
+```
+
+The default is a no-spend plan. Add `--run` only when the selected AWS account,
+region, quotas, and image name are correct:
+
+```bash
+scripts/mint-aws-devtools-image.sh \
+  --target linux \
+  --region us-west-2 \
+  --class standard \
+  --type m7i.large \
+  --run
+
+scripts/mint-aws-devtools-image.sh \
+  --target windows \
+  --region us-west-2 \
+  --class standard \
+  --type m7i.large \
+  --windows-mode normal \
+  --run
+```
+
+The Linux prep script installs common CLI/build tooling, GitHub CLI, Node 24,
+corepack/pnpm, Chrome or Chromium for browser lanes, desktop/VNC helpers, Docker
+Engine, Compose, buildx, and a small default Docker image set. The Windows prep
+script installs common CLI/build tooling, GitHub CLI, Node 24, corepack/pnpm,
+and Windows Server container support with Docker Engine. It deliberately avoids
+Docker Desktop because headless image bakes should not depend on a user-session
+desktop app or Docker Desktop licensing.
+Windows developer bakes are headless by default for faster boot and fewer
+desktop-bootstrap moving parts. Pass `--desktop` only when the image is meant
+to back interactive desktop leases.
+
+Windows container support can require one reboot before Docker starts. The
+wrapper detects the prep script's reboot marker, reboots the source lease,
+waits for Crabbox readiness, reruns the prep script to pull the configured
+Docker images, and only then runs the source smoke and AMI capture.
+
+Tune the default prebake set with environment variables:
+
+```bash
+CRABBOX_LINUX_DOCKER_IMAGES='hello-world ubuntu:24.04 node:24-bookworm'
+CRABBOX_WINDOWS_DOCKER_IMAGES='mcr.microsoft.com/windows/servercore:ltsc2022'
+CRABBOX_LINUX_BROWSER=0
+CRABBOX_LINUX_DESKTOP_TOOLS=0
+CRABBOX_WINDOWS_INSTALL_DOCKER=0
+```
+
+The wrapper defaults to `--class standard` even when an explicit instance type
+is provided, so image bakes do not accidentally consume the high-pressure beast
+class. It always proves the source lease, candidate AMI, and promoted AMI before
+declaring success unless `--no-promote` is set. It writes warmup timing logs
+under `.crabbox/image-mint-<image-name>-*.log`, which is the evidence to compare
+before and after each bake.
+
+## Fast Boot Expectations
+
+Fast images come from moving stable machine setup into the AMI and keeping
+per-lease bootstrap tiny. Bake OS patches, developer tools, Docker, browser
+bits, cache directories, service enablement, and first-run suppression. Do not
+bake repository checkouts, package installs tied to one lockfile, browser login
+state, or secrets.
+
+For Blacksmith-like cold-start times on AWS, an AMI alone is not always enough.
+EBS snapshots hydrate lazily by default, so new regions or availability zones
+can still pay first-read penalties. For hot production lanes, keep capacity in
+the same region as the promoted AMI, track the wrapper timing logs, and enable
+AWS Fast Snapshot Restore on the backing snapshots in the availability zones
+where the image must boot immediately. Treat snapshot warmup as a separate
+provider-cost decision; do not enable it casually for every candidate image.
+
 ## macOS Images
 
 macOS images use the same `image create` command, but the source lease must be
@@ -277,10 +360,11 @@ requires an active Apple developer tools directory, a macOS SDK through
 waits for the portal bridge to report `connected=true`, collects desktop
 artifacts, creates a candidate AMI with a rebooting image capture, boots and
 smokes the candidate, then promotes and smokes the promoted image when
-`CRABBOX_MACOS_PROMOTE=1`. Command Line Tools are enough by default; full Xcode
-is not required unless `CRABBOX_MACOS_REQUIRE_XCODE=1` is set. For `mac2*`
-families the default gates are macOS 14+ and Swift tools 6.0+ because those are
-the launchable hosts commonly available today. For newer `mac-m*` families the
+`CRABBOX_MACOS_PROMOTE=1`. The generic lifecycle defaults to Command Line
+Tools-compatible checks; set `CRABBOX_MACOS_REQUIRE_XCODE=1` when the image must
+run SwiftPM, app, or SDK lanes that depend on Xcode.app. For `mac2*` families
+the default gates are macOS 14+ and Swift tools 6.0+ because those are the
+launchable hosts commonly available today. For newer `mac-m*` families the
 defaults are macOS 15+ and Swift tools 6.2+, which matches Swift package lanes
 that require `swift-tools-version: 6.2` and macOS 15 SDKs. Tune the toolchain
 gates with `CRABBOX_MACOS_REQUIRED_MAJOR` and
@@ -314,13 +398,15 @@ scripts/macos-image-lifecycle-smoke.sh
 ```
 
 The bundled developer-tool prep script keeps the image generic: it verifies
-Command Line Tools, installs Homebrew when missing, installs common developer
-packages such as Git, GitHub CLI, jq/yq, ripgrep, fd, ShellCheck, shfmt, Python,
-Node 24, and activates pnpm through corepack. It also creates `/usr/local/bin`
-shims so non-login SSH commands can find those tools after the AMI boots. Use a
-private prep hook only for organization-specific setup. Do not put Apple
-credentials, download tokens, or private package mirrors in this repository or
-in baked images.
+Command Line Tools by default, or selects an installed `/Applications/Xcode*.app`
+developer directory when `CRABBOX_MACOS_REQUIRE_XCODE=1`. It installs Homebrew
+when missing, installs common developer packages such as Git, GitHub CLI, jq/yq,
+ripgrep, fd, ShellCheck, shfmt, Python, Node 24, and activates pnpm through
+corepack. It also creates `/usr/local/bin` shims so non-login SSH commands can
+find those tools after the AMI boots. The script does not download Xcode;
+install Xcode in a private prep hook first if the base image does not already
+contain it. Do not put Apple credentials, download tokens, or private package
+mirrors in this repository or in baked images.
 
 For the generic developer-tools image, prefer the small wrapper instead of
 remembering the lifecycle environment by hand:
@@ -331,12 +417,18 @@ scripts/mint-macos-devtools-image.sh
 
 That default is no-spend: it runs coordinator, IAM, offering, quota, host list,
 and allocation dry-run checks, writes the usual lifecycle summary, and stops
-before lease creation. To mint from an already available host:
+before lease creation. The wrapper is intentionally stricter than the generic
+lifecycle: it defaults to `mac-m4.metal`, macOS 15+, Swift tools 6.2+, and full
+Xcode.app via `CRABBOX_MACOS_REQUIRE_XCODE=1`. For an older CLT-only image, set
+`CRABBOX_MACOS_TYPE=mac2.metal`, `CRABBOX_MACOS_REQUIRED_MAJOR=14`,
+`CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS=6.0`, and
+`CRABBOX_MACOS_REQUIRE_XCODE=0` explicitly. To mint from an already available
+host:
 
 ```bash
 scripts/mint-macos-devtools-image.sh \
   --region us-west-2 \
-  --type mac2.metal \
+  --type mac-m4.metal \
   --use-existing
 ```
 
@@ -345,7 +437,7 @@ To allow paid host allocation when no reusable host exists:
 ```bash
 scripts/mint-macos-devtools-image.sh \
   --region us-west-2 \
-  --type mac2.metal \
+  --type mac-m4.metal \
   --allocate
 ```
 

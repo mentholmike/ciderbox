@@ -35,6 +35,9 @@ const keys = [
   "CRABBOX_MACOS_OPEN_WEBVNC",
   "CRABBOX_MACOS_KEEP_LEASE",
   "CRABBOX_MACOS_RELEASE_HOST",
+  "CRABBOX_MACOS_REQUIRED_MAJOR",
+  "CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS",
+  "CRABBOX_MACOS_REQUIRE_XCODE",
 ];
 const out = {};
 for (const key of keys) out[key] = process.env[key] || "";
@@ -79,6 +82,7 @@ test("mint wrapper defaults to no-spend promoted developer-tools proof", async (
   const env = JSON.parse(await readFile(fake.envPath, "utf8"));
   assert.equal(env.CRABBOX_MACOS_SOURCE_PREP_SCRIPT, fake.prepPath);
   assert.match(env.CRABBOX_MACOS_IMAGE_NAME, /^crabbox-macos-devtools-/);
+  assert.equal(env.CRABBOX_MACOS_TYPE, "mac-m4.metal");
   assert.equal(env.CRABBOX_MACOS_RUN, "0");
   assert.equal(env.CRABBOX_MACOS_ALLOCATE, "0");
   assert.equal(env.CRABBOX_MACOS_CREATE_IMAGE, "1");
@@ -86,7 +90,11 @@ test("mint wrapper defaults to no-spend promoted developer-tools proof", async (
   assert.equal(env.CRABBOX_MACOS_CHECKPOINT, "1");
   assert.equal(env.CRABBOX_MACOS_OPEN_WEBVNC, "0");
   assert.equal(env.CRABBOX_MACOS_RELEASE_HOST, "0");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_MAJOR, "15");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS, "6.2");
+  assert.equal(env.CRABBOX_MACOS_REQUIRE_XCODE, "1");
   assert.match(result.stderr, /paid:\s+use_existing=0 allocate=0 release_host=0/);
+  assert.match(result.stderr, /tools:\s+macos>=15 swift>=6\.2 require_xcode=1/);
 });
 
 test("mint wrapper maps explicit paid-work flags to lifecycle env", async () => {
@@ -126,6 +134,9 @@ test("mint wrapper maps explicit paid-work flags to lifecycle env", async () => 
   assert.equal(env.CRABBOX_MACOS_OPEN_WEBVNC, "1");
   assert.equal(env.CRABBOX_MACOS_PROMOTE, "0");
   assert.equal(env.CRABBOX_MACOS_CHECKPOINT, "0");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_MAJOR, "15");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS, "6.2");
+  assert.equal(env.CRABBOX_MACOS_REQUIRE_XCODE, "1");
 });
 
 test("mint wrapper preserves source-only checkpoint default", async () => {
@@ -141,4 +152,24 @@ test("mint wrapper preserves source-only checkpoint default", async () => {
   assert.equal(env.CRABBOX_MACOS_CREATE_IMAGE, "0");
   assert.equal(env.CRABBOX_MACOS_CHECKPOINT, "0");
   assert.match(result.stderr, /proof:\s+create_image=0 checkpoint=0 promote=1/);
+});
+
+test("mint wrapper preserves explicit macOS toolchain overrides", async () => {
+  const fake = await setupFakeLifecycle();
+  const result = await runWrapper([], {
+    CRABBOX_FAKE_ENV_PATH: fake.envPath,
+    CRABBOX_MACOS_LIFECYCLE_SCRIPT: fake.lifecyclePath,
+    CRABBOX_MACOS_SOURCE_PREP_SCRIPT: fake.prepPath,
+    CRABBOX_MACOS_TYPE: "mac2.metal",
+    CRABBOX_MACOS_REQUIRED_MAJOR: "14",
+    CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS: "6.0",
+    CRABBOX_MACOS_REQUIRE_XCODE: "0",
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const env = JSON.parse(await readFile(fake.envPath, "utf8"));
+  assert.equal(env.CRABBOX_MACOS_TYPE, "mac2.metal");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_MAJOR, "14");
+  assert.equal(env.CRABBOX_MACOS_REQUIRED_SWIFT_TOOLS, "6.0");
+  assert.equal(env.CRABBOX_MACOS_REQUIRE_XCODE, "0");
+  assert.match(result.stderr, /tools:\s+macos>=14 swift>=6\.0 require_xcode=0/);
 });

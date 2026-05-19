@@ -5,11 +5,27 @@
 ### Added
 
 - Added a thin macOS developer-tools image mint wrapper that keeps paid host allocation explicit while wiring the reusable prep script, promotion, checkpoint proof, and lifecycle evidence defaults.
+- Added AWS Linux and Windows developer-image prep scripts plus a guarded mint wrapper for baking Docker, Node 24, pnpm, GitHub CLI, and common developer tooling into fast-booting Crabbox AMIs.
 - Added a light/dark mode toggle to the Crabbox documentation site that defaults to the system color scheme, persists the choice in local storage, and applies before first paint to avoid a flash.
 
 ### Changed
 
 - Changed the portal lease table filter bar from a long single-choice pill list to grouped state, provider, OS, kind, and admin ownership selectors.
+- Changed the macOS developer-tools mint wrapper to default to a full Xcode macOS 15 / Swift 6.2 toolchain on newer EC2 Mac host families, while keeping CLT-only image bakes explicit.
+
+### Fixed
+
+- Fixed Windows developer-image bootstrap readiness so setup completion is written before restarting SSH and native Windows bakes wait for a stable SSH window before continuing.
+- Fixed the Windows developer-image mint wrapper so the final PowerShell prep chunk decodes and runs inline instead of relying on a separate post-upload command.
+- Fixed Windows developer-image prep so Docker Engine installation is deferred until after the required Containers feature reboot.
+- Fixed Windows developer-image bakes so the Docker Containers feature can interrupt SSH without aborting the image mint, as long as the reboot marker is present.
+- Fixed Windows developer-image warmup proof so the mint wrapper keeps the source lease alive with an SSH command instead of waiting on stale coordinator readiness.
+- Fixed Windows developer-image prep so fresh Chocolatey and Node shims are visible in the active PowerShell session, and first-pass Docker feature installs exit cleanly before final tool verification.
+- Fixed Windows developer-image Docker Engine installation to use static Docker binaries instead of the stale DockerMsftProvider package feed.
+- Fixed Windows developer-image AMI prep to reset EC2Launch state before capture so candidate instances run per-lease user data and accept the new Crabbox SSH key.
+- Fixed Windows developer-image prep to leave Crabbox-managed OpenSSH in place instead of installing Chocolatey's OpenSSH package over the active lease transport.
+- Fixed Windows developer-image minting to retry idempotent prep-script chunk uploads, run long prep through a detached scheduled task, and require a stable post-reboot SSH window before the second prep pass.
+- Fixed AWS developer-image bakes behind configured security groups so coordinator heartbeats still refresh the configured Crabbox SSH ports, and aligned the Worker Windows bootstrap ordering with the CLI path.
 
 ## 0.16.0 - 2026-05-18
 

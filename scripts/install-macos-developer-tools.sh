@@ -5,6 +5,8 @@ brew_update="${CRABBOX_MACOS_BREW_UPDATE:-1}"
 pnpm_version="${CRABBOX_MACOS_PNPM_VERSION:-11.1.0}"
 node_formula="${CRABBOX_MACOS_NODE_FORMULA:-node@24}"
 python_formula="${CRABBOX_MACOS_PYTHON_FORMULA:-python@3.13}"
+require_xcode="${CRABBOX_MACOS_REQUIRE_XCODE:-0}"
+xcode_developer_dir="${CRABBOX_MACOS_XCODE_DEVELOPER_DIR:-}"
 default_formulas=(
   git
   git-lfs
@@ -29,8 +31,26 @@ log() {
   printf 'macos-tools: %s\n' "$*" >&2
 }
 
-require_command_line_tools() {
+select_full_xcode() {
+  local candidate
+  if [[ -n "$xcode_developer_dir" ]]; then
+    sudo xcode-select -s "$xcode_developer_dir"
+    return
+  fi
+  for candidate in /Applications/Xcode*.app/Contents/Developer; do
+    [[ -d "$candidate" ]] || continue
+    if [[ -x "$candidate/usr/bin/xcodebuild" && -d "$candidate/Platforms/MacOSX.platform/Developer/SDKs" ]]; then
+      sudo xcode-select -s "$candidate"
+      return
+    fi
+  done
+}
+
+require_developer_tools() {
   local developer_dir
+  if [[ "$require_xcode" == "1" ]]; then
+    select_full_xcode || true
+  fi
   developer_dir="$(xcode-select -p 2>/dev/null || true)"
   if [[ -z "$developer_dir" ]]; then
     log "xcode-select has no active developer directory"
@@ -43,6 +63,23 @@ require_command_line_tools() {
   xcrun --sdk macosx --show-sdk-path >/dev/null
   xcrun --find clang >/dev/null
   xcrun --find swift >/dev/null
+  if [[ "$require_xcode" == "1" ]]; then
+    case "$developer_dir" in
+      *CommandLineTools*)
+        log "full Xcode developer directory required, got Command Line Tools: $developer_dir"
+        log "install Xcode.app first or set CRABBOX_MACOS_XCODE_DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer"
+        return 1
+        ;;
+    esac
+    if [[ ! -x "$developer_dir/usr/bin/xcodebuild" || ! -d "$developer_dir/Platforms/MacOSX.platform/Developer/SDKs" ]]; then
+      log "active developer directory is not a full Xcode.app: $developer_dir"
+      return 1
+    fi
+    sudo xcodebuild -license accept >/dev/null 2>&1 || true
+    sudo xcodebuild -runFirstLaunch >/dev/null 2>&1 || true
+    xcodebuild -version
+    xcodebuild -showsdks | grep -E 'macOS|macosx' >/dev/null
+  fi
   log "developer tools: $developer_dir"
 }
 
@@ -213,7 +250,7 @@ print_versions() {
   pnpm --version
 }
 
-require_command_line_tools
+require_developer_tools
 install_homebrew
 install_formulas
 install_node_and_pnpm

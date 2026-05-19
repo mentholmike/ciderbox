@@ -643,6 +643,7 @@ test("macOS lifecycle smoke uses stricter defaults for mac-m host families", asy
     CRABBOX_MACOS_ALLOCATE: "1",
     CRABBOX_MACOS_CREATE_IMAGE: "0",
     CRABBOX_MACOS_TYPE: "mac-m4.metal",
+    CRABBOX_MACOS_REQUIRE_XCODE: "1",
     CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
     CRABBOX_MACOS_IMAGE_NAME: "m4-toolchain",
     CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
@@ -652,6 +653,9 @@ test("macOS lifecycle smoke uses stricter defaults for mac-m host families", asy
   const fakeLog = await readFile(run.fakeLog, "utf8");
   assert.match(fakeLog, /required_macos_major=15/);
   assert.match(fakeLog, /required_swift_tools=6\.2/);
+  assert.match(fakeLog, /require_xcode=1/);
+  assert.match(fakeLog, /full Xcode developer directory required/);
+  assert.match(fakeLog, /xcodebuild -version/);
 });
 
 test("macOS lifecycle smoke runs source prep before the source smoke", async () => {

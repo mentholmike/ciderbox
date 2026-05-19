@@ -33,8 +33,10 @@ Good prebake contents:
 - SSH, Git, rsync, curl, jq, and readiness helpers;
 - desktop/browser capabilities for `--desktop --browser` leases;
 - screenshot and recording tools such as `scrot`, `ffmpeg`, `xdotool`, and VNC;
-- Node 22, corepack/pnpm, build-essential, Python, and common native-addon
+- Node 24, corepack/pnpm, build-essential, Python, and common native-addon
   headers when the image targets browser/channel QA;
+- Docker Engine and common container plugin support when the target platform
+  supports headless Docker;
 - empty shared cache directories such as `/var/cache/crabbox/pnpm`.
 
 Bad prebake contents:
@@ -74,9 +76,10 @@ candidate smoke, promotion, rollback, and cleanup commands. At a high level:
 6. Run a normal brokered lease and the relevant QA lane.
 7. Keep the previous known-good AMI until the new image has real QA proof.
 
-For Mantis, image bake success is not just "Chrome exists." A useful image must
-reduce `crabbox.warmup` or `crabbox.remote_run` time in the Mantis timing
-report while keeping Slack/browser login state outside the image.
+Image bake success is not just "Chrome exists." A useful image must reduce
+`crabbox.warmup` or `crabbox.remote_run` time in timing evidence while keeping
+project credentials, browser login state, and repository artifacts outside the
+image.
 
 Related docs:
 
