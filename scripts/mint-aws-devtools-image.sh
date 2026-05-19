@@ -11,6 +11,7 @@ image_name="${CRABBOX_IMAGE_NAME:-}"
 ttl="${CRABBOX_IMAGE_TTL:-2h}"
 idle_timeout="${CRABBOX_IMAGE_IDLE_TIMEOUT:-30m}"
 wait_timeout="${CRABBOX_IMAGE_WAIT_TIMEOUT:-60m}"
+prep_wait_timeout="${CRABBOX_IMAGE_PREP_WAIT_TIMEOUT:-90m}"
 reboot_wait_timeout="${CRABBOX_IMAGE_REBOOT_WAIT_TIMEOUT:-25m}"
 reboot_settle_seconds="${CRABBOX_IMAGE_REBOOT_SETTLE_SECONDS:-30}"
 reboot_ready_settle_seconds="${CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS:-180}"
@@ -55,6 +56,7 @@ Useful env:
   CRABBOX_IMAGE_PROMOTE
   CRABBOX_IMAGE_KEEP_LEASE
   CRABBOX_IMAGE_WAIT_TIMEOUT
+  CRABBOX_IMAGE_PREP_WAIT_TIMEOUT
   CRABBOX_IMAGE_REBOOT_WAIT_TIMEOUT
   CRABBOX_IMAGE_REBOOT_SETTLE_SECONDS
   CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS
@@ -253,6 +255,106 @@ run_windows_shell_retry() {
   return 1
 }
 
+windows_prep_start_command() {
+  cat <<'POWERSHELL'
+$dir = 'C:\ProgramData\crabbox'
+$runner = Join-Path $dir 'image-prep-runner.ps1'
+$script = Join-Path $dir 'image-prep.ps1'
+$log = Join-Path $dir 'image-prep.log'
+$exitFile = Join-Path $dir 'image-prep.exit'
+$done = Join-Path $dir 'image-prep.done'
+$failed = Join-Path $dir 'image-prep.failed'
+Remove-Item -Force $log,$exitFile,$done,$failed -ErrorAction SilentlyContinue
+@'
+$dir = 'C:\ProgramData\crabbox'
+$script = Join-Path $dir 'image-prep.ps1'
+$log = Join-Path $dir 'image-prep.log'
+$exitFile = Join-Path $dir 'image-prep.exit'
+$done = Join-Path $dir 'image-prep.done'
+$failed = Join-Path $dir 'image-prep.failed'
+$ErrorActionPreference = 'Continue'
+Remove-Item -Force $exitFile,$done,$failed -ErrorAction SilentlyContinue
+& powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script *>&1 | Tee-Object -FilePath $log
+$code = $LASTEXITCODE
+if ($null -eq $code) { $code = 0 }
+Set-Content -Path $exitFile -Value $code
+if ($code -eq 0) {
+  Set-Content -Path $done -Value 'ok'
+} else {
+  Set-Content -Path $failed -Value $code
+}
+exit $code
+'@ | Set-Content -Path $runner -Encoding UTF8
+Unregister-ScheduledTask -TaskName 'CrabboxImagePrep' -Confirm:$false -ErrorAction SilentlyContinue
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $runner)
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+Register-ScheduledTask -TaskName 'CrabboxImagePrep' -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName 'CrabboxImagePrep'
+Write-Output 'crabbox-prep-started'
+POWERSHELL
+}
+
+windows_prep_status_command() {
+  cat <<'POWERSHELL'
+$dir = 'C:\ProgramData\crabbox'
+$log = Join-Path $dir 'image-prep.log'
+$exitFile = Join-Path $dir 'image-prep.exit'
+$done = Join-Path $dir 'image-prep.done'
+$failed = Join-Path $dir 'image-prep.failed'
+if (Test-Path $done) {
+  Write-Output 'crabbox-prep-done'
+  if (Test-Path $exitFile) { Get-Content $exitFile }
+  if (Test-Path $log) { Get-Content $log -Tail 80 }
+  exit 0
+}
+if (Test-Path $failed) {
+  Write-Output 'crabbox-prep-failed'
+  if (Test-Path $exitFile) { Get-Content $exitFile }
+  if (Test-Path $log) { Get-Content $log -Tail 120 }
+  exit 0
+}
+$task = Get-ScheduledTask -TaskName 'CrabboxImagePrep' -ErrorAction SilentlyContinue
+if ($task) {
+  $info = Get-ScheduledTaskInfo -TaskName 'CrabboxImagePrep' -ErrorAction SilentlyContinue
+  if ($info) {
+    Write-Output ("crabbox-prep-state={0} result={1}" -f $task.State,$info.LastTaskResult)
+  } else {
+    Write-Output ("crabbox-prep-state={0}" -f $task.State)
+  }
+}
+if (Test-Path $log) { Get-Content $log -Tail 30 }
+Write-Output 'crabbox-prep-running'
+exit 0
+POWERSHELL
+}
+
+wait_windows_prep_task() {
+  local lease="$1"
+  local status_command output status deadline
+  status_command="$(windows_prep_status_command)"
+  deadline=$((SECONDS + $(duration_seconds "$prep_wait_timeout")))
+  while true; do
+    status=0
+    output="$("$CRABBOX_BIN" run --provider aws --target windows --id "$lease" --no-sync --shell -- "$status_command" 2>&1)" || status=$?
+    printf '%s\n' "$output" >&2
+    if grep -q 'crabbox-prep-done' <<<"$output"; then
+      return 0
+    fi
+    if grep -q 'crabbox-prep-failed' <<<"$output"; then
+      return 1
+    fi
+    if ((SECONDS >= deadline)); then
+      printf 'Windows prep task did not finish within %s\n' "$prep_wait_timeout" >&2
+      return 1
+    fi
+    if [[ "$status" -ne 0 ]]; then
+      printf 'Windows prep status unavailable; waiting for SSH before next poll\n' >&2
+    fi
+    sleep 30
+  done
+}
+
 warmup_args() {
   printf '%s\0' warmup --provider aws --target "$target" --class "$server_class" --market on-demand --ttl "$ttl" --idle-timeout "$idle_timeout" --timing-json
   [[ -n "$server_type" ]] && printf '%s\0' --type "$server_type"
@@ -380,7 +482,7 @@ run_prep() {
     chunk_size=1800
     remote_dir='C:\ProgramData\crabbox'
     remote_script='C:\ProgramData\crabbox\image-prep.ps1'
-    decode_and_run="; \$__crabboxParts = Get-ChildItem -Path '$remote_dir' -Filter 'image-prep.part-*' | Sort-Object Name; \$__crabboxPrep = (\$__crabboxParts | ForEach-Object { Get-Content -Raw \$_.FullName }) -join ''; [IO.File]::WriteAllBytes('$remote_script', [Convert]::FromBase64String(\$__crabboxPrep)); powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '$remote_script'; exit \$LASTEXITCODE"
+    decode_and_run="; \$__crabboxParts = Get-ChildItem -Path '$remote_dir' -Filter 'image-prep.part-*' | Sort-Object Name; \$__crabboxPrep = (\$__crabboxParts | ForEach-Object { Get-Content -Raw \$_.FullName }) -join ''; [IO.File]::WriteAllBytes('$remote_script', [Convert]::FromBase64String(\$__crabboxPrep)); Write-Output 'crabbox-prep-uploaded'"
     run_windows_shell_retry "$lease" "prep upload init" "New-Item -ItemType Directory -Force -Path '$remote_dir' | Out-Null; Remove-Item -Path '$remote_dir\\image-prep.part-*' -Force -ErrorAction SilentlyContinue"
     part_index=0
     for ((offset = 0; offset < ${#encoded}; offset += chunk_size)); do
@@ -398,6 +500,8 @@ run_prep() {
       fi
       part_index=$((part_index + 1))
     done
+    run_windows_shell_retry "$lease" "prep task start" "$(windows_prep_start_command)"
+    wait_windows_prep_task "$lease"
     return
   fi
   run_cmd "$CRABBOX_BIN" run --provider aws --target "$target" --id "$lease" --no-sync --script "$prep_script"

@@ -58,6 +58,15 @@ case "$1" in
       touch "\${CRABBOX_FAKE_LOG}.prep-disconnected"
       exit 255
     fi
+    if [[ "$*" == *"Start-ScheduledTask"* ]]; then
+      touch "\${CRABBOX_FAKE_LOG}.prep-started"
+      printf 'crabbox-prep-started\\n'
+      exit 0
+    fi
+    if [[ "$*" == *"image-prep.done"* ]]; then
+      printf 'crabbox-prep-done\\n0\\n'
+      exit 0
+    fi
     printf 'devtools-smoke-ok\\n'
     ;;
   image)
@@ -122,6 +131,7 @@ test("AWS devtools mint wrapper runs linux source candidate and promoted proof",
       CRABBOX_FAKE_LOG: fake.log,
       CRABBOX_IMAGE_WINDOWS_WARMUP_SETTLE_SECONDS: "0",
       CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS: "0",
+      CRABBOX_IMAGE_PREP_WAIT_TIMEOUT: "5s",
     },
   );
   assert.equal(result.code, 0, result.stderr);
@@ -198,6 +208,7 @@ test("AWS devtools mint wrapper reboots windows source when prep requires it", a
       CRABBOX_IMAGE_REBOOT_SETTLE_SECONDS: "0",
       CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS: "0",
       CRABBOX_IMAGE_WINDOWS_WARMUP_SETTLE_SECONDS: "0",
+      CRABBOX_IMAGE_PREP_WAIT_TIMEOUT: "5s",
     },
   );
   assert.equal(result.code, 0, result.stderr);
@@ -232,6 +243,7 @@ test("AWS devtools mint wrapper retries windows prep upload disconnects", async 
       CRABBOX_IMAGE_REBOOT_SETTLE_SECONDS: "0",
       CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS: "0",
       CRABBOX_IMAGE_WINDOWS_WARMUP_SETTLE_SECONDS: "0",
+      CRABBOX_IMAGE_PREP_WAIT_TIMEOUT: "5s",
     },
   );
   assert.equal(result.code, 0, result.stderr);

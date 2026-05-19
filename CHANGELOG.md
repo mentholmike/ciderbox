@@ -24,7 +24,7 @@
 - Fixed Windows developer-image Docker Engine installation to use static Docker binaries instead of the stale DockerMsftProvider package feed.
 - Fixed Windows developer-image AMI prep to reset EC2Launch state before capture so candidate instances run per-lease user data and accept the new Crabbox SSH key.
 - Fixed Windows developer-image prep to leave Crabbox-managed OpenSSH in place instead of installing Chocolatey's OpenSSH package over the active lease transport.
-- Fixed Windows developer-image minting to retry idempotent prep-script chunk uploads and require a stable post-reboot SSH window before the second prep pass.
+- Fixed Windows developer-image minting to retry idempotent prep-script chunk uploads, run long prep through a detached scheduled task, and require a stable post-reboot SSH window before the second prep pass.
 - Fixed AWS developer-image bakes behind configured security groups so coordinator heartbeats still refresh the configured Crabbox SSH ports, and aligned the Worker Windows bootstrap ordering with the CLI path.
 
 ## 0.16.0 - 2026-05-18
