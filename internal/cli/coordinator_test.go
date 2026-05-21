@@ -1221,6 +1221,44 @@ func TestCoordinatorImageCreateAndPromote(t *testing.T) {
 	}
 }
 
+func TestImageFSRStatusAcceptsFlagsAfterImageID(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var gotPath, gotRegion, gotAuth string
+	var gotAZs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRegion = r.URL.Query().Get("region")
+		gotAZs = r.URL.Query()["fsrAz"]
+		gotAuth = r.Header.Get("Authorization")
+		if r.Method != http.MethodGet {
+			t.Fatalf("method=%s", r.Method)
+		}
+		_, _ = w.Write([]byte(`{"image":{"id":"ami-12345678","state":"available","region":"us-west-2","fastSnapshotRestores":[{"snapshotID":"snap-root","availabilityZone":"us-west-2a","state":"enabled"}]}}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("CRABBOX_COORDINATOR", server.URL)
+	t.Setenv("CRABBOX_COORDINATOR_ADMIN_TOKEN", "admin-token")
+	var out bytes.Buffer
+	app := App{Stdout: &out, Stderr: io.Discard}
+	err := app.imageFSRStatus(context.Background(), []string{"ami-12345678", "--region", "us-west-2", "--fsr-az", "us-west-2a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1/images/ami-12345678/fast-snapshot-restore" || gotRegion != "us-west-2" || !reflect.DeepEqual(gotAZs, []string{"us-west-2a"}) {
+		t.Fatalf("request path=%q region=%q azs=%#v", gotPath, gotRegion, gotAZs)
+	}
+	if gotAuth != "Bearer admin-token" {
+		t.Fatalf("auth=%q", gotAuth)
+	}
+	if !strings.Contains(out.String(), "fsr snapshot=snap-root az=us-west-2a state=enabled") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
 func TestLeaseStatusRequiresSSHReadiness(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/leases/cbx_123" {

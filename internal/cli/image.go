@@ -94,7 +94,7 @@ func (a App) imageFSRStatus(ctx context.Context, args []string) error {
 	var fastSnapshotRestoreAZs stringListFlag
 	fs.Var(&fastSnapshotRestoreAZs, "fsr-az", "availability zone for Fast Snapshot Restore status; repeatable")
 	jsonOut := fs.Bool("json", false, "print JSON")
-	if err := parseFlags(fs, args); err != nil {
+	if err := parseInterspersedFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
