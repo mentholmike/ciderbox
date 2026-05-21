@@ -1,20 +1,25 @@
 # 🦀 Crabbox Docs
 
-**Warm a box, sync the diff, run the suite.**
+**Give agents a real test box. Get back logs, artifacts, and proof.**
 
 ## What Crabbox is
 
-Crabbox is a shared agent workspace control plane for software maintainers and
-AI agents. The goal is to keep the local developer story unchanged - edit,
-save, run - while moving compute, tests, and review evidence onto owned or
-provider-backed remote capacity.
+Crabbox is a remote validation tool for software maintainers and AI agents. The
+goal is to keep the local developer story unchanged - edit, save, run - while
+moving compute, tests, and review evidence onto owned or provider-backed remote
+capacity.
 
 A `crabbox run` command leases a brokered cloud machine, reuses a static SSH
-host, or delegates to a sandbox provider, syncs your tracked and nonignored
-local files, executes the command remotely, streams stdout and stderr back, and
-releases or unclaims the target. Behind the scenes a small Cloudflare-hosted
-broker owns cloud provider credentials, lease state, cleanup, usage, and cost
-guardrails so individual machines and CLIs never need to.
+host, or delegates to a sandbox provider; syncs your current checkout; executes
+the command remotely; streams stdout and stderr back; and keeps durable proof:
+logs, timing, artifacts, screenshots, recordings, and test results. Behind the
+scenes a small Cloudflare-hosted broker owns cloud provider credentials, lease
+state, cleanup, usage, and cost guardrails so individual machines and CLIs never
+need to.
+
+Local sandboxes protect your laptop. Crabbox gives agent work a real machine to
+run the repo, enough CPU/RAM/Docker/browser/OS support for the validation that
+matters, and an evidence trail you can review later.
 
 ## How it fits together
 

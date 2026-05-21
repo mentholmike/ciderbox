@@ -17,6 +17,7 @@
 
 ### Changed
 
+- Repositioned README and docs-site copy around real remote test boxes, durable logs, artifacts, and proof for agent validation.
 - Clarified WebVNC docs to include coordinator-backed AWS macOS desktop leases in the supported portal bridge surface.
 
 ### Fixed

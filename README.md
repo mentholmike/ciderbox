@@ -4,21 +4,24 @@
 [![Release](https://github.com/openclaw/crabbox/actions/workflows/release.yml/badge.svg)](https://github.com/openclaw/crabbox/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/openclaw/crabbox?sort=semver)](https://github.com/openclaw/crabbox/releases/latest)
 
-**Warm a box, sync the diff, run the suite.**
+**Give agents a real test box. Get back logs, artifacts, and proof.**
 
-Crabbox is an open-source agent workspace control plane for maintainers and AI
-agents. Lease fast managed cloud capacity, point at an existing SSH host, or use
-an agent sandbox provider, then sync your dirty checkout, run commands remotely,
-stream output, collect evidence, and release. Local edit-save-run loop,
-cloud-grade compute, agent-ready observability.
+Crabbox is an open-source remote validation tool for maintainers and AI agents.
+Lease clean cloud, VM, CI, or sandbox capacity; sync your current checkout; run
+the command; and keep durable proof: logs, timing, artifacts, screenshots,
+recordings, and test results. Local edit-save-run loop, real remote compute,
+reviewable evidence.
 
 ```sh
 crabbox run -- pnpm test
 ```
 
 Behind that single command: a Go CLI on your laptop, a Cloudflare Worker broker
-that owns provider credentials and lease state, and a managed or delegated
-runner.
+that owns provider credentials and lease state, and a disposable remote runner.
+
+Local sandboxes protect your laptop. Crabbox gives agent work a real machine to
+run the repo, enough CPU/RAM/Docker/browser/OS support for the validation that
+matters, and an evidence trail you can review later.
 
 Supported providers:
 
