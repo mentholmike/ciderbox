@@ -11,7 +11,13 @@ import {
 } from "./config";
 import { leaseProviderLabels } from "./provider-labels";
 import { leaseProviderName } from "./slug";
-import type { Env, ProviderImage, ProviderMachine, ProvisioningAttempt } from "./types";
+import type {
+  Env,
+  ProviderFastSnapshotRestore,
+  ProviderImage,
+  ProviderMachine,
+  ProvisioningAttempt,
+} from "./types";
 
 const awsUbuntuOwner = "099720109477";
 const ec2Version = "2016-11-15";
@@ -558,6 +564,50 @@ export class EC2SpotClient {
       // oxlint-disable-next-line eslint/no-await-in-loop -- EBS snapshot deletes are independent cleanup calls.
       await this.deleteSnapshotWithRetry(snapshotID);
     }
+  }
+
+  async enableFastSnapshotRestore(
+    snapshotIDs: string[],
+    availabilityZones: string[],
+  ): Promise<ProviderFastSnapshotRestore[]> {
+    const snapshots = uniqueStrings(snapshotIDs);
+    const zones = uniqueStrings(availabilityZones);
+    if (snapshots.length === 0 || zones.length === 0) {
+      return [];
+    }
+    const params: Record<string, string> = {};
+    snapshots.forEach((snapshotID, index) => {
+      params[`SourceSnapshotId.${index + 1}`] = snapshotID;
+    });
+    zones.forEach((zone, index) => {
+      params[`AvailabilityZone.${index + 1}`] = zone;
+    });
+    const root = await this.ec2("EnableFastSnapshotRestores", params);
+    const successes = fastSnapshotRestoreItems(root, "enableFastSnapshotRestoreSuccessSet");
+    const errors = fastSnapshotRestoreItems(root, "enableFastSnapshotRestoreErrorSet");
+    if (errors.length > 0) {
+      const message = errors
+        .map((error) =>
+          [
+            error.snapshotID,
+            error.availabilityZone,
+            error.stateTransitionReason || error.state || "failed",
+          ]
+            .filter(Boolean)
+            .join(":"),
+        )
+        .join(", ");
+      throw new Error(`aws fast snapshot restore failed: ${message}`);
+    }
+    return successes.length > 0
+      ? successes
+      : snapshots.flatMap((snapshotID) =>
+          zones.map((availabilityZone) => ({
+            snapshotID,
+            availabilityZone,
+            state: "enabling",
+          })),
+        );
   }
 
   async listMacHosts(serverType = "", state = ""): Promise<AWSMacHost[]> {
@@ -1563,6 +1613,24 @@ function imageSnapshotIDs(image: Record<string, unknown>): string[] {
     .map((mapping) => asString(record(record(mapping)["ebs"])["snapshotId"]))
     .filter((snapshotID) => snapshotID !== "");
   return [...new Set(snapshots)];
+}
+
+function fastSnapshotRestoreItems(
+  root: Record<string, unknown>,
+  field: string,
+): ProviderFastSnapshotRestore[] {
+  return items(record(root[field])["item"]).map((entry) => {
+    const item = record(entry);
+    const error = record(item["error"]);
+    const state = asString(item["state"] ?? error["code"]);
+    const stateTransitionReason = asString(item["stateTransitionReason"] ?? error["message"]);
+    return {
+      snapshotID: asString(item["snapshotId"] ?? item["sourceSnapshotId"]),
+      availabilityZone: asString(item["availabilityZone"]),
+      ...(state ? { state } : {}),
+      ...(stateTransitionReason ? { stateTransitionReason } : {}),
+    };
+  });
 }
 
 function tagValue(resource: Record<string, unknown>, key: string): string {

@@ -100,6 +100,8 @@ Flags:
 --type <instance-type>   instance type the AMI boots on, for example mac1.metal
 --server-type <type>     alias for --type
 --architecture <arch>    AWS AMI architecture, for example x86_64_mac or arm64_mac
+--fast-snapshot-restore  enable AWS Fast Snapshot Restore for backing snapshots
+--fsr-az <az>            availability zone for Fast Snapshot Restore; repeatable
 --json                   print JSON
 ```
 
@@ -109,6 +111,22 @@ their source lease. For external macOS AMIs, Crabbox reads the AMI architecture
 from AWS and also accepts `--type` or `--architecture` when you want to pin the
 promotion metadata explicitly. Add `--json` to print the promoted image record
 for automation.
+
+Add `--fast-snapshot-restore` plus one or more `--fsr-az` values when the
+promoted image backs hot lanes that need immediate EBS snapshot reads:
+
+```sh
+crabbox image promote \
+  --target windows \
+  --region us-west-2 \
+  --fast-snapshot-restore \
+  --fsr-az us-west-2a \
+  --fsr-az us-west-2b \
+  ami-1234567890abcdef0
+```
+
+Fast Snapshot Restore is provider-billed per snapshot and availability zone.
+Use it for known hot zones, not every candidate bake.
 
 Future brokered AWS leases use the promoted image when the request does not set
 an explicit `awsAMI` or `CRABBOX_AWS_AMI` override. Promotion stores coordinator

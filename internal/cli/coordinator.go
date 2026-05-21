@@ -167,22 +167,30 @@ type CoordinatorProviderReadiness struct {
 }
 
 type CoordinatorImage struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	State        string   `json:"state"`
-	Provider     string   `json:"provider,omitempty"`
-	Kind         string   `json:"kind,omitempty"`
-	Region       string   `json:"region,omitempty"`
-	AccountID    string   `json:"accountId,omitempty"`
-	Project      string   `json:"project,omitempty"`
-	ResourceID   string   `json:"resourceID,omitempty"`
-	SnapshotIDs  []string `json:"snapshotIds,omitempty"`
-	Direct       bool     `json:"direct,omitempty"`
-	Target       string   `json:"target,omitempty"`
-	WindowsMode  string   `json:"windowsMode,omitempty"`
-	ServerType   string   `json:"serverType,omitempty"`
-	Architecture string   `json:"architecture,omitempty"`
-	PromotedAt   string   `json:"promotedAt,omitempty"`
+	ID                   string                           `json:"id"`
+	Name                 string                           `json:"name"`
+	State                string                           `json:"state"`
+	Provider             string                           `json:"provider,omitempty"`
+	Kind                 string                           `json:"kind,omitempty"`
+	Region               string                           `json:"region,omitempty"`
+	AccountID            string                           `json:"accountId,omitempty"`
+	Project              string                           `json:"project,omitempty"`
+	ResourceID           string                           `json:"resourceID,omitempty"`
+	SnapshotIDs          []string                         `json:"snapshotIds,omitempty"`
+	Direct               bool                             `json:"direct,omitempty"`
+	Target               string                           `json:"target,omitempty"`
+	WindowsMode          string                           `json:"windowsMode,omitempty"`
+	ServerType           string                           `json:"serverType,omitempty"`
+	Architecture         string                           `json:"architecture,omitempty"`
+	PromotedAt           string                           `json:"promotedAt,omitempty"`
+	FastSnapshotRestores []CoordinatorFastSnapshotRestore `json:"fastSnapshotRestores,omitempty"`
+}
+
+type CoordinatorFastSnapshotRestore struct {
+	SnapshotID            string `json:"snapshotID"`
+	AvailabilityZone      string `json:"availabilityZone"`
+	State                 string `json:"state,omitempty"`
+	StateTransitionReason string `json:"stateTransitionReason,omitempty"`
 }
 
 type CoordinatorMacHost struct {
@@ -236,13 +244,15 @@ type CoordinatorAWSPolicyTarget struct {
 }
 
 type CoordinatorImageRef struct {
-	Provider     string
-	Region       string
-	Project      string
-	Kind         string
-	Target       string
-	ServerType   string
-	Architecture string
+	Provider               string
+	Region                 string
+	Project                string
+	Kind                   string
+	Target                 string
+	ServerType             string
+	Architecture           string
+	FastSnapshotRestore    bool
+	FastSnapshotRestoreAZs []string
 }
 
 type CoordinatorGitHubLoginStart struct {
@@ -1228,6 +1238,14 @@ func imagePath(imageID, action string, refs ...CoordinatorImageRef) string {
 		}
 		if strings.TrimSpace(ref.Architecture) != "" {
 			values.Set("architecture", strings.TrimSpace(ref.Architecture))
+		}
+		if ref.FastSnapshotRestore {
+			values.Set("fastSnapshotRestore", "true")
+		}
+		for _, zone := range ref.FastSnapshotRestoreAZs {
+			if strings.TrimSpace(zone) != "" {
+				values.Add("fsrAz", strings.TrimSpace(zone))
+			}
 		}
 	}
 	if encoded := values.Encode(); encoded != "" {

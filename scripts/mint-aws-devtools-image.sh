@@ -17,6 +17,8 @@ reboot_settle_seconds="${CRABBOX_IMAGE_REBOOT_SETTLE_SECONDS:-30}"
 reboot_ready_settle_seconds="${CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS:-180}"
 windows_warmup_wait_timeout="${CRABBOX_IMAGE_WINDOWS_WARMUP_WAIT_TIMEOUT:-15m}"
 windows_warmup_settle_seconds="${CRABBOX_IMAGE_WINDOWS_WARMUP_SETTLE_SECONDS:-90}"
+fast_snapshot_restore="${CRABBOX_IMAGE_FAST_SNAPSHOT_RESTORE:-0}"
+fast_snapshot_restore_azs="${CRABBOX_IMAGE_FAST_SNAPSHOT_RESTORE_AZS:-}"
 run="${CRABBOX_IMAGE_RUN:-0}"
 promote="${CRABBOX_IMAGE_PROMOTE:-1}"
 keep_lease="${CRABBOX_IMAGE_KEEP_LEASE:-0}"
@@ -42,6 +44,9 @@ Flags:
   --name NAME           image name
   --run                 allow paid lease/image work
   --no-promote          smoke candidate only
+  --fast-snapshot-restore
+                       enable AWS Fast Snapshot Restore when promoting
+  --fsr-az AZ           availability zone for Fast Snapshot Restore; repeatable
   --keep-lease          keep proof leases alive
   --desktop             request desktop bootstrap
   --no-desktop          do not request desktop bootstrap
@@ -62,6 +67,8 @@ Useful env:
   CRABBOX_IMAGE_REBOOT_READY_SETTLE_SECONDS
   CRABBOX_IMAGE_WINDOWS_WARMUP_WAIT_TIMEOUT
   CRABBOX_IMAGE_WINDOWS_WARMUP_SETTLE_SECONDS
+  CRABBOX_IMAGE_FAST_SNAPSHOT_RESTORE
+  CRABBOX_IMAGE_FAST_SNAPSHOT_RESTORE_AZS
 USAGE
 }
 
@@ -99,6 +106,19 @@ while [[ "$#" -gt 0 ]]; do
     --no-promote)
       promote=0
       shift
+      ;;
+    --fast-snapshot-restore)
+      fast_snapshot_restore=1
+      shift
+      ;;
+    --fsr-az)
+      [[ "$#" -ge 2 ]] || { printf '%s requires a value\n' "$1" >&2; exit 2; }
+      if [[ -n "$fast_snapshot_restore_azs" ]]; then
+        fast_snapshot_restore_azs+=",$2"
+      else
+        fast_snapshot_restore_azs="$2"
+      fi
+      shift 2
       ;;
     --keep-lease)
       keep_lease=1
@@ -558,6 +578,7 @@ AWS devtools image mint
   type:   ${server_type:-auto}
   prep:   $prep_script
   proof:  desktop=$desktop browser=$browser promote=$promote
+  fsr:    enabled=$fast_snapshot_restore azs=${fast_snapshot_restore_azs:-auto}
   paid:   run=$run keep_lease=$keep_lease
 EOF
 
@@ -592,8 +613,17 @@ if [[ "$promote" != "1" ]]; then
   exit 0
 fi
 
-promote_args=(image promote "$ami_id" --target "$target" --json)
+promote_args=(image promote --target "$target" --json)
 [[ -n "$region" ]] && promote_args+=(--region "$region")
+if [[ "$fast_snapshot_restore" == "1" ]]; then
+  promote_args+=(--fast-snapshot-restore)
+  IFS=',' read -r -a fsr_az_values <<<"$fast_snapshot_restore_azs"
+  for fsr_az in "${fsr_az_values[@]}"; do
+    [[ -n "$fsr_az" ]] || continue
+    promote_args+=(--fsr-az "$fsr_az")
+  done
+fi
+promote_args+=("$ami_id")
 run_cmd "$CRABBOX_BIN" "${promote_args[@]}"
 
 if [[ "$keep_lease" != "1" ]]; then

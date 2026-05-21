@@ -11,6 +11,7 @@ export interface Env {
   CRABBOX_AWS_INSTANCE_PROFILE?: string;
   CRABBOX_AWS_ROOT_GB?: string;
   CRABBOX_AWS_SSH_CIDRS?: string;
+  CRABBOX_AWS_FAST_SNAPSHOT_RESTORE_AZS?: string;
   CRABBOX_HOST_ID?: string;
   CRABBOX_AWS_MAC_HOST_ID?: string;
   CRABBOX_AWS_ORPHAN_SWEEP_ENABLED?: string;
@@ -284,6 +285,14 @@ export interface ProviderImage {
   project?: string;
   resourceID?: string;
   snapshots?: string[];
+  fastSnapshotRestores?: ProviderFastSnapshotRestore[];
+}
+
+export interface ProviderFastSnapshotRestore {
+  snapshotID: string;
+  availabilityZone: string;
+  state?: string;
+  stateTransitionReason?: string;
 }
 
 export interface PromotedImageRecord extends ProviderImage {

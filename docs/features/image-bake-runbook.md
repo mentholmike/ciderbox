@@ -206,6 +206,20 @@ scripts/mint-aws-devtools-image.sh \
   --run
 ```
 
+For hot maintainer lanes that need lower first-boot variance, enable Fast
+Snapshot Restore only in the availability zones you will actually launch from:
+
+```bash
+scripts/mint-aws-devtools-image.sh \
+  --target windows \
+  --region us-west-2 \
+  --type m7i.large \
+  --fast-snapshot-restore \
+  --fsr-az us-west-2a \
+  --fsr-az us-west-2b \
+  --run
+```
+
 The Linux prep script installs common CLI/build tooling, GitHub CLI, Node 24,
 corepack/pnpm, Chrome or Chromium for browser lanes, desktop/VNC helpers, Docker
 Engine, Compose, buildx, and a small default Docker image set. The Windows prep
@@ -252,8 +266,11 @@ EBS snapshots hydrate lazily by default, so new regions or availability zones
 can still pay first-read penalties. For hot production lanes, keep capacity in
 the same region as the promoted AMI, track the wrapper timing logs, and enable
 AWS Fast Snapshot Restore on the backing snapshots in the availability zones
-where the image must boot immediately. Treat snapshot warmup as a separate
-provider-cost decision; do not enable it casually for every candidate image.
+where the image must boot immediately. Use `crabbox image promote
+--fast-snapshot-restore --fsr-az <az>` directly or pass
+`--fast-snapshot-restore --fsr-az <az>` to the AWS developer-image wrapper.
+Treat snapshot warmup as a separate provider-cost decision; do not enable it
+casually for every candidate image.
 
 ## macOS Images
 

@@ -148,6 +148,7 @@ const awsProviderPolicyJSON = `{
         "ec2:DescribeInstances",
         "ec2:DescribeKeyPairs",
         "ec2:DescribeSecurityGroups",
+        "ec2:DescribeFastSnapshotRestores",
         "ec2:DescribeSnapshots",
         "ec2:DescribeSubnets",
         "ec2:DescribeVpcs",
@@ -170,6 +171,7 @@ const awsProviderPolicyJSON = `{
         "ec2:DeregisterImage",
         "ec2:CreateSnapshot",
         "ec2:DeleteSnapshot",
+        "ec2:EnableFastSnapshotRestores",
         "ec2:CreateTags"
       ],
       "Resource": "*"

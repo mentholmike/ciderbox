@@ -7,6 +7,7 @@
 - Added `provider: runpod` for RunPod public TCP SSH leases through the RunPod REST API, including Crabbox sync/run, `crabbox ssh`, `crabbox doctor`, and provider docs. Thanks @zozo123.
 - Added a thin macOS developer-tools image mint wrapper that keeps paid host allocation explicit while wiring the reusable prep script, promotion, checkpoint proof, and lifecycle evidence defaults.
 - Added AWS Linux and Windows developer-image prep scripts plus a guarded mint wrapper for baking Docker, Node 24, pnpm, GitHub CLI, and common developer tooling into fast-booting Crabbox AMIs.
+- Added explicit AWS Fast Snapshot Restore promotion support for hot developer-image AMIs via `crabbox image promote --fast-snapshot-restore --fsr-az <az>` and the AWS developer-image mint wrapper.
 - Added a light/dark mode toggle to the Crabbox documentation site that defaults to the system color scheme, persists the choice in local storage, and applies before first paint to avoid a flash.
 
 ### Changed

@@ -123,6 +123,7 @@ func TestAdminAWSPolicyPrintsProviderPermissions(t *testing.T) {
 		`"ec2:CreateImage"`,
 		`"ec2:RegisterImage"`,
 		`"ec2:DeleteSnapshot"`,
+		`"ec2:EnableFastSnapshotRestores"`,
 		`"servicequotas:GetServiceQuota"`,
 	} {
 		if !strings.Contains(out, want) {

@@ -125,7 +125,20 @@ test("AWS devtools mint wrapper defaults to dry plan", async () => {
 test("AWS devtools mint wrapper runs linux source candidate and promoted proof", async () => {
   const fake = await setupFakeCrabbox();
   const result = await runScript(
-    ["--target", "linux", "--region", "us-west-2", "--type", "m7i.large", "--run", "--prep-script", fake.linuxPrep],
+    [
+      "--target",
+      "linux",
+      "--region",
+      "us-west-2",
+      "--type",
+      "m7i.large",
+      "--run",
+      "--fast-snapshot-restore",
+      "--fsr-az",
+      "us-west-2a",
+      "--prep-script",
+      fake.linuxPrep,
+    ],
     {
       CRABBOX_BIN: fake.fake,
       CRABBOX_FAKE_LOG: fake.log,
@@ -146,7 +159,7 @@ test("AWS devtools mint wrapper runs linux source candidate and promoted proof",
   assert.match(log, /run --provider aws --target linux --id cbx_source --no-sync --script/);
   assert.match(log, /docker image inspect hello-world ubuntu:24\.04 node:24-bookworm/);
   assert.match(log, /image create --id cbx_source --name crabbox-linux-devtools-/);
-  assert.match(log, /image promote ami-devtools --target linux --json --region us-west-2/);
+  assert.match(log, /image promote --target linux --json --region us-west-2 --fast-snapshot-restore --fsr-az us-west-2a ami-devtools/);
 });
 
 test("AWS devtools mint wrapper maps windows flags", async () => {

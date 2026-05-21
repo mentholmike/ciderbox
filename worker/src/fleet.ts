@@ -54,6 +54,7 @@ import type {
   LeaseShareRole,
   LeaseTelemetry,
   Provider,
+  ProviderFastSnapshotRestore,
   ProviderImage,
   ProviderMachine,
   ProvisioningAttempt,
@@ -3742,11 +3743,15 @@ export class FleetDurableObject implements DurableObject {
         region?: string;
         serverType?: string;
         architecture?: string;
+        fastSnapshotRestore?: unknown;
+        fastSnapshotRestoreAvailabilityZones?: string[];
       } = await readJson<{
         target?: string;
         region?: string;
         serverType?: string;
         architecture?: string;
+        fastSnapshotRestore?: unknown;
+        fastSnapshotRestoreAvailabilityZones?: string[];
       }>(request).catch(() => ({}));
       const target = normalizeAWSImageTarget(
         input.target ?? url.searchParams.get("target") ?? known?.target ?? "linux",
@@ -3776,6 +3781,27 @@ export class FleetDurableObject implements DurableObject {
       if (architecture) {
         metadata.architecture = architecture;
       }
+      const fastSnapshotRestore = boolFromUnknown(
+        input.fastSnapshotRestore ?? url.searchParams.get("fastSnapshotRestore"),
+      );
+      const fastSnapshotRestoreAvailabilityZones = fastSnapshotRestore
+        ? fastSnapshotRestoreAZs(
+            input.fastSnapshotRestoreAvailabilityZones,
+            url,
+            imageRegion,
+            this.env,
+          )
+        : [];
+      if (fastSnapshotRestore && fastSnapshotRestoreAvailabilityZones.length === 0) {
+        return json(
+          {
+            error: "invalid_fast_snapshot_restore_zones",
+            message:
+              "Fast Snapshot Restore promotion requires at least one availability zone via fsrAz, fastSnapshotRestoreAvailabilityZones, CRABBOX_AWS_FAST_SNAPSHOT_RESTORE_AZS, or CRABBOX_CAPACITY_AVAILABILITY_ZONES",
+          },
+          { status: 400 },
+        );
+      }
       const image = mergeAWSImageMetadata(
         await this.provider("aws", imageRegion).getImage(decodedImageID),
         metadata,
@@ -3795,8 +3821,25 @@ export class FleetDurableObject implements DurableObject {
           { status: 400 },
         );
       }
+      if (fastSnapshotRestoreAvailabilityZones.length > 0 && (image.snapshots ?? []).length === 0) {
+        return json(
+          {
+            error: "image_snapshots_missing",
+            message: `image ${decodedImageID} has no EBS snapshots to enable for Fast Snapshot Restore`,
+          },
+          { status: 409 },
+        );
+      }
+      const fastSnapshotRestores =
+        fastSnapshotRestoreAvailabilityZones.length > 0
+          ? await this.provider("aws", imageRegion).enableFastSnapshotRestore?.(
+              image.snapshots ?? [],
+              fastSnapshotRestoreAvailabilityZones,
+            )
+          : undefined;
       const promoted: PromotedImageRecord = {
         ...image,
+        ...(fastSnapshotRestores ? { fastSnapshotRestores } : {}),
         target,
         region: image.region ?? imageRegion,
         architecture:
@@ -4562,6 +4605,43 @@ function awsImageArchitectureForTarget(target: TargetOS, serverType: string): st
 function sanitizeAWSRegion(value: string): string {
   const region = value.trim().toLowerCase();
   return /^[a-z]{2}-[a-z-]+-[0-9]$/.test(region) ? region : "";
+}
+
+function boolFromUnknown(value: unknown): boolean {
+  if (value === true) return true;
+  if (value === false || value === undefined || value === null) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function fastSnapshotRestoreAZs(
+  inputZones: string[] | undefined,
+  url: URL,
+  region: string,
+  env: Pick<Env, "CRABBOX_AWS_FAST_SNAPSHOT_RESTORE_AZS" | "CRABBOX_CAPACITY_AVAILABILITY_ZONES">,
+): string[] {
+  const zones = [
+    ...(inputZones ?? []),
+    ...url.searchParams.getAll("fsrAz"),
+    ...splitCommaList(url.searchParams.get("fsrAzs") ?? ""),
+    ...splitCommaList(env.CRABBOX_AWS_FAST_SNAPSHOT_RESTORE_AZS ?? ""),
+    ...splitCommaList(env.CRABBOX_CAPACITY_AVAILABILITY_ZONES ?? ""),
+  ];
+  return [...new Set(zones.map((zone) => zone.trim()).filter((zone) => validAWSAZ(zone, region)))];
+}
+
+function splitCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function validAWSAZ(zone: string, region: string): boolean {
+  if (!/^[a-z]{2}-[a-z-]+-[0-9][a-z]$/.test(zone)) {
+    return false;
+  }
+  return region === "" || zone.startsWith(region);
 }
 
 function sanitizeMacHostQuotaError(message: string): string {
@@ -6116,6 +6196,10 @@ interface CloudProvider {
   ): Promise<ProviderImage>;
   getImage(imageID: string, kind?: string): Promise<ProviderImage>;
   deleteImage(imageID: string, kind?: string): Promise<void>;
+  enableFastSnapshotRestore?(
+    snapshotIDs: string[],
+    availabilityZones: string[],
+  ): Promise<ProviderFastSnapshotRestore[]>;
   deleteSSHKey(name: string): Promise<void>;
   hourlyPriceUSD(
     serverType: string,
@@ -6417,6 +6501,13 @@ class AWSProvider implements CloudProvider {
 
   getImage(imageID: string): Promise<ProviderImage> {
     return this.client.getImage(imageID);
+  }
+
+  enableFastSnapshotRestore(
+    snapshotIDs: string[],
+    availabilityZones: string[],
+  ): Promise<ProviderFastSnapshotRestore[]> {
+    return this.client.enableFastSnapshotRestore(snapshotIDs, availabilityZones);
   }
 
   deleteImage(imageID: string): Promise<void> {

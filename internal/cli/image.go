@@ -51,12 +51,15 @@ func (a App) imagePromote(ctx context.Context, args []string) error {
 	serverType := fs.String("type", "", "AWS instance type the AMI boots on, for example mac1.metal")
 	serverTypeAlias := fs.String("server-type", "", "alias for --type")
 	architecture := fs.String("architecture", "", "AWS AMI architecture, for example x86_64_mac or arm64_mac")
+	fastSnapshotRestore := fs.Bool("fast-snapshot-restore", false, "enable AWS Fast Snapshot Restore for the promoted AMI snapshots")
+	var fastSnapshotRestoreAZs stringListFlag
+	fs.Var(&fastSnapshotRestoreAZs, "fsr-az", "availability zone for Fast Snapshot Restore; repeatable")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return exit(2, "usage: crabbox image promote <ami-id> [--target linux|macos|windows] [--region <aws-region>] [--type <instance-type>] [--architecture <arch>]")
+		return exit(2, "usage: crabbox image promote <ami-id> [--target linux|macos|windows] [--region <aws-region>] [--type <instance-type>] [--architecture <arch>] [--fast-snapshot-restore --fsr-az <az>]")
 	}
 	if *serverType == "" {
 		*serverType = *serverTypeAlias
@@ -66,11 +69,13 @@ func (a App) imagePromote(ctx context.Context, args []string) error {
 		return err
 	}
 	image, err := coord.PromoteImage(ctx, fs.Arg(0), CoordinatorImageRef{
-		Provider:     "aws",
-		Region:       *region,
-		Target:       *target,
-		ServerType:   *serverType,
-		Architecture: *architecture,
+		Provider:               "aws",
+		Region:                 *region,
+		Target:                 *target,
+		ServerType:             *serverType,
+		Architecture:           *architecture,
+		FastSnapshotRestore:    *fastSnapshotRestore,
+		FastSnapshotRestoreAZs: fastSnapshotRestoreAZs,
 	})
 	if err != nil {
 		return err

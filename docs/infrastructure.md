@@ -242,8 +242,10 @@ The AWS provider imports the local SSH public key as an EC2 key pair when needed
 Grant the Worker AWS principal EC2 launch/list/tag/terminate permissions for
 instances, key pairs, and managed security groups, plus `CreateImage`,
 `DeregisterImage`, `RegisterImage`, `DescribeSnapshots`, `DeleteSnapshot`,
-and `servicequotas:GetServiceQuota`. The image permissions are required for
-`crabbox image`, native AWS checkpoints, and macOS image bake validation.
+`DescribeFastSnapshotRestores`, `EnableFastSnapshotRestores`, and
+`servicequotas:GetServiceQuota`. The image permissions are required for
+`crabbox image`, native AWS checkpoints, macOS image bake validation, and
+explicit Fast Snapshot Restore promotion for hot AMIs.
 Service Quotas access is best-effort: when it is available, Crabbox can skip
 known quota-impossible instance types before calling `RunInstances`; when it
 is missing, EC2 launch errors are still classified after the failed call.

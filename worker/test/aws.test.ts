@@ -189,6 +189,63 @@ describe("aws provider", () => {
     expect(calls).not.toContain("DescribeVpcs:::");
   });
 
+  it("enables Fast Snapshot Restore for AMI snapshots in selected zones", async () => {
+    const calls: Array<Record<string, string>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        const params = Object.fromEntries(new URLSearchParams(await request.clone().text()));
+        calls.push(params);
+        if (params.Action === "EnableFastSnapshotRestores") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<EnableFastSnapshotRestoresResponse>
+  <enableFastSnapshotRestoreSuccessSet>
+    <item>
+      <snapshotId>snap-root</snapshotId>
+      <availabilityZone>us-west-2a</availabilityZone>
+      <state>enabling</state>
+    </item>
+    <item>
+      <snapshotId>snap-root</snapshotId>
+      <availabilityZone>us-west-2b</availabilityZone>
+      <state>enabled</state>
+    </item>
+  </enableFastSnapshotRestoreSuccessSet>
+</EnableFastSnapshotRestoresResponse>`);
+        }
+        return ec2XMLResponse(
+          `<Response><Errors><Error><Code>Unexpected</Code><Message>${params.Action}</Message></Error></Errors></Response>`,
+          500,
+        );
+      }),
+    );
+    const client = new EC2SpotClient(
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "secret",
+      } as never,
+      "us-west-2",
+    );
+
+    const records = await client.enableFastSnapshotRestore(
+      ["snap-root", "snap-root"],
+      ["us-west-2a", "us-west-2b"],
+    );
+
+    expect(calls[0]).toMatchObject({
+      Action: "EnableFastSnapshotRestores",
+      "SourceSnapshotId.1": "snap-root",
+      "AvailabilityZone.1": "us-west-2a",
+      "AvailabilityZone.2": "us-west-2b",
+    });
+    expect(calls[0]).not.toHaveProperty("SourceSnapshotId.2");
+    expect(records).toEqual([
+      { snapshotID: "snap-root", availabilityZone: "us-west-2a", state: "enabling" },
+      { snapshotID: "snap-root", availabilityZone: "us-west-2b", state: "enabled" },
+    ]);
+  });
+
   it("does not tag Spot request resources for On-Demand launches", () => {
     const spotParams: Record<string, string> = {};
     addRunInstancesTagSpecifications(spotParams, { crabbox: "true", Name: "crabbox-cbx" }, "spot");
