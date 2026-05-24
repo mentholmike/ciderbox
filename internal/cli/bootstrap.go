@@ -710,7 +710,7 @@ func cloudInitOptionalWriteFiles(cfg Config) string {
         xfconf-query -c xsettings -p /Net/IconThemeName -n -t string -s Adwaita >/dev/null 2>&1 || true
         xfconf-query -c xsettings -p /Gtk/ApplicationPreferDarkTheme -n -t bool -s true >/dev/null 2>&1 || true
         xfconf-query -c xfwm4 -p /general/theme -n -t string -s "$xfwm_theme" >/dev/null 2>&1 || true
-        for panel in $(xfconf-query -c xfce4-panel -l 2>/dev/null | sed -n 's#^/panels/panel-\([0-9][0-9]*\)$#\1#p; s#^/panels/panel-\([0-9][0-9]*\)/.*#\1#p' | sort -u); do
+        for panel in $(xfconf-query -c xfce4-panel -l 2>/dev/null | sed -n -e 's#^/panels/panel-\([0-9][0-9]*\)$#\1#p' -e 's#^/panels/panel-\([0-9][0-9]*\)/.*#\1#p' | sort -u); do
           xfconf-query -c xfce4-panel -p "/panels/panel-$panel/background-style" -n -t int -s 1 >/dev/null 2>&1 || true
           xfconf-query -c xfce4-panel -p "/panels/panel-$panel/background-rgba" -n -t double -t double -t double -t double -s 0.06 -s 0.07 -s 0.09 -s 1.0 >/dev/null 2>&1 || true
         done
