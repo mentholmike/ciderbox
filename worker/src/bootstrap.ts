@@ -849,6 +849,27 @@ function optionalWriteFiles(config: LeaseConfig): string {
         color: $panel_css_fg;
         text-shadow: none;
       }
+      menubar,
+      menubar > menuitem,
+      menubar > menuitem label {
+        background: $panel_css_bg;
+        background-image: none;
+        background-color: $panel_css_bg;
+        border-color: transparent;
+        box-shadow: none;
+        color: $panel_css_fg;
+        text-shadow: none;
+        -gtk-icon-shadow: none;
+      }
+      menubar > menuitem:hover,
+      menubar > menuitem:hover label,
+      menubar > menuitem:selected,
+      menubar > menuitem:selected label {
+        background: $panel_css_bg;
+        background-image: none;
+        background-color: $panel_css_bg;
+        color: $panel_css_fg;
+      }
       /* crabbox desktop theme end */
       EOF
       mv "$css_tmp" "$css_file"
