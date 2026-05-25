@@ -146,6 +146,13 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain("(umask 077 && openssl rand -base64 18 > /var/lib/crabbox/vnc.password)");
     expect(got).toContain("-rfbauth /var/lib/crabbox/vnc.pass");
     expect(got).toContain("ss -ltn | grep -q '127.0.0.1:5900'");
+    expect(got).toContain("systemctl disable --now crabbox-wayvnc.service 2>/dev/null || true");
+    expect(got).toContain(
+      "systemctl enable crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service",
+    );
+    expect(got).toContain(
+      "systemctl restart crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service",
+    );
   });
 
   it("adds Wayland desktop services when requested", () => {
@@ -171,10 +178,13 @@ describe("cloud-init bootstrap", () => {
       'wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=30',
     );
     expect(got).toContain("systemctl is-active --quiet crabbox-wayvnc.service");
-    expect(got).toContain("systemctl enable --now crabbox-desktop.service crabbox-wayvnc.service");
+    expect(got).toContain(
+      "systemctl disable --now crabbox-xvfb.service crabbox-desktop-session.service crabbox-x11vnc.service 2>/dev/null || true",
+    );
+    expect(got).toContain("systemctl enable crabbox-desktop.service crabbox-wayvnc.service");
+    expect(got).toContain("systemctl restart crabbox-desktop.service crabbox-wayvnc.service");
     expect(got).toContain("--ozone-platform=wayland");
     expect(got).not.toContain("startxfce4");
-    expect(got).not.toContain("crabbox-x11vnc.service");
     expect(got).not.toContain("x11vnc -storepasswd");
     expect(got).not.toContain("XDG_RUNTIME_DIR=/tmp/crabbox-runtime-1000");
     expect(got).not.toContain("\nset $mod");

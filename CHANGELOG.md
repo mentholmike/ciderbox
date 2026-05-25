@@ -12,6 +12,7 @@
 ### Fixed
 
 - Fixed AWS Linux desktop bootstrap so generated theme helpers include the latest WebVNC desktop styling on fresh leases.
+- Fixed AWS Linux desktop bootstrap so existing desktop services are restarted after profile changes instead of leaving stale XFCE/X11 services running under a Wayland profile.
 - Fixed Linux WebVNC desktop panel styling so status and taskbar items avoid harsh high-contrast borders in dark mode.
 - Fixed Linux WebVNC terminal windows so the XFCE Terminal menu bar follows the dark desktop theme.
 

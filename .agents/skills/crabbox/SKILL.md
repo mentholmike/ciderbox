@@ -250,8 +250,10 @@ For UI QA proof, use `crabbox artifacts collect` instead of ad hoc screenshots
 and shell recordings. It can bundle screenshots, MP4 recordings, trimmed GIFs,
 desktop doctor output, WebVNC status, run logs, and metadata, then
 `crabbox artifacts publish --pr <n>` can publish inline-ready Markdown through
-the configured coordinator artifact backend. Use explicit `--storage s3`,
-`--storage r2`, or `--storage local` only as a local fallback.
+the configured coordinator artifact backend and an artifact manifest URL. Never
+push screenshots, videos, proof images, or proof assets to a product repo branch
+or temporary artifact branch. Use explicit `--storage s3`, `--storage r2`, or
+`--storage local` only as a local fallback.
 
 ## Run Inspection Workflow
 

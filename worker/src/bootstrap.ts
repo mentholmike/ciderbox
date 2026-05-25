@@ -1063,7 +1063,9 @@ function optionalBootstrap(config: LeaseConfig): string {
     chown -R crabbox:crabbox /home/crabbox/.config/sway /home/crabbox/.config/wayvnc /var/lib/crabbox/desktop.env
     chmod 0644 /var/lib/crabbox/desktop.env
     systemctl daemon-reload
-    systemctl enable --now crabbox-desktop.service crabbox-wayvnc.service`);
+    systemctl disable --now crabbox-xvfb.service crabbox-desktop-session.service crabbox-x11vnc.service 2>/dev/null || true
+    systemctl enable crabbox-desktop.service crabbox-wayvnc.service
+    systemctl restart crabbox-desktop.service crabbox-wayvnc.service`);
   } else if (config.desktop) {
     parts.push(`    retry apt-get install -y --no-install-recommends xvfb xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-terminal xfconf xfce4-settings x11vnc xauth dbus-x11 x11-xserver-utils xterm scrot ffmpeg xdotool wmctrl xclip xsel fonts-dejavu-core fonts-liberation iproute2 openssl arc-theme
     install -d -m 0750 -o crabbox -g crabbox /var/lib/crabbox
@@ -1078,7 +1080,9 @@ function optionalBootstrap(config: LeaseConfig): string {
     chmod 0644 /var/lib/crabbox/desktop.env
     CRABBOX_DESKTOP_USER=crabbox /usr/local/bin/crabbox-configure-desktop-theme
     systemctl daemon-reload
-    systemctl enable --now crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service`);
+    systemctl disable --now crabbox-wayvnc.service 2>/dev/null || true
+    systemctl enable crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service
+    systemctl restart crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service`);
   }
   if (config.browser) {
     parts.push(`    retry apt-get install -y --no-install-recommends gnupg build-essential python3

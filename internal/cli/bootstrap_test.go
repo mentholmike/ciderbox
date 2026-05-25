@@ -127,6 +127,9 @@ func TestCloudInitDesktopProfile(t *testing.T) {
 		"x11vnc -storepasswd",
 		"-rfbauth /var/lib/crabbox/vnc.pass",
 		"ss -ltn | grep -q '127.0.0.1:5900'",
+		"systemctl disable --now crabbox-wayvnc.service 2>/dev/null || true",
+		"systemctl enable crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service",
+		"systemctl restart crabbox-xvfb.service crabbox-desktop.service crabbox-desktop-session.service crabbox-x11vnc.service",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("cloudInit(desktop) missing %q", want)
@@ -159,7 +162,9 @@ func TestCloudInitWaylandDesktopProfile(t *testing.T) {
 		`WAYLAND_DISPLAY="${socket##*/}"`,
 		"wayvnc --config \"$HOME/.config/wayvnc/config\" --render-cursor --max-fps=30",
 		"systemctl is-active --quiet crabbox-wayvnc.service",
-		"systemctl enable --now crabbox-desktop.service crabbox-wayvnc.service",
+		"systemctl disable --now crabbox-xvfb.service crabbox-desktop-session.service crabbox-x11vnc.service 2>/dev/null || true",
+		"systemctl enable crabbox-desktop.service crabbox-wayvnc.service",
+		"systemctl restart crabbox-desktop.service crabbox-wayvnc.service",
 		"--ozone-platform=wayland",
 	} {
 		if !strings.Contains(got, want) {
@@ -168,9 +173,7 @@ func TestCloudInitWaylandDesktopProfile(t *testing.T) {
 	}
 	for _, notWant := range []string{
 		"startxfce4",
-		"crabbox-x11vnc.service",
 		"x11vnc -storepasswd",
-		"crabbox-xvfb.service",
 		"XDG_RUNTIME_DIR=/tmp/crabbox-runtime-1000",
 		"\nset $mod",
 		"\nSWAY",
