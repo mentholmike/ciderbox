@@ -100,6 +100,92 @@ func TestTimingJSONIncludesFailureClassification(t *testing.T) {
 	}
 }
 
+func TestPrintRunFailureDigest(t *testing.T) {
+	stderrTail := newStreamTailBuffer(40)
+	_, _ = stderrTail.Write([]byte("setup ok\nunit failed\n"))
+	var buf bytes.Buffer
+	printRunFailureDigest(&buf, runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		Slug:           "blue-lobster",
+		RunID:          "run_123",
+		CommandDisplay: "go test ./...",
+		Classification: FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"},
+		Phases:         []TimingPhase{{Name: "test"}},
+	}, newStreamTailBuffer(40), stderrTail, "", "")
+	out := buf.String()
+	for _, want := range []string{
+		"failure digest",
+		"phase: test",
+		"area: user_command",
+		"next: crabbox logs run_123 --tail 80",
+		"next: crabbox doctor --from-run run_123",
+		"next: crabbox run --id blue-lobster --fresh-sync -- go test ./...",
+		"tail stderr:",
+		"unit failed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("digest missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFailureDigestSuppressesScriptRetryCommand(t *testing.T) {
+	commands := failureDigestNextCommands(runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		CommandDisplay: "'--script=./smoke test.sh' arg",
+		ScriptMode:     true,
+		Classification: FailureClassification{RetryLikely: "unknown"},
+	}, "unknown")
+	for _, command := range commands {
+		if strings.Contains(command, "crabbox run") {
+			t.Fatalf("script retry command should be suppressed: %v", commands)
+		}
+	}
+}
+
+func TestFailureDigestRoutesNextCommands(t *testing.T) {
+	commands := failureDigestNextCommands(runFailureDigestInput{
+		Provider:       "aws",
+		TargetOS:       targetWindows,
+		WindowsMode:    windowsModeWSL2,
+		LeaseID:        "cbx_123",
+		CommandDisplay: "go test ./...",
+		Classification: FailureClassification{RetryLikely: "unknown"},
+		StopCommand:    "crabbox stop --provider aws --target windows --windows-mode wsl2 cbx_123",
+	}, "unknown")
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{
+		"crabbox ssh --provider aws --target windows --windows-mode wsl2 --id cbx_123",
+		"crabbox run --provider aws --target windows --windows-mode wsl2 --id cbx_123 --fresh-sync -- go test ./...",
+		"crabbox stop --provider aws --target windows --windows-mode wsl2 cbx_123",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("commands missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestFailureDigestUsesSSHCompatibleRouting(t *testing.T) {
+	commands := failureDigestNextCommands(runFailureDigestInput{
+		Provider:       "proxmox",
+		LeaseID:        "cbx_123",
+		CommandDisplay: "go test ./...",
+		RoutingArgs:    []string{"--provider", "proxmox", "--proxmox-api-url", "https://pve.example"},
+		SSHRoutingArgs: []string{"--provider", "proxmox"},
+		Classification: FailureClassification{RetryLikely: "unknown"},
+		StopCommand:    "crabbox stop --provider proxmox --proxmox-api-url https://pve.example cbx_123",
+	}, "unknown")
+	if len(commands) < 3 {
+		t.Fatalf("commands=%v", commands)
+	}
+	if strings.Contains(commands[0], "proxmox-api-url") {
+		t.Fatalf("ssh command contains provider-specific flag: %q", commands[0])
+	}
+	if !strings.Contains(commands[1], "--proxmox-api-url") || !strings.Contains(commands[2], "--proxmox-api-url") {
+		t.Fatalf("run/stop commands lost provider routing: %v", commands)
+	}
+}
+
 func TestFailureTailRedactsHTMLAuthBody(t *testing.T) {
 	tail := newStreamTailBuffer(40)
 	_, _ = tail.Write([]byte("<!doctype html><html><head><title>Cloudflare Access</title></head><body>login</body></html>\n"))
