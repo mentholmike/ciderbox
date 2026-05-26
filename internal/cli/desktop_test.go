@@ -49,7 +49,11 @@ func TestDesktopBrowserDarkModeCommandPatchesManagedChromiumWrapper(t *testing.T
 		"--blink-settings=preferredColorScheme=1",
 		"--force-dark-mode --enable-features=WebUIDarkMode --blink-settings=preferredColorScheme=2",
 		`--user-data-dir=\"\$profile\"`,
-		`CRABBOX_DESKTOP_ENV=(wayland|gnome)`,
+		`CRABBOX_DESKTOP_ENV=gnome`,
+		`CRABBOX_DESKTOP_ENV=wayland`,
+		`export DISPLAY="${DISPLAY:-:0}"`,
+		`export GDK_BACKEND=x11 MOZ_ENABLE_WAYLAND=0`,
+		"--ozone-platform=x11",
 		"--ozone-platform=wayland",
 		"sudo install -m 0755",
 	} {
@@ -103,6 +107,8 @@ func TestDesktopLinuxTerminalSupportsWaylandAndX11(t *testing.T) {
 	joined := strings.Join(got, " ")
 	for _, want := range []string{
 		"CRABBOX_DESKTOP_ENV:-xfce",
+		"export DISPLAY=\"${DISPLAY:-:0}\"",
+		"export GDK_BACKEND=x11 MOZ_ENABLE_WAYLAND=0",
 		"exec gnome-terminal --working-directory=\"$PWD\" -- bash -lc",
 		"exec foot --title='Crabbox Desktop'",
 		"monospace:size=16",

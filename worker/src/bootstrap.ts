@@ -615,6 +615,7 @@ function optionalWriteFiles(config: LeaseConfig): string {
   }
   if (config.desktopEnv !== "xfce") {
     const desktopEnv = config.desktopEnv;
+    const displayEnv = desktopEnv === "gnome" ? "      DISPLAY=:0\n" : "";
     return `  - path: /usr/local/bin/crabbox-start-wayland-desktop
     permissions: '0755'
     content: |
@@ -658,7 +659,7 @@ function optionalWriteFiles(config: LeaseConfig): string {
       CRABBOX_DESKTOP_ENV=${desktopEnv}
       XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR
       WAYLAND_DISPLAY=$WAYLAND_DISPLAY
-      EOF
+${displayEnv}      EOF
           exec /usr/bin/wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=30
         done
         sleep 1
@@ -1003,65 +1004,22 @@ function optionalBootstrap(config: LeaseConfig): string {
   if (config.desktop && config.desktopEnv !== "xfce") {
     const gnome = config.desktopEnv === "gnome";
     const packages = gnome
-      ? "labwc wayvnc waybar wlr-randr grim slurp wtype wl-clipboard dbus-user-session xwayland xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme fonts-dejavu-core fonts-liberation iproute2 openssl procps"
+      ? "labwc wayvnc gnome-panel wlr-randr grim slurp wtype wl-clipboard dbus-user-session xwayland xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme fonts-dejavu-core fonts-liberation iproute2 openssl procps"
       : "labwc wayvnc foot grim slurp wtype wl-clipboard wlr-randr dbus-user-session xwayland xdg-desktop-portal-wlr fonts-dejavu-core fonts-liberation iproute2 openssl procps";
-    const configDirs = gnome
-      ? "/home/crabbox/.config/labwc /home/crabbox/.config/wayvnc /home/crabbox/.config/waybar"
-      : "/home/crabbox/.config/labwc /home/crabbox/.config/wayvnc";
-    const waybarConfig = gnome
-      ? `    cat >/home/crabbox/.config/waybar/config <<'WAYBAR'
-    {
-      "layer": "top",
-      "position": "bottom",
-      "height": 34,
-      "modules-left": ["wlr/taskbar"],
-      "modules-center": [],
-      "modules-right": ["clock"],
-      "wlr/taskbar": {
-        "format": "{title}",
-        "tooltip": true,
-        "on-click": "activate",
-        "on-click-middle": "close"
-      },
-      "clock": {
-        "format": "{:%H:%M}"
-      }
-    }
-    WAYBAR
-    cat >/home/crabbox/.config/waybar/style.css <<'WAYBAR_CSS'
-    * {
-      font-family: Sans, sans-serif;
-      font-size: 13px;
-    }
-    window#waybar {
-      background: #20242b;
-      border-top: 1px solid #3b4048;
-      color: #f8fafc;
-    }
-    #taskbar button {
-      background: #2f3540;
-      border: 0;
-      border-radius: 0;
-      color: #f8fafc;
-      margin: 3px 2px;
-      padding: 0 10px;
-    }
-    #taskbar button.active {
-      background: #e5e7eb;
-      color: #111827;
-    }
-    #clock {
-      padding: 0 12px;
-    }
-    WAYBAR_CSS
-`
-      : "";
+    const desktopEnvExtra = gnome ? "    DISPLAY=:0\n" : "";
     const autostart = gnome
       ? `    wlr-randr --output HEADLESS-1 --custom-mode 1920x1080 >/tmp/crabbox-wlr-randr.log 2>&1 || true
+    for _ in $(seq 1 20); do
+      [ -S /tmp/.X11-unix/X0 ] && break
+      sleep 0.2
+    done
     export XDG_CURRENT_DESKTOP=GNOME
     export XDG_SESSION_DESKTOP=gnome
     export GTK_THEME=Adwaita
-    waybar --config "$HOME/.config/waybar/config" --style "$HOME/.config/waybar/style.css" >/tmp/crabbox-waybar.log 2>&1 &
+    export DISPLAY="\${DISPLAY:-:0}"
+    export GDK_BACKEND=x11
+    export MOZ_ENABLE_WAYLAND=0
+    gnome-panel >/tmp/crabbox-gnome-panel.log 2>&1 &
     gnome-terminal -- bash -l >/tmp/crabbox-gnome-terminal.log 2>&1 &
     nautilus --new-window "$HOME" >/tmp/crabbox-nautilus.log 2>&1 &
 `
@@ -1082,9 +1040,8 @@ ${autostart}    AUTOSTART
     crabbox_uid="$(id -u crabbox)"
     crabbox_runtime="/tmp/crabbox-runtime-$crabbox_uid"
     install -d -m 0700 -o crabbox -g crabbox "$crabbox_runtime"
-    install -d -m 0700 -o crabbox -g crabbox ${configDirs}
+    install -d -m 0700 -o crabbox -g crabbox /home/crabbox/.config/labwc /home/crabbox/.config/wayvnc
 ${labwcAutostart}
-${waybarConfig}
     cat >/home/crabbox/.config/wayvnc/config <<'WAYVNC'
     address=127.0.0.1
     port=5900
@@ -1095,6 +1052,7 @@ ${waybarConfig}
     CRABBOX_DESKTOP_ENV=${config.desktopEnv}
     XDG_RUNTIME_DIR=$crabbox_runtime
     WAYLAND_DISPLAY=wayland-1
+${desktopEnvExtra}
     EOF
     chown -R crabbox:crabbox /home/crabbox/.config /var/lib/crabbox/desktop.env
     chmod 0644 /var/lib/crabbox/desktop.env
@@ -1147,7 +1105,9 @@ ${waybarConfig}
       install -d -m 0755 /etc/opt/chrome/policies/managed /etc/chromium/policies/managed
       printf '%s\\n' '{"DefaultBrowserSettingEnabled":false,"MetricsReportingEnabled":false,"PromotionalTabsEnabled":false}' > /etc/opt/chrome/policies/managed/crabbox.json
       cp /etc/opt/chrome/policies/managed/crabbox.json /etc/chromium/policies/managed/crabbox.json
-      if [ -f /var/lib/crabbox/desktop.env ] && grep -Eq '^CRABBOX_DESKTOP_ENV=(wayland|gnome)$' /var/lib/crabbox/desktop.env; then
+      if [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=gnome$' /var/lib/crabbox/desktop.env; then
+        printf '%s\\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export DISPLAY="\${DISPLAY:-:0}"' 'export XDG_RUNTIME_DIR WAYLAND_DISPLAY' 'export GDK_BACKEND=x11 MOZ_ENABLE_WAYLAND=0' 'profile="\${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \\"$browser_path\\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\\"\\$profile\\" --ozone-platform=x11 --window-size=1500,900 --window-position=80,80 \\"\\$@\\"" > "$browser_wrapper"
+      elif [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=wayland$' /var/lib/crabbox/desktop.env; then
         printf '%s\\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export XDG_RUNTIME_DIR WAYLAND_DISPLAY' 'export MOZ_ENABLE_WAYLAND=1' 'profile="\${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \\"$browser_path\\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\\"\\$profile\\" --ozone-platform=wayland --window-size=1500,900 --window-position=80,80 \\"\\$@\\"" > "$browser_wrapper"
       else
         printf '%s\\n' '#!/bin/sh' 'profile="\${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \\"$browser_path\\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\\"\\$profile\\" --window-size=1500,900 --window-position=80,80 \\"\\$@\\"" > "$browser_wrapper"

@@ -407,11 +407,12 @@ func TestBootstrapScriptSupportsWaylandDesktop(t *testing.T) {
 		`display="${socket##*/}"`,
 		`desktop_env="${CRABBOX_DESKTOP_ENV:-wayland}"`,
 		`CRABBOX_DESKTOP_ENV='$desktop_env'`,
-		`labwc wayvnc waybar wlr-randr grim slurp wtype wl-clipboard`,
-		`"$home_dir/.config/waybar/config"`,
-		`"wlr/taskbar"`,
-		`waybar --config "$HOME/.config/waybar/config"`,
+		`labwc wayvnc gnome-panel wlr-randr grim slurp wtype wl-clipboard`,
 		`gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme`,
+		`DISPLAY=:0`,
+		`export GDK_BACKEND=x11`,
+		`export MOZ_ENABLE_WAYLAND=0`,
+		`gnome-panel >/tmp/crabbox-gnome-panel.log 2>&1 &`,
 		`gnome-terminal -- bash -l`,
 		`nautilus --new-window "$HOME"`,
 		`--user-data-dir=`,
@@ -420,10 +421,19 @@ func TestBootstrapScriptSupportsWaylandDesktop(t *testing.T) {
 		`dbus-run-session labwc`,
 		`/tmp/crabbox-labwc.log`,
 		`wayvnc --config`,
+		`--ozone-platform=x11`,
 		`--ozone-platform=wayland`,
 	} {
 		if !strings.Contains(bootstrapScript, want) {
 			t.Fatalf("bootstrap script missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		`waybar`,
+		`"wlr/taskbar"`,
+	} {
+		if strings.Contains(bootstrapScript, notWant) {
+			t.Fatalf("bootstrap script contains %q", notWant)
 		}
 	}
 

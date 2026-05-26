@@ -251,6 +251,10 @@ Use native `crabbox vnc --id <id-or-slug> --open` as the fallback printed by
 and passwords. `desktop key` accepts both `--id <lease> <keys>` and positional
 `<lease> <keys>` forms for shortcuts.
 
+GNOME desktop profile means labwc/WayVNC with GNOME Panel taskbars and GNOME
+apps. Do not add Waybar. Browser/terminal windows use Xwayland so GNOME Panel
+can list them.
+
 When desktop/WebVNC hangs, trust the inline rescue output first: `problem: VNC
 bridge disconnected`, `problem: browser not launched`, `problem: input stack
 dead`, or similar will be followed by exact `rescue:` commands such as

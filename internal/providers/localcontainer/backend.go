@@ -984,7 +984,7 @@ if [ "${CRABBOX_DESKTOP:-0}" = "1" ] && command -v apt-get >/dev/null 2>&1; then
   apt-get update
   if [ "${CRABBOX_DESKTOP_ENV:-xfce}" != "xfce" ]; then
     if [ "${CRABBOX_DESKTOP_ENV:-xfce}" = "gnome" ]; then
-      apt-get install -y --no-install-recommends labwc wayvnc waybar wlr-randr grim slurp wtype wl-clipboard dbus-user-session xwayland xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme fonts-dejavu-core fonts-liberation iproute2 openssl procps netcat-openbsd novnc websockify
+      apt-get install -y --no-install-recommends labwc wayvnc gnome-panel wlr-randr grim slurp wtype wl-clipboard dbus-user-session xwayland xdg-desktop-portal-wlr xdg-desktop-portal-gtk gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme fonts-dejavu-core fonts-liberation iproute2 openssl procps netcat-openbsd novnc websockify
     else
       apt-get install -y --no-install-recommends labwc wayvnc foot grim slurp wtype wl-clipboard wlr-randr dbus-user-session xwayland xdg-desktop-portal-wlr fonts-dejavu-core fonts-liberation iproute2 openssl procps netcat-openbsd novnc websockify
     fi
@@ -1095,58 +1095,19 @@ if [ "${CRABBOX_DESKTOP:-0}" = "1" ]; then
     runtime="/tmp/crabbox-runtime-$(id -u "$user")"
     install -d -m 0700 -o "$user" "$runtime" "$home_dir/.config" "$home_dir/.config/labwc" "$home_dir/.config/wayvnc"
     if [ "$desktop_env" = "gnome" ]; then
-      install -d -m 0700 -o "$user" "$home_dir/.config/waybar"
-cat > "$home_dir/.config/waybar/config" <<'WAYBAR'
-{
-  "layer": "top",
-  "position": "bottom",
-  "height": 34,
-  "modules-left": ["wlr/taskbar"],
-  "modules-center": [],
-  "modules-right": ["clock"],
-  "wlr/taskbar": {
-    "format": "{title}",
-    "tooltip": true,
-    "on-click": "activate",
-    "on-click-middle": "close"
-  },
-  "clock": {
-    "format": "{:%H:%M}"
-  }
-}
-WAYBAR
-cat > "$home_dir/.config/waybar/style.css" <<'WAYBAR_CSS'
-* {
-  font-family: Sans, sans-serif;
-  font-size: 13px;
-}
-window#waybar {
-  background: #20242b;
-  border-top: 1px solid #3b4048;
-  color: #f8fafc;
-}
-#taskbar button {
-  background: #2f3540;
-  border: 0;
-  border-radius: 0;
-  color: #f8fafc;
-  margin: 3px 2px;
-  padding: 0 10px;
-}
-#taskbar button.active {
-  background: #e5e7eb;
-  color: #111827;
-}
-#clock {
-  padding: 0 12px;
-}
-WAYBAR_CSS
 cat > "$home_dir/.config/labwc/autostart" <<'AUTOSTART'
 wlr-randr --output HEADLESS-1 --custom-mode 1920x1080 >/tmp/crabbox-wlr-randr.log 2>&1 || true
+for _ in $(seq 1 20); do
+  [ -S /tmp/.X11-unix/X0 ] && break
+  sleep 0.2
+done
 export XDG_CURRENT_DESKTOP=GNOME
 export XDG_SESSION_DESKTOP=gnome
 export GTK_THEME=Adwaita
-waybar --config "$HOME/.config/waybar/config" --style "$HOME/.config/waybar/style.css" >/tmp/crabbox-waybar.log 2>&1 &
+export DISPLAY="${DISPLAY:-:0}"
+export GDK_BACKEND=x11
+export MOZ_ENABLE_WAYLAND=0
+gnome-panel >/tmp/crabbox-gnome-panel.log 2>&1 &
 gnome-terminal -- bash -l >/tmp/crabbox-gnome-terminal.log 2>&1 &
 nautilus --new-window "$HOME" >/tmp/crabbox-nautilus.log 2>&1 &
 AUTOSTART
@@ -1194,6 +1155,9 @@ CRABBOX_DESKTOP_ENV=$desktop_env
 XDG_RUNTIME_DIR=$runtime
 WAYLAND_DISPLAY=$display
 EOF
+if [ "$desktop_env" = "gnome" ]; then
+  printf 'DISPLAY=:0\n' >>/var/lib/crabbox/desktop.env
+fi
 chown "$user" /var/lib/crabbox/desktop.env
 chmod 0644 /var/lib/crabbox/desktop.env
 if ! ss -ltn | grep -q '127.0.0.1:5900'; then
@@ -1516,14 +1480,18 @@ if [ "${CRABBOX_BROWSER:-0}" = "1" ]; then
   browser_wrapper=/usr/local/bin/crabbox-browser
   case "$(basename "$browser_path")" in
     firefox*|iceweasel*)
-      if [ -f /var/lib/crabbox/desktop.env ] && grep -Eq '^CRABBOX_DESKTOP_ENV=(wayland|gnome)$' /var/lib/crabbox/desktop.env; then
+      if [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=gnome$' /var/lib/crabbox/desktop.env; then
+        printf '%s\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export DISPLAY="${DISPLAY:-:0}"' "exec \"$browser_path\" --width 1500 --height 900 \"\$@\"" > "$browser_wrapper"
+      elif [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=wayland$' /var/lib/crabbox/desktop.env; then
         printf '%s\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export XDG_RUNTIME_DIR WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=1' "exec \"$browser_path\" --width 1500 --height 900 \"\$@\"" > "$browser_wrapper"
       else
         printf '%s\n' '#!/bin/sh' "exec \"$browser_path\" --width 1500 --height 900 \"\$@\"" > "$browser_wrapper"
       fi
       ;;
     *)
-      if [ -f /var/lib/crabbox/desktop.env ] && grep -Eq '^CRABBOX_DESKTOP_ENV=(wayland|gnome)$' /var/lib/crabbox/desktop.env; then
+      if [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=gnome$' /var/lib/crabbox/desktop.env; then
+        printf '%s\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export DISPLAY="${DISPLAY:-:0}"' 'export XDG_RUNTIME_DIR WAYLAND_DISPLAY' 'export GDK_BACKEND=x11 MOZ_ENABLE_WAYLAND=0' 'profile="${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \"$browser_path\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\"\$profile\" --ozone-platform=x11 --window-size=1500,900 --window-position=80,80 \"\$@\"" > "$browser_wrapper"
+      elif [ -f /var/lib/crabbox/desktop.env ] && grep -q '^CRABBOX_DESKTOP_ENV=wayland$' /var/lib/crabbox/desktop.env; then
         printf '%s\n' '#!/bin/sh' 'if [ -f /var/lib/crabbox/desktop.env ]; then . /var/lib/crabbox/desktop.env; fi' 'export XDG_RUNTIME_DIR WAYLAND_DISPLAY' 'export MOZ_ENABLE_WAYLAND=1' 'profile="${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \"$browser_path\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\"\$profile\" --ozone-platform=wayland --window-size=1500,900 --window-position=80,80 \"\$@\"" > "$browser_wrapper"
       else
         printf '%s\n' '#!/bin/sh' 'profile="${CRABBOX_BROWSER_PROFILE:-$HOME/.cache/crabbox/browser-profile}"' 'umask 077' 'mkdir -p "$profile"' 'chmod 700 "$profile"' "exec \"$browser_path\" --no-first-run --no-default-browser-check --disable-default-apps --hide-crash-restore-bubble --user-data-dir=\"\$profile\" --window-size=1500,900 --window-position=80,80 \"\$@\"" > "$browser_wrapper"

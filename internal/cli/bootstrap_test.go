@@ -193,22 +193,23 @@ func TestCloudInitGnomeDesktopProfile(t *testing.T) {
 	cfg.DesktopEnv = "gnome"
 	got := cloudInit(cfg, "ssh-ed25519 test")
 	for _, want := range []string{
-		"labwc wayvnc waybar wlr-randr grim slurp wtype wl-clipboard",
+		"labwc wayvnc gnome-panel wlr-randr grim slurp wtype wl-clipboard",
 		"dbus-user-session xwayland",
 		"gnome-terminal nautilus gsettings-desktop-schemas adwaita-icon-theme",
 		"/usr/local/bin/crabbox-start-wayland-desktop",
-		"/home/crabbox/.config/waybar/config",
-		`"wlr/taskbar"`,
-		"waybar --config",
 		"/etc/systemd/system/crabbox-wayvnc.service",
 		"CRABBOX_DESKTOP_ENV=gnome",
+		"DISPLAY=:0",
 		"WAYLAND_DISPLAY=wayland-1",
 		"exec dbus-run-session labwc",
+		"export GDK_BACKEND=x11",
+		"export MOZ_ENABLE_WAYLAND=0",
+		"gnome-panel >/tmp/crabbox-gnome-panel.log 2>&1 &",
 		"gnome-terminal -- bash -l",
 		"nautilus --new-window",
 		"rm -f /var/lib/crabbox/display.env",
 		"--user-data-dir=",
-		"--ozone-platform=wayland",
+		"--ozone-platform=x11",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("cloudInit(gnome desktop) missing %q", want)
@@ -220,6 +221,8 @@ func TestCloudInitGnomeDesktopProfile(t *testing.T) {
 		"gnome-shell",
 		"lxqt-panel",
 		"QT_QPA_PLATFORM=xcb",
+		"waybar",
+		`"wlr/taskbar"`,
 	} {
 		if strings.Contains(got, notWant) {
 			t.Fatalf("cloudInit(gnome desktop) contains %q", notWant)
