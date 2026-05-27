@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.20.1 - Unreleased
+## 0.21.0 - 2026-05-27
 
 ### Added
 
@@ -21,6 +21,7 @@
 - Fixed native Windows `--fresh-pr` runs so PR checkout, local patch application, and post-bootstrap SSH port changes work over PowerShell.
 - Fixed native Windows Actions env handoff so `crabbox run` can consume bash-style hydrate env files and reuse hydrated Node/pnpm paths.
 - Fixed AWS coordinator EC2 polling to tolerate transient `InvalidInstanceID.NotFound` after instance creation and to report parsed AWS XML errors.
+- Fixed AWS coordinator provisioning retries so wrapped opaque `RunInstances` errors are retried instead of failing immediately.
 - Fixed Daytona provider sandbox inventory to use Daytona's cursor-based listing API.
 - Removed OpenClaw-specific hosted broker defaults and documentation from the generic Crabbox broker login flow.
 
