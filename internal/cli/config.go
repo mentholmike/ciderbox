@@ -61,6 +61,7 @@ type Config struct {
 	AzureNSG                    string
 	AzureSSHCIDRs               []string
 	AzureNetwork                string
+	AzureDynamicSessions        AzureDynamicSessionsConfig
 	GCPProject                  string
 	gcpProjectExplicit          bool
 	GCPZone                     string
@@ -201,6 +202,14 @@ type E2BConfig struct {
 	Template string
 	Workdir  string
 	User     string
+}
+
+type AzureDynamicSessionsConfig struct {
+	Endpoint    string
+	Pool        string
+	APIVersion  string
+	Workdir     string
+	TimeoutSecs int
 }
 
 type ExeDevConfig struct {
@@ -653,19 +662,24 @@ func baseConfig() Config {
 		AzureVNet:          "crabbox-vnet",
 		AzureSubnet:        "crabbox-subnet",
 		AzureNSG:           "crabbox-nsg",
-		GCPZone:            "europe-west2-a",
-		GCPImage:           gcpImage,
-		GCPNetwork:         "default",
-		GCPTags:            []string{"crabbox-ssh"},
-		GCPRootGB:          400,
-		SSHUser:            "crabbox",
-		SSHKey:             sshKey,
-		SSHPort:            "2222",
-		SSHFallbackPorts:   []string{"22"},
-		ProviderKey:        "crabbox-steipete",
-		WorkRoot:           defaultPOSIXWorkRoot,
-		TTL:                90 * time.Minute,
-		IdleTimeout:        30 * time.Minute,
+		AzureDynamicSessions: AzureDynamicSessionsConfig{
+			APIVersion:  "2025-02-02-preview",
+			Workdir:     "/workspace/crabbox",
+			TimeoutSecs: 1800,
+		},
+		GCPZone:          "europe-west2-a",
+		GCPImage:         gcpImage,
+		GCPNetwork:       "default",
+		GCPTags:          []string{"crabbox-ssh"},
+		GCPRootGB:        400,
+		SSHUser:          "crabbox",
+		SSHKey:           sshKey,
+		SSHPort:          "2222",
+		SSHFallbackPorts: []string{"22"},
+		ProviderKey:      "crabbox-steipete",
+		WorkRoot:         defaultPOSIXWorkRoot,
+		TTL:              90 * time.Minute,
+		IdleTimeout:      30 * time.Minute,
 		Sync: SyncConfig{
 			Delete:      true,
 			Checksum:    false,
@@ -790,63 +804,64 @@ func baseConfig() Config {
 }
 
 type fileConfig struct {
-	Profile          string                             `yaml:"profile,omitempty"`
-	Provider         string                             `yaml:"provider,omitempty"`
-	Target           string                             `yaml:"target,omitempty"`
-	TargetOS         string                             `yaml:"targetOS,omitempty"`
-	OSImage          string                             `yaml:"os,omitempty"`
-	Windows          *fileWindowsConfig                 `yaml:"windows,omitempty"`
-	Desktop          *bool                              `yaml:"desktop,omitempty"`
-	DesktopEnv       string                             `yaml:"desktopEnv,omitempty"`
-	Browser          *bool                              `yaml:"browser,omitempty"`
-	Code             *bool                              `yaml:"code,omitempty"`
-	Network          string                             `yaml:"network,omitempty"`
-	Class            string                             `yaml:"class,omitempty"`
-	ServerType       string                             `yaml:"serverType,omitempty"`
-	Coordinator      string                             `yaml:"coordinator,omitempty"`
-	CoordinatorToken string                             `yaml:"coordinatorToken,omitempty"`
-	HostID           string                             `yaml:"hostId,omitempty"`
-	Broker           *fileBrokerConfig                  `yaml:"broker,omitempty"`
-	Hetzner          *fileHetznerConfig                 `yaml:"hetzner,omitempty"`
-	AWS              *fileAWSConfig                     `yaml:"aws,omitempty"`
-	Azure            *fileAzureConfig                   `yaml:"azure,omitempty"`
-	GCP              *fileGCPConfig                     `yaml:"gcp,omitempty"`
-	Proxmox          *fileProxmoxConfig                 `yaml:"proxmox,omitempty"`
-	Parallels        *fileParallelsConfig               `yaml:"parallels,omitempty"`
-	SSH              *fileSSHConfig                     `yaml:"ssh,omitempty"`
-	Sync             *fileSyncConfig                    `yaml:"sync,omitempty"`
-	Run              *fileRunConfig                     `yaml:"run,omitempty"`
-	Env              *fileEnvConfig                     `yaml:"env,omitempty"`
-	Capacity         *fileCapacityConfig                `yaml:"capacity,omitempty"`
-	Actions          *fileActionsConfig                 `yaml:"actions,omitempty"`
-	Blacksmith       *fileBlacksmithConfig              `yaml:"blacksmith,omitempty"`
-	Namespace        *fileNamespaceConfig               `yaml:"namespace,omitempty"`
-	Daytona          *fileDaytonaConfig                 `yaml:"daytona,omitempty"`
-	E2B              *fileE2BConfig                     `yaml:"e2b,omitempty"`
-	ExeDev           *fileExeDevConfig                  `yaml:"exeDev,omitempty"`
-	Railway          *fileRailwayConfig                 `yaml:"railway,omitempty"`
-	Runpod           *fileRunpodConfig                  `yaml:"runpod,omitempty"`
-	Wandb            *fileWandbConfig                   `yaml:"wandb,omitempty"`
-	Islo             *fileIsloConfig                    `yaml:"islo,omitempty"`
-	Tensorlake       *fileTensorlakeConfig              `yaml:"tensorlake,omitempty"`
-	Modal            *fileModalConfig                   `yaml:"modal,omitempty"`
-	UpstashBox       *fileUpstashBoxConfig              `yaml:"upstashBox,omitempty"`
-	Cloudflare       *fileCloudflareConfig              `yaml:"cloudflare,omitempty"`
-	Semaphore        *fileSemaphoreConfig               `yaml:"semaphore,omitempty"`
-	Sprites          *fileSpritesConfig                 `yaml:"sprites,omitempty"`
-	LocalContainer   *fileLocalContainerConfig          `yaml:"localContainer,omitempty"`
-	Tailscale        *fileTailscaleConfig               `yaml:"tailscale,omitempty"`
-	Static           *fileStaticConfig                  `yaml:"static,omitempty"`
-	Results          *fileResultsConfig                 `yaml:"results,omitempty"`
-	Cache            *fileCacheConfig                   `yaml:"cache,omitempty"`
-	Lease            *fileLeaseConfig                   `yaml:"lease,omitempty"`
-	Profiles         map[string]fileProfileConfig       `yaml:"profiles,omitempty"`
-	Presets          map[string]filePresetConfig        `yaml:"presets,omitempty"`
-	ProofTemplates   map[string]fileProofTemplateConfig `yaml:"proofTemplates,omitempty"`
-	Jobs             map[string]fileJobConfig           `yaml:"jobs,omitempty"`
-	TTL              string                             `yaml:"ttl,omitempty"`
-	IdleTimeout      string                             `yaml:"idleTimeout,omitempty"`
-	WorkRoot         string                             `yaml:"workRoot,omitempty"`
+	Profile              string                             `yaml:"profile,omitempty"`
+	Provider             string                             `yaml:"provider,omitempty"`
+	Target               string                             `yaml:"target,omitempty"`
+	TargetOS             string                             `yaml:"targetOS,omitempty"`
+	OSImage              string                             `yaml:"os,omitempty"`
+	Windows              *fileWindowsConfig                 `yaml:"windows,omitempty"`
+	Desktop              *bool                              `yaml:"desktop,omitempty"`
+	DesktopEnv           string                             `yaml:"desktopEnv,omitempty"`
+	Browser              *bool                              `yaml:"browser,omitempty"`
+	Code                 *bool                              `yaml:"code,omitempty"`
+	Network              string                             `yaml:"network,omitempty"`
+	Class                string                             `yaml:"class,omitempty"`
+	ServerType           string                             `yaml:"serverType,omitempty"`
+	Coordinator          string                             `yaml:"coordinator,omitempty"`
+	CoordinatorToken     string                             `yaml:"coordinatorToken,omitempty"`
+	HostID               string                             `yaml:"hostId,omitempty"`
+	Broker               *fileBrokerConfig                  `yaml:"broker,omitempty"`
+	Hetzner              *fileHetznerConfig                 `yaml:"hetzner,omitempty"`
+	AWS                  *fileAWSConfig                     `yaml:"aws,omitempty"`
+	Azure                *fileAzureConfig                   `yaml:"azure,omitempty"`
+	AzureDynamicSessions *fileAzureDynamicSessionsConfig    `yaml:"azureDynamicSessions,omitempty"`
+	GCP                  *fileGCPConfig                     `yaml:"gcp,omitempty"`
+	Proxmox              *fileProxmoxConfig                 `yaml:"proxmox,omitempty"`
+	Parallels            *fileParallelsConfig               `yaml:"parallels,omitempty"`
+	SSH                  *fileSSHConfig                     `yaml:"ssh,omitempty"`
+	Sync                 *fileSyncConfig                    `yaml:"sync,omitempty"`
+	Run                  *fileRunConfig                     `yaml:"run,omitempty"`
+	Env                  *fileEnvConfig                     `yaml:"env,omitempty"`
+	Capacity             *fileCapacityConfig                `yaml:"capacity,omitempty"`
+	Actions              *fileActionsConfig                 `yaml:"actions,omitempty"`
+	Blacksmith           *fileBlacksmithConfig              `yaml:"blacksmith,omitempty"`
+	Namespace            *fileNamespaceConfig               `yaml:"namespace,omitempty"`
+	Daytona              *fileDaytonaConfig                 `yaml:"daytona,omitempty"`
+	E2B                  *fileE2BConfig                     `yaml:"e2b,omitempty"`
+	ExeDev               *fileExeDevConfig                  `yaml:"exeDev,omitempty"`
+	Railway              *fileRailwayConfig                 `yaml:"railway,omitempty"`
+	Runpod               *fileRunpodConfig                  `yaml:"runpod,omitempty"`
+	Wandb                *fileWandbConfig                   `yaml:"wandb,omitempty"`
+	Islo                 *fileIsloConfig                    `yaml:"islo,omitempty"`
+	Tensorlake           *fileTensorlakeConfig              `yaml:"tensorlake,omitempty"`
+	Modal                *fileModalConfig                   `yaml:"modal,omitempty"`
+	UpstashBox           *fileUpstashBoxConfig              `yaml:"upstashBox,omitempty"`
+	Cloudflare           *fileCloudflareConfig              `yaml:"cloudflare,omitempty"`
+	Semaphore            *fileSemaphoreConfig               `yaml:"semaphore,omitempty"`
+	Sprites              *fileSpritesConfig                 `yaml:"sprites,omitempty"`
+	LocalContainer       *fileLocalContainerConfig          `yaml:"localContainer,omitempty"`
+	Tailscale            *fileTailscaleConfig               `yaml:"tailscale,omitempty"`
+	Static               *fileStaticConfig                  `yaml:"static,omitempty"`
+	Results              *fileResultsConfig                 `yaml:"results,omitempty"`
+	Cache                *fileCacheConfig                   `yaml:"cache,omitempty"`
+	Lease                *fileLeaseConfig                   `yaml:"lease,omitempty"`
+	Profiles             map[string]fileProfileConfig       `yaml:"profiles,omitempty"`
+	Presets              map[string]filePresetConfig        `yaml:"presets,omitempty"`
+	ProofTemplates       map[string]fileProofTemplateConfig `yaml:"proofTemplates,omitempty"`
+	Jobs                 map[string]fileJobConfig           `yaml:"jobs,omitempty"`
+	TTL                  string                             `yaml:"ttl,omitempty"`
+	IdleTimeout          string                             `yaml:"idleTimeout,omitempty"`
+	WorkRoot             string                             `yaml:"workRoot,omitempty"`
 }
 
 type fileWindowsConfig struct {
@@ -1058,6 +1073,14 @@ type fileE2BConfig struct {
 	Template string `yaml:"template,omitempty"`
 	Workdir  string `yaml:"workdir,omitempty"`
 	User     string `yaml:"user,omitempty"`
+}
+
+type fileAzureDynamicSessionsConfig struct {
+	Endpoint    string `yaml:"endpoint,omitempty"`
+	Pool        string `yaml:"pool,omitempty"`
+	APIVersion  string `yaml:"apiVersion,omitempty"`
+	Workdir     string `yaml:"workdir,omitempty"`
+	TimeoutSecs int    `yaml:"timeoutSecs,omitempty"`
 }
 
 type fileExeDevConfig struct {
@@ -1623,6 +1646,23 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 		}
 		if file.Azure.Network != "" {
 			cfg.AzureNetwork = file.Azure.Network
+		}
+	}
+	if file.AzureDynamicSessions != nil {
+		if file.AzureDynamicSessions.Endpoint != "" {
+			cfg.AzureDynamicSessions.Endpoint = file.AzureDynamicSessions.Endpoint
+		}
+		if file.AzureDynamicSessions.Pool != "" {
+			cfg.AzureDynamicSessions.Pool = file.AzureDynamicSessions.Pool
+		}
+		if file.AzureDynamicSessions.APIVersion != "" {
+			cfg.AzureDynamicSessions.APIVersion = file.AzureDynamicSessions.APIVersion
+		}
+		if file.AzureDynamicSessions.Workdir != "" {
+			cfg.AzureDynamicSessions.Workdir = file.AzureDynamicSessions.Workdir
+		}
+		if file.AzureDynamicSessions.TimeoutSecs > 0 {
+			cfg.AzureDynamicSessions.TimeoutSecs = file.AzureDynamicSessions.TimeoutSecs
 		}
 	}
 	if file.GCP != nil {
@@ -2624,6 +2664,11 @@ func applyEnv(cfg *Config) {
 		cfg.AzureSSHCIDRs = splitCommaList(cidrs)
 	}
 	cfg.AzureNetwork = getenv("CRABBOX_AZURE_NETWORK", cfg.AzureNetwork)
+	cfg.AzureDynamicSessions.Endpoint = getenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_ENDPOINT", cfg.AzureDynamicSessions.Endpoint)
+	cfg.AzureDynamicSessions.Pool = getenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_POOL", cfg.AzureDynamicSessions.Pool)
+	cfg.AzureDynamicSessions.APIVersion = getenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_API_VERSION", cfg.AzureDynamicSessions.APIVersion)
+	cfg.AzureDynamicSessions.Workdir = getenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_WORKDIR", cfg.AzureDynamicSessions.Workdir)
+	cfg.AzureDynamicSessions.TimeoutSecs = getenvInt("CRABBOX_AZURE_DYNAMIC_SESSIONS_TIMEOUT_SECS", cfg.AzureDynamicSessions.TimeoutSecs)
 	if project := os.Getenv("CRABBOX_GCP_PROJECT"); project != "" {
 		cfg.GCPProject = project
 		cfg.gcpProjectExplicit = true

@@ -53,6 +53,7 @@ test("provider schema accepts current Crabbox providers and aliases", () => {
   for (const provider of [
     "aws",
     "azure",
+    "azure-dynamic-sessions",
     "gcp",
     "google",
     "google-cloud",

@@ -460,7 +460,7 @@ func normalizeProviderName(name string) string {
 }
 
 func providerHelpAll() string {
-	return "provider: hetzner, aws, azure, gcp, proxmox, parallels, local-container, ssh, exe-dev, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, e2b, modal, sprites, railway, runpod, cloudflare, or wandb"
+	return "provider: hetzner, aws, azure, azure-dynamic-sessions, gcp, proxmox, parallels, local-container, ssh, exe-dev, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, e2b, modal, sprites, railway, runpod, cloudflare, or wandb"
 }
 
 func providerHelpSSH() string {

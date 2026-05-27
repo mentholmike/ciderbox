@@ -26,6 +26,7 @@ const providerSchema = {
   enum: [
     "aws",
     "azure",
+    "azure-dynamic-sessions",
     "gcp",
     "google",
     "google-cloud",

@@ -13,6 +13,7 @@ static SSH provider for existing machines.
 | --- | --- | --- | --- |
 | [AWS](aws.md) | SSH lease | Linux, Windows, macOS | broad managed capacity, Windows, EC2 Mac |
 | [Azure](azure.md) | SSH lease | Linux, Windows | Azure-backed Linux and Windows capacity |
+| [Azure Dynamic Sessions](azure-dynamic-sessions.md) | delegated run | Linux | Microsoft Azure Container Apps custom container sandbox execution |
 | [Google Cloud](gcp.md) | SSH lease | Linux | GCP-backed Linux Compute Engine capacity |
 | [Hetzner](hetzner.md) | SSH lease | Linux | fast Linux capacity at low cost |
 | [Proxmox](proxmox.md) | SSH lease | Linux | private Proxmox VE QEMU VM templates |
@@ -76,6 +77,8 @@ Proxmox and delegated providers do not use the Crabbox coordinator:
 - Daytona uses Daytona API and SDK/toolbox APIs.
 - Islo uses the Islo API and SDK auth.
 - E2B uses E2B's sandbox REST and envd APIs.
+- Azure Dynamic Sessions uses Microsoft Azure Container Apps Dynamic Sessions
+  pool APIs for sandbox lifecycle, archive upload, and command execution.
 - Modal uses the local Modal Python client and Modal Sandbox APIs.
 - Upstash Box uses the [Upstash Box](https://upstash.com/blog/upstash-box)
   REST API for sandbox lifecycle, archive upload, and command streaming.
@@ -105,6 +108,7 @@ Sprites API and reaches SSH through `sprite proxy`; exe.dev provisions through
 | --- | --- | --- | --- | --- | --- | --- |
 | AWS | yes | yes | yes | yes | yes | no |
 | Azure | yes | yes | yes | Linux/Windows VNC; Linux code | yes | no |
+| Azure Dynamic Sessions | yes | yes | no | no | archive via Dynamic Sessions files API | no |
 | Google Cloud | yes | yes | yes | no | yes | no |
 | Hetzner | yes | yes | yes | Linux VNC/code | yes | no |
 | Proxmox | yes | yes | yes | no | yes | no |

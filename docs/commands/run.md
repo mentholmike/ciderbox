@@ -309,7 +309,7 @@ Flags:
 
 ```text
 --id <lease-id-or-slug>
---provider hetzner|aws|azure|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
+--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
 --target linux|macos|windows
 --windows-mode normal|wsl2
 --static-host <host>
@@ -386,6 +386,11 @@ Flags:
 --semaphore-machine <type>
 --semaphore-os-image <image>
 --semaphore-idle-timeout <duration>
+--azure-dynamic-sessions-endpoint <url>
+--azure-dynamic-sessions-pool <name>
+--azure-dynamic-sessions-api-version <version>
+--azure-dynamic-sessions-workdir <path>
+--azure-dynamic-sessions-timeout-secs <n>
 --sprites-api-url <url>
 --sprites-work-root <path>
 --e2b-api-url <url>
@@ -411,7 +416,8 @@ can become native checkpoint sources. Use `--azure-os-disk ephemeral` only for
 stateless leases where native Azure checkpoint/fork support is not needed.
 `--azure-os-disk auto` is accepted for compatibility and resolves to managed.
 
-Delegated providers such as Blacksmith Testbox, Daytona `run`, Islo, and E2B
+Delegated providers such as Blacksmith Testbox, Daytona `run`, Islo, Azure
+Dynamic Sessions, and E2B
 own command transport. They reject SSH-run-only features including
 `--capture-stdout`, `--capture-stderr`, `--capture-on-fail`, `--download`,
 `--script`, `--script-stdin`, and `--fresh-pr`. Provider-specific docs note any

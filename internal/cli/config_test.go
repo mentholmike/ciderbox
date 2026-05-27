@@ -33,6 +33,11 @@ func clearConfigEnv(t *testing.T) {
 		"CF_ACCESS_CLIENT_ID",
 		"CF_ACCESS_CLIENT_SECRET",
 		"CF_ACCESS_TOKEN",
+		"CRABBOX_AZURE_DYNAMIC_SESSIONS_ENDPOINT",
+		"CRABBOX_AZURE_DYNAMIC_SESSIONS_POOL",
+		"CRABBOX_AZURE_DYNAMIC_SESSIONS_API_VERSION",
+		"CRABBOX_AZURE_DYNAMIC_SESSIONS_WORKDIR",
+		"CRABBOX_AZURE_DYNAMIC_SESSIONS_TIMEOUT_SECS",
 		"CRABBOX_GCP_PROJECT",
 		"GOOGLE_CLOUD_PROJECT",
 		"GCP_PROJECT_ID",
@@ -439,6 +444,12 @@ daytona:
   workRoot: /home/daytona/crabbox
   sshGatewayHost: ssh.daytona.example.test
   sshAccessMinutes: 12
+azureDynamicSessions:
+  endpoint: https://pool.env.eastus.azurecontainerapps.io
+  pool: pool
+  apiVersion: 2025-02-02-preview
+  workdir: /workspace/file
+  timeoutSecs: 120
 e2b:
   apiUrl: https://api.e2b.example.test
   domain: e2b.example.test
@@ -612,6 +623,9 @@ ssh:
 	if cfg.Daytona.APIURL != "https://daytona.example.test/api" || cfg.Daytona.Snapshot != "crabbox-ready" || cfg.Daytona.Target != "us" || cfg.Daytona.User != "daytona" || cfg.Daytona.WorkRoot != "/home/daytona/crabbox" || cfg.Daytona.SSHGatewayHost != "ssh.daytona.example.test" || cfg.Daytona.SSHAccessMinutes != 12 {
 		t.Fatalf("daytona config not loaded: %#v", cfg.Daytona)
 	}
+	if cfg.AzureDynamicSessions.Endpoint != "https://pool.env.eastus.azurecontainerapps.io" || cfg.AzureDynamicSessions.Pool != "pool" || cfg.AzureDynamicSessions.Workdir != "/workspace/file" || cfg.AzureDynamicSessions.TimeoutSecs != 120 {
+		t.Fatalf("azure dynamic sessions config not loaded: %#v", cfg.AzureDynamicSessions)
+	}
 	if cfg.E2B.APIURL != "https://api.e2b.example.test" || cfg.E2B.Domain != "e2b.example.test" || cfg.E2B.Template != "crabbox-ready" || cfg.E2B.Workdir != "work/repo" || cfg.E2B.User != "sandbox" {
 		t.Fatalf("e2b config not loaded: %#v", cfg.E2B)
 	}
@@ -751,6 +765,11 @@ func TestEnvOverridesConfig(t *testing.T) {
 	t.Setenv("CRABBOX_AWS_SSH_CIDRS", "198.51.100.7/32,203.0.113.8/32")
 	t.Setenv("CRABBOX_AZURE_OS_DISK", "managed")
 	t.Setenv("CRABBOX_AZURE_SSH_CIDRS", "198.51.100.9/32,203.0.113.10/32")
+	t.Setenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_ENDPOINT", "https://env-pool.env.westus.azurecontainerapps.io")
+	t.Setenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_POOL", "env-pool")
+	t.Setenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_API_VERSION", "2025-02-02-preview")
+	t.Setenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_WORKDIR", "/workspace/env")
+	t.Setenv("CRABBOX_AZURE_DYNAMIC_SESSIONS_TIMEOUT_SECS", "90")
 	t.Setenv("CRABBOX_GCP_PROJECT", "crabbox-project")
 	t.Setenv("CRABBOX_GCP_ZONE", "europe-west2-b")
 	t.Setenv("CRABBOX_GCP_IMAGE", "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64")
@@ -946,6 +965,9 @@ func TestEnvOverridesConfig(t *testing.T) {
 	}
 	if !cfg.AzureOSDiskExplicit {
 		t.Fatal("AzureOSDiskExplicit=false, want true")
+	}
+	if cfg.AzureDynamicSessions.Endpoint != "https://env-pool.env.westus.azurecontainerapps.io" || cfg.AzureDynamicSessions.Pool != "env-pool" || cfg.AzureDynamicSessions.Workdir != "/workspace/env" || cfg.AzureDynamicSessions.TimeoutSecs != 90 {
+		t.Fatalf("unexpected azure dynamic sessions env: %#v", cfg.AzureDynamicSessions)
 	}
 	if cfg.GCPProject != "crabbox-project" || cfg.GCPZone != "europe-west2-b" || cfg.GCPNetwork != "crabbox-net" || cfg.GCPSubnet != "crabbox-subnet" || cfg.GCPRootGB != 900 || cfg.GCPServiceAccount != "runner@crabbox-project.iam.gserviceaccount.com" {
 		t.Fatalf("unexpected gcp env: project=%s zone=%s network=%s subnet=%s root=%d service=%s", cfg.GCPProject, cfg.GCPZone, cfg.GCPNetwork, cfg.GCPSubnet, cfg.GCPRootGB, cfg.GCPServiceAccount)
@@ -1649,6 +1671,13 @@ func TestApplyFileConfigCloudProviderBranches(t *testing.T) {
 			SSHCIDRs:       []string{"198.51.100.2/32"},
 			Network:        "public",
 		},
+		AzureDynamicSessions: &fileAzureDynamicSessionsConfig{
+			Endpoint:    "https://pool.env.eastus.azurecontainerapps.io",
+			Pool:        "pool",
+			APIVersion:  "2025-02-02-preview",
+			Workdir:     "/workspace/file",
+			TimeoutSecs: 120,
+		},
 		GCP: &fileGCPConfig{
 			Project:        "project",
 			Zone:           "europe-west1-b",
@@ -1672,6 +1701,9 @@ func TestApplyFileConfigCloudProviderBranches(t *testing.T) {
 	}
 	if cfg.AzureOSDisk != "ephemeral" || !cfg.AzureOSDiskExplicit || cfg.AzureNetwork != "public" {
 		t.Fatalf("azure config not applied: %#v", cfg)
+	}
+	if cfg.AzureDynamicSessions.Pool != "pool" || cfg.AzureDynamicSessions.Workdir != "/workspace/file" || cfg.AzureDynamicSessions.TimeoutSecs != 120 {
+		t.Fatalf("azure dynamic sessions config not applied: %#v", cfg.AzureDynamicSessions)
 	}
 	if cfg.GCPProject != "project" || !cfg.gcpProjectExplicit || cfg.GCPRootGB != 456 || cfg.GCPServiceAccount == "" {
 		t.Fatalf("gcp config not applied: %#v", cfg)

@@ -46,7 +46,7 @@ normalized Crabbox lease view.
 Flags:
 
 ```text
---provider hetzner|aws|azure|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
+--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
 --target linux|macos|windows
 --windows-mode normal|wsl2
 --static-host <host>
@@ -56,6 +56,9 @@ Flags:
 --json
 --exe-dev-control-host <host>
 --sprites-api-url <url>
+--azure-dynamic-sessions-endpoint <url>
+--azure-dynamic-sessions-pool <name>
+--azure-dynamic-sessions-api-version <version>
 --e2b-api-url <url>
 --e2b-domain <domain>
 ```

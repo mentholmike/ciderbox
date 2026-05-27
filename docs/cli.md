@@ -33,8 +33,8 @@ crabbox init [--force] [--detect]
 crabbox config show [--json]
 crabbox config path
 crabbox config set-broker --url <url> --token-stdin [--provider hetzner|aws|azure|gcp]
-crabbox warmup [--provider hetzner|aws|azure|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--profile <name>] [--slug <slug>] [--idle-timeout <duration>] [--timing-json]
-crabbox run [--id <lease-id-or-slug>] [--provider hetzner|aws|azure|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--slug <slug>] [--label <text>] [--keep-on-failure] [--shell] [--script <file>|--script-stdin] [--fresh-pr <owner/repo#number>] [--no-hydrate] [--allow-env <name>] [--env-from-profile <file>] [--checksum] [--debug] [--force-sync-large] [--preflight] [--preflight-tools <tools>] [--capture-stdout <path>] [--capture-stderr <path>] [--capture-on-fail] [--download remote=local] [--timing-json] [--blacksmith-workflow <workflow>] -- <command...>
+crabbox warmup [--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--profile <name>] [--slug <slug>] [--idle-timeout <duration>] [--timing-json]
+crabbox run [--id <lease-id-or-slug>] [--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--slug <slug>] [--label <text>] [--keep-on-failure] [--shell] [--script <file>|--script-stdin] [--fresh-pr <owner/repo#number>] [--no-hydrate] [--allow-env <name>] [--env-from-profile <file>] [--checksum] [--debug] [--force-sync-large] [--preflight] [--preflight-tools <tools>] [--capture-stdout <path>] [--capture-stderr <path>] [--capture-on-fail] [--download remote=local] [--timing-json] [--blacksmith-workflow <workflow>] -- <command...>
 crabbox job list
 crabbox job run [--id <lease-id-or-slug>] [--dry-run] [--no-hydrate] [--github-runner] [--stop auto|always|success|failure|never] <name>
 crabbox desktop launch --id <lease-id-or-slug> [--browser] [--url <url>] [--egress <profile>] [--webvnc] [--open] [-- <command...>]
@@ -348,7 +348,7 @@ Flags:
 
 ```text
 --id <lease-id-or-slug>  reuse an existing lease
---provider <name>        hetzner, aws, azure, gcp, proxmox, ssh, exe-dev, blacksmith-testbox, namespace-devbox, semaphore, sprites, daytona, islo, or e2b
+--provider <name>        hetzner, aws, azure, azure-dynamic-sessions, gcp, proxmox, ssh, exe-dev, blacksmith-testbox, namespace-devbox, semaphore, sprites, daytona, islo, or e2b
 --target <name>          linux, macos, or windows
 --windows-mode <mode>    normal or wsl2
 --static-host <host>     existing SSH host for provider=ssh
@@ -414,6 +414,11 @@ Flags:
 --semaphore-machine <type> Semaphore machine type
 --semaphore-os-image <image> Semaphore OS image
 --semaphore-idle-timeout <duration> Semaphore keepalive idle timeout
+--azure-dynamic-sessions-endpoint <url> Azure Dynamic Sessions pool management endpoint
+--azure-dynamic-sessions-pool <name> Azure Dynamic Sessions pool name
+--azure-dynamic-sessions-api-version <version> Azure Dynamic Sessions management API version
+--azure-dynamic-sessions-workdir <path> Azure Dynamic Sessions sandbox working directory
+--azure-dynamic-sessions-timeout-secs <n> Azure Dynamic Sessions command timeout
 --e2b-api-url <url>     E2B API URL override
 --e2b-domain <domain>   E2B sandbox domain override
 --e2b-template <id>     E2B sandbox template
@@ -686,6 +691,17 @@ semaphore:
 
 Keep the token in `CRABBOX_SEMAPHORE_TOKEN` or `SEMAPHORE_API_TOKEN`.
 
+Azure Dynamic Sessions config:
+
+```yaml
+provider: azure-dynamic-sessions
+azureDynamicSessions:
+  endpoint: https://<pool>.<environment-id>.eastus.azurecontainerapps.io
+  workdir: /workspace/crabbox
+```
+
+Auth uses Azure CLI or `CRABBOX_AZURE_DYNAMIC_SESSIONS_TOKEN`.
+
 E2B config:
 
 ```yaml
@@ -742,6 +758,11 @@ CRABBOX_AWS_SUBNET_ID
 CRABBOX_AWS_INSTANCE_PROFILE
 CRABBOX_AWS_ROOT_GB
 CRABBOX_AWS_SSH_CIDRS
+CRABBOX_AZURE_DYNAMIC_SESSIONS_ENDPOINT
+CRABBOX_AZURE_DYNAMIC_SESSIONS_POOL
+CRABBOX_AZURE_DYNAMIC_SESSIONS_API_VERSION
+CRABBOX_AZURE_DYNAMIC_SESSIONS_WORKDIR
+CRABBOX_AZURE_DYNAMIC_SESSIONS_TIMEOUT_SECS
 CRABBOX_HOST_ID
 CRABBOX_AWS_MAC_HOST_ID legacy AWS alias
 CRABBOX_CAPACITY_MARKET
@@ -834,6 +855,7 @@ CRABBOX_DOMAIN
 CRABBOX_FALLBACK_DOMAIN
 HCLOUD_TOKEN/HETZNER_TOKEN
 AWS_PROFILE/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN
+CRABBOX_AZURE_DYNAMIC_SESSIONS_TOKEN
 SEMAPHORE_HOST/SEMAPHORE_API_TOKEN/SEMAPHORE_PROJECT
 E2B_API_KEY/E2B_API_URL/E2B_DOMAIN
 MODAL_TOKEN_ID/MODAL_TOKEN_SECRET

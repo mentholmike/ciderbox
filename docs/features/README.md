@@ -36,6 +36,7 @@ Read when:
 - [Authoring a provider](provider-authoring.md): step-by-step guide to writing a new provider.
 - [AWS](aws.md): EC2 Linux, Windows, WSL2, EC2 Mac, capacity, AMIs, and security groups.
 - [Azure](azure.md): Azure Linux, Windows, WSL2, shared infra, capacity, and cleanup.
+- [Azure Dynamic Sessions](../providers/azure-dynamic-sessions.md): delegated Microsoft Azure Container Apps custom container sandbox runs.
 - [Google Cloud](../providers/gcp.md): GCP Compute Engine Linux SSH leases.
 - [Hetzner](hetzner.md): Linux-only managed Hetzner behavior, classes, and cleanup.
 - [Proxmox](../providers/proxmox.md): direct Proxmox VE Linux QEMU VM clones.

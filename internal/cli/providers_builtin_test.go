@@ -9,6 +9,7 @@ func init() {
 	RegisterProvider(testHetznerProvider{})
 	RegisterProvider(testAWSProvider{})
 	RegisterProvider(testAzureProvider{})
+	RegisterProvider(testAzureDynamicSessionsProvider{})
 	RegisterProvider(testGCPProvider{})
 	RegisterProvider(testProxmoxProvider{})
 	RegisterProvider(testStaticSSHProvider{})
@@ -82,6 +83,29 @@ func (testAzureProvider) ApplyNativeCheckpointForkConfig(req NativeCheckpointFor
 		req.Config.AzureOSDiskExplicit = true
 	}
 	return nil
+}
+
+type testAzureDynamicSessionsProvider struct{}
+
+func (testAzureDynamicSessionsProvider) Name() string      { return "azure-dynamic-sessions" }
+func (testAzureDynamicSessionsProvider) Aliases() []string { return nil }
+func (testAzureDynamicSessionsProvider) Spec() ProviderSpec {
+	return ProviderSpec{
+		Name:        "azure-dynamic-sessions",
+		Kind:        ProviderKindDelegatedRun,
+		Targets:     []TargetSpec{{OS: targetLinux}},
+		Features:    FeatureSet{FeatureArchiveSync},
+		Coordinator: CoordinatorNever,
+	}
+}
+func (testAzureDynamicSessionsProvider) RegisterFlags(*flag.FlagSet, Config) any {
+	return noProviderFlags{}
+}
+func (testAzureDynamicSessionsProvider) ApplyFlags(*Config, *flag.FlagSet, any) error {
+	return nil
+}
+func (p testAzureDynamicSessionsProvider) Configure(cfg Config, rt Runtime) (Backend, error) {
+	return testDelegatedBackend{spec: p.Spec()}, nil
 }
 
 type testHetznerProvider struct{}

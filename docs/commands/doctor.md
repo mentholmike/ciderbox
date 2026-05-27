@@ -119,7 +119,7 @@ warnings never change the exit code.
 ## Flags
 
 ```text
---provider hetzner|aws|azure|gcp|proxmox|ssh   provider to validate
+--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh   provider to validate
 --profile <name>             configured profile for remote prereq checks
 --from-run <run-id>          load diagnostic context from recorded run history
 --json                       print JSON
@@ -130,6 +130,8 @@ warnings never change the exit code.
 --static-user <user>         static SSH user override
 --static-port <port>         static SSH port override
 --static-work-root <path>    static target work root
+--azure-dynamic-sessions-endpoint <url>
+--azure-dynamic-sessions-pool <name>
 ```
 
 ## When To Run

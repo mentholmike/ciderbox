@@ -115,7 +115,7 @@ On success, `warmup` prints a concise total duration line. Add `--timing-json` t
 Flags:
 
 ```text
---provider hetzner|aws|azure|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
+--provider hetzner|aws|azure|azure-dynamic-sessions|gcp|proxmox|ssh|exe-dev|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b
 --target linux|macos|windows
 --windows-mode normal|wsl2
 --static-host <host>
@@ -173,6 +173,11 @@ Flags:
 --semaphore-idle-timeout <duration>
 --sprites-api-url <url>
 --sprites-work-root <path>
+--azure-dynamic-sessions-endpoint <url>
+--azure-dynamic-sessions-pool <name>
+--azure-dynamic-sessions-api-version <version>
+--azure-dynamic-sessions-workdir <path>
+--azure-dynamic-sessions-timeout-secs <n>
 --e2b-api-url <url>
 --e2b-domain <domain>
 --e2b-template <template-id>

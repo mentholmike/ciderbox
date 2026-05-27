@@ -37,6 +37,7 @@ namespace  Namespace Devboxes exposed as SSH leases
 sprites    Sprites microVMs exposed as SSH leases through sprite proxy
 daytona    Daytona sandboxes with SDK/toolbox run and short-lived SSH access
 islo       Islo sandboxes with delegated command execution
+azure-dynamic-sessions  Azure Container Apps custom container Dynamic Sessions delegated execution
 e2b        E2B sandboxes with delegated command execution
 modal      Modal Sandboxes with delegated command execution
 tensorlake Tensorlake Firecracker sandboxes with delegated command execution
@@ -47,6 +48,7 @@ tensorlake Tensorlake Firecracker sandboxes with delegated command execution
 - [Provider reference](../providers/README.md): one page per built-in backend.
 - [AWS](../providers/aws.md): EC2 Linux, Windows, WSL2, EC2 Mac, capacity, AMIs, and security groups.
 - [Azure](../providers/azure.md): Azure Linux/native Windows, shared infra, capacity, and cleanup.
+- [Azure Dynamic Sessions](../providers/azure-dynamic-sessions.md): delegated Azure Container Apps custom container sandbox execution.
 - [Google Cloud](../providers/gcp.md): GCP Compute Engine Linux SSH leases.
 - [Hetzner](../providers/hetzner.md): Linux-only managed provider behavior, classes, and cleanup.
 - [Proxmox](../providers/proxmox.md): direct Proxmox VE Linux QEMU VM clones.

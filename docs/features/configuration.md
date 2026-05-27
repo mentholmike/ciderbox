@@ -238,6 +238,20 @@ native disk-snapshot checkpoints. `ephemeral` opts into local OS disks for
 stateless leases and disables native Azure checkpoint/fork support. `auto` is
 accepted for compatibility and resolves to managed.
 
+### Azure Dynamic Sessions
+
+```yaml
+provider: azure-dynamic-sessions
+target: linux
+azureDynamicSessions:
+  endpoint: https://<pool>.<environment-id>.eastus.azurecontainerapps.io
+  workdir: /workspace/crabbox
+```
+
+Use a custom container session pool whose image exposes the Crabbox runner on
+port `8787`. Auth uses `az account get-access-token --resource
+https://dynamicsessions.io` unless `CRABBOX_AZURE_DYNAMIC_SESSIONS_TOKEN` is set.
+
 ### Hetzner
 
 Hetzner credentials and image come from broker-side config. Repos do not need
@@ -650,6 +664,7 @@ AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN
 AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_SUBSCRIPTION_ID
 GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_CLOUD_PROJECT
 CRABBOX_PROXMOX_TOKEN_ID / CRABBOX_PROXMOX_TOKEN_SECRET
+CRABBOX_AZURE_DYNAMIC_SESSIONS_TOKEN
 DAYTONA_API_KEY / DAYTONA_JWT_TOKEN
 BLACKSMITH_*  (read by the Blacksmith CLI)
 ISLO_API_KEY  (read by the Islo SDK)

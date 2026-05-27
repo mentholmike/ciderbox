@@ -135,7 +135,7 @@ The plugin schema constrains the `provider` argument to the providers
 Crabbox actually supports:
 
 ```text
-aws | hetzner | ssh | blacksmith-testbox | blacksmith | namespace-devbox | namespace | semaphore | sprites | daytona | islo | e2b
+aws | azure | azure-dynamic-sessions | hetzner | ssh | blacksmith-testbox | blacksmith | namespace-devbox | namespace | semaphore | sprites | daytona | islo | e2b
 ```
 
 Adding a provider to the CLI requires updating this list in `index.js` and
