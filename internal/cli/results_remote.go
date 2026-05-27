@@ -8,7 +8,7 @@ import (
 
 const (
 	resultFileMarker    = "__CRABBOX_RESULT_FILE__:"
-	remoteResultsMarker = ".crabbox/results-start"
+	remoteResultsMarker = ".git/crabbox/results-start"
 	autoJUnitMaxFiles   = 50
 	autoJUnitMaxBytes   = 1 << 20
 	autoJUnitSniffBytes = 4 << 10
@@ -80,7 +80,7 @@ func remoteReadResultFiles(workdir string, paths []string) string {
 }
 
 func remoteTouchResultsMarker(workdir string) string {
-	return "cd " + shellQuote(workdir) + " && mkdir -p .crabbox && : > " + shellQuote(remoteResultsMarker)
+	return "cd " + shellQuote(workdir) + " && mkdir -p .git/crabbox && : > " + shellQuote(remoteResultsMarker)
 }
 
 func remoteFindJUnitResultFiles(workdir, marker string) string {

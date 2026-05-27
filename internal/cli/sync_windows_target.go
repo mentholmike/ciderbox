@@ -244,7 +244,7 @@ func windowsRemoteReadResultFiles(workdir string, paths []string) string {
 func windowsRemoteTouchResultsMarker(workdir string) string {
 	return powershellCommand(`$ErrorActionPreference = "Stop"
 Set-Location -LiteralPath ` + psQuote(workdir) + `
-New-Item -ItemType Directory -Force -Path .crabbox | Out-Null
+New-Item -ItemType Directory -Force -Path .git/crabbox | Out-Null
 Set-Content -LiteralPath ` + psQuote(remoteResultsMarker) + ` -Value ""
 `)
 }
