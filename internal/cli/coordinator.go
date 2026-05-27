@@ -24,6 +24,8 @@ type CoordinatorClient struct {
 	Client  *http.Client
 }
 
+const coordinatorHTTPTimeout = 30 * time.Minute
+
 type CoordinatorHTTPError struct {
 	Method     string
 	Path       string
@@ -558,7 +560,7 @@ func newCoordinatorClient(cfg Config) (*CoordinatorClient, bool, error) {
 		Token:   cfg.CoordToken,
 		Access:  cfg.Access,
 		Client: &http.Client{
-			Timeout: 5 * time.Minute,
+			Timeout: coordinatorHTTPTimeout,
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 				DialContext: (&net.Dialer{
@@ -566,7 +568,7 @@ func newCoordinatorClient(cfg Config) (*CoordinatorClient, bool, error) {
 					KeepAlive: 30 * time.Second,
 				}).DialContext,
 				TLSHandshakeTimeout:   10 * time.Second,
-				ResponseHeaderTimeout: 5 * time.Minute,
+				ResponseHeaderTimeout: coordinatorHTTPTimeout,
 				IdleConnTimeout:       90 * time.Second,
 			},
 		},

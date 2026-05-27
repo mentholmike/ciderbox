@@ -144,6 +144,44 @@ func TestAzureWindowsVMSizeCandidatesForClass(t *testing.T) {
 	}
 }
 
+func TestAzureRegionCandidates(t *testing.T) {
+	t.Parallel()
+	cfg := Config{AzureLocation: "eastus"}
+	cfg.Capacity.Regions = []string{"westeurope", "eastus"}
+	got := azureRegionCandidates(cfg, "eastus")
+	want := []string{"eastus", "westeurope"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	cfg.AzureLocation = "westeurope"
+	got = azureRegionCandidates(cfg, "eastus")
+	want = []string{"westeurope", "eastus"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("override got %v, want %v", got, want)
+	}
+	if got := azureRegionalName("crabbox-vnet", "West Europe"); got != "crabbox-vnet-west-europe" {
+		t.Fatalf("regional name=%q", got)
+	}
+	if got := azureRegionalName("crabbox-vnet-westeurope", "westeurope"); got != "crabbox-vnet-westeurope" {
+		t.Fatalf("regional name duplicated suffix: %q", got)
+	}
+}
+
+func TestApplyAzureSpotCapacity(t *testing.T) {
+	t.Parallel()
+	props := &armcompute.VirtualMachineProperties{}
+	applyAzureSpotCapacity(props)
+	if props.Priority == nil || *props.Priority != armcompute.VirtualMachinePriorityTypesSpot {
+		t.Fatalf("Priority=%v want Spot", props.Priority)
+	}
+	if props.EvictionPolicy == nil || *props.EvictionPolicy != armcompute.VirtualMachineEvictionPolicyTypesDelete {
+		t.Fatalf("EvictionPolicy=%v want Delete", props.EvictionPolicy)
+	}
+	if props.BillingProfile == nil || props.BillingProfile.MaxPrice == nil || *props.BillingProfile.MaxPrice != -1 {
+		t.Fatalf("BillingProfile.MaxPrice=%v want -1", props.BillingProfile)
+	}
+}
+
 func TestServerTypeForProviderClassAzure(t *testing.T) {
 	t.Parallel()
 	got := serverTypeForProviderClass("azure", "beast")
@@ -358,6 +396,7 @@ func TestIsAzureRetryableProvisioningError(t *testing.T) {
 		"QuotaExceeded for cores":                          true,
 		"AllocationFailed: out of capacity":                true,
 		"OverconstrainedAllocationRequest: zone exhausted": true,
+		"NotAvailableForSubscription":                      true,
 	}
 	for msg, want := range cases {
 		var err error

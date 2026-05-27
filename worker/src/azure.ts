@@ -1,13 +1,8 @@
 import { azureWindowsBootstrapPowerShell, cloudInit } from "./bootstrap";
-import {
-  azureLocationFor,
-  azureVMSizeCandidatesForTargetClass,
-  sshPorts,
-  type LeaseConfig,
-} from "./config";
+import { azureVMSizeCandidatesForTargetClass, sshPorts, type LeaseConfig } from "./config";
 import { leaseProviderLabels } from "./provider-labels";
 import { leaseProviderName } from "./slug";
-import type { Env, ProviderImage, ProviderMachine } from "./types";
+import type { Env, ProviderImage, ProviderMachine, ProvisioningAttempt } from "./types";
 
 const ADDRESS_SPACE = "10.42.0.0/16";
 const SUBNET_CIDR = "10.42.0.0/24";
@@ -83,6 +78,7 @@ interface AzureSKU {
 }
 
 export class AzureClient {
+  private readonly env: Env;
   private readonly tenant: string;
   private readonly clientID: string;
   private readonly secret: string;
@@ -98,7 +94,8 @@ export class AzureClient {
   private ephemeralOSSupport?: Map<string, boolean>;
   fetcher: typeof fetch = (input, init) => fetch(input, init);
 
-  constructor(env: Env) {
+  constructor(env: Env, options: { location?: string; vnet?: string; nsg?: string } = {}) {
+    this.env = env;
     if (!env.AZURE_TENANT_ID) throw new Error("AZURE_TENANT_ID secret is required");
     if (!env.AZURE_CLIENT_ID) throw new Error("AZURE_CLIENT_ID secret is required");
     if (!env.AZURE_CLIENT_SECRET) throw new Error("AZURE_CLIENT_SECRET secret is required");
@@ -108,16 +105,16 @@ export class AzureClient {
     this.secret = env.AZURE_CLIENT_SECRET;
     this.subscription = env.AZURE_SUBSCRIPTION_ID;
     this.resourceGroup = env.CRABBOX_AZURE_RESOURCE_GROUP?.trim() || "crabbox-leases";
-    this.vnet = env.CRABBOX_AZURE_VNET?.trim() || "crabbox-vnet";
+    this.vnet = options.vnet || env.CRABBOX_AZURE_VNET?.trim() || "crabbox-vnet";
     this.subnet = env.CRABBOX_AZURE_SUBNET?.trim() || "crabbox-subnet";
-    this.nsg = env.CRABBOX_AZURE_NSG?.trim() || "crabbox-nsg";
+    this.nsg = options.nsg || env.CRABBOX_AZURE_NSG?.trim() || "crabbox-nsg";
     this.image = env.CRABBOX_AZURE_IMAGE?.trim() || DEFAULT_AZURE_LINUX_IMAGE;
     this.sshCIDRs = (env.CRABBOX_AZURE_SSH_CIDRS ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
     if (this.sshCIDRs.length === 0) this.sshCIDRs.push("0.0.0.0/0");
-    this.defaultLocation = env.CRABBOX_AZURE_LOCATION?.trim() || "eastus";
+    this.defaultLocation = options.location || env.CRABBOX_AZURE_LOCATION?.trim() || "eastus";
   }
 
   async listCrabboxServers(): Promise<ProviderMachine[]> {
@@ -143,11 +140,73 @@ export class AzureClient {
     leaseID: string,
     slug: string,
     owner: string,
-  ): Promise<{ server: ProviderMachine; serverType: string; market: string }> {
-    const location = azureLocationFor(
-      { CRABBOX_AZURE_LOCATION: this.defaultLocation },
-      config.azureLocation,
-    );
+  ): Promise<{
+    server: ProviderMachine;
+    serverType: string;
+    market: string;
+    attempts?: ProvisioningAttempt[];
+  }> {
+    const locations = azureRegionCandidates(config, this.env, this.defaultLocation);
+    const multiRegion = locations.length > 1;
+    const failures: string[] = [];
+    const attempts: ProvisioningAttempt[] = [];
+    for (const location of locations) {
+      const client = this.clientForLocation(location, multiRegion);
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- region fallback must preserve operator preference order.
+        const result = await client.createServerWithFallbackInLocation(
+          config,
+          location,
+          leaseID,
+          slug,
+          owner,
+        );
+        const allAttempts = [...attempts, ...(result.attempts ?? [])];
+        const server = {
+          ...result.server,
+          region: location,
+          labels: { ...result.server.labels, region: location },
+        };
+        return allAttempts.length > 0
+          ? { ...result, server, attempts: allAttempts }
+          : { ...result, server };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        attempts.push({
+          region: location,
+          serverType: config.serverType,
+          market: config.capacityMarket,
+          category: azureProvisioningErrorCategory(message) || "region",
+          message: conciseAzureProvisioningMessage(message),
+        });
+        failures.push(`${location}: ${message}`);
+        if (!isRetryableProvisioningError(message)) break;
+      }
+    }
+    throw new Error(failures.join("; "));
+  }
+
+  private clientForLocation(location: string, multiRegion: boolean): AzureClient {
+    if (location === this.defaultLocation && !multiRegion) return this;
+    return new AzureClient(this.env, {
+      location,
+      vnet: multiRegion ? azureRegionalName(this.vnet, location) : this.vnet,
+      nsg: multiRegion ? azureRegionalName(this.nsg, location) : this.nsg,
+    });
+  }
+
+  private async createServerWithFallbackInLocation(
+    config: LeaseConfig,
+    location: string,
+    leaseID: string,
+    slug: string,
+    owner: string,
+  ): Promise<{
+    server: ProviderMachine;
+    serverType: string;
+    market: string;
+    attempts?: ProvisioningAttempt[];
+  }> {
     await this.ensureSharedInfra(location, config);
     const candidates =
       config.serverTypeExplicit && config.serverType
@@ -157,6 +216,7 @@ export class AzureClient {
             azureVMSizeCandidatesForTargetClass(config.target, config.class, config.windowsMode),
           );
     const failures: string[] = [];
+    const attempts: ProvisioningAttempt[] = [];
     for (const vmSize of candidates) {
       try {
         // oxlint-disable-next-line eslint/no-await-in-loop -- SKU fallback must stay sequential.
@@ -167,9 +227,18 @@ export class AzureClient {
           slug,
           owner,
         );
-        return { server, serverType: vmSize, market: config.capacityMarket };
+        return attempts.length > 0
+          ? { server, serverType: vmSize, market: config.capacityMarket, attempts }
+          : { server, serverType: vmSize, market: config.capacityMarket };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        attempts.push({
+          region: location,
+          serverType: vmSize,
+          market: config.capacityMarket,
+          category: azureProvisioningErrorCategory(message) || "fatal",
+          message: conciseAzureProvisioningMessage(message),
+        });
         failures.push(`${vmSize}: ${message}`);
         if (!isRetryableProvisioningError(message)) break;
       }
@@ -185,9 +254,18 @@ export class AzureClient {
             slug,
             owner,
           );
-          return { server, serverType: vmSize, market: "on-demand" };
+          return attempts.length > 0
+            ? { server, serverType: vmSize, market: "on-demand", attempts }
+            : { server, serverType: vmSize, market: "on-demand" };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          attempts.push({
+            region: location,
+            serverType: vmSize,
+            market: "on-demand",
+            category: azureProvisioningErrorCategory(message) || "fatal",
+            message: conciseAzureProvisioningMessage(message),
+          });
           failures.push(`on-demand ${vmSize}: ${message}`);
           if (!isRetryableProvisioningError(message)) break;
         }
@@ -204,6 +282,9 @@ export class AzureClient {
       if (!result.retry || attempt >= DELETE_RETRY_ATTEMPTS - 1) {
         throw new Error(result.errors.join("; "));
       }
+      console.warn(
+        `azure delete retry name=${name} attempt=${attempt + 1}/${DELETE_RETRY_ATTEMPTS}: ${result.errors.join("; ")}`,
+      );
       // oxlint-disable-next-line eslint/no-await-in-loop -- the next delete attempt depends on this delay.
       await sleep(DELETE_RETRY_DELAY_MS);
     }
@@ -456,6 +537,7 @@ export class AzureClient {
     if (config.capacityMarket === "spot") {
       vmProperties["priority"] = "Spot";
       vmProperties["evictionPolicy"] = "Delete";
+      vmProperties["billingProfile"] = { maxPrice: -1 };
     }
     await this.arm("PUT", vmPath(this.resourceGroup, name), API_VERSIONS.compute, {
       location,
@@ -1130,12 +1212,83 @@ export function isRetryableProvisioningError(message: string): boolean {
     message.includes("AllocationFailed") ||
     message.includes("ZonalAllocationFailed") ||
     message.includes("OverconstrainedAllocationRequest") ||
-    message.includes("OperationNotAllowed")
+    message.includes("OperationNotAllowed") ||
+    message.includes("NotAvailableForSubscription")
   );
+}
+
+export function azureRegionCandidates(
+  config: Pick<LeaseConfig, "azureLocation" | "capacityRegions">,
+  env: Pick<Env, "CRABBOX_AZURE_LOCATION" | "CRABBOX_AZURE_REGIONS">,
+  preferredLocation = "eastus",
+): string[] {
+  return uniqueStrings(
+    [
+      config.azureLocation,
+      env.CRABBOX_AZURE_LOCATION ?? "",
+      preferredLocation,
+      ...splitCommaList(env.CRABBOX_AZURE_REGIONS ?? ""),
+      ...config.capacityRegions,
+    ].filter(Boolean),
+  );
+}
+
+export function azureRegionalName(base: string, location: string): string {
+  if (!base) return base;
+  const suffix = location
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!suffix || base.toLowerCase().endsWith(`-${suffix}`)) return base;
+  return `${base}-${suffix}`;
+}
+
+export function azureProvisioningErrorCategory(message: string): string | undefined {
+  if (message.includes("QuotaExceeded")) return "quota";
+  if (
+    message.includes("SkuNotAvailable") ||
+    message.includes("AllocationFailed") ||
+    message.includes("ZonalAllocationFailed") ||
+    message.includes("OverconstrainedAllocationRequest")
+  ) {
+    return "capacity";
+  }
+  if (message.includes("NotAvailableForSubscription") || message.includes("OperationNotAllowed")) {
+    return "policy";
+  }
+  return undefined;
+}
+
+export function conciseAzureProvisioningMessage(message: string): string {
+  const parsed = parseAzureStatusMessage(message);
+  const raw = parsed || message;
+  return raw.split(/\n|\. /, 1)[0]?.trim() || raw.trim();
 }
 
 function prependUnique(first: string, rest: string[]): string[] {
   return [first, ...rest.filter((value) => value !== first)];
+}
+
+function splitCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function parseAzureStatusMessage(message: string): string {
+  const match = message.match(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (!match) return "";
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1] ?? "";
+  }
 }
 
 function isAzureDefaultLinuxImage(image: string): boolean {

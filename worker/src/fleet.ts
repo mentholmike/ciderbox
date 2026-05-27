@@ -6110,16 +6110,18 @@ function capacityHints(
     return [];
   }
   const hints: CapacityHint[] = [];
-  const selectedRegion = lease.region || config.awsRegion;
+  const provider = lease.provider === "azure" ? "azure" : "aws";
+  const providerName = provider === "azure" ? "Azure" : "AWS";
+  const selectedRegion =
+    lease.region || (provider === "azure" ? config.azureLocation : config.awsRegion);
   const selectedMarket = lease.market || config.capacityMarket;
   const attemptedRegions = uniqueNonEmpty(attempts.map((attempt) => attempt.region));
   const failedRegions = attemptedRegions.filter((region) => region !== selectedRegion);
   if (selectedRegion && failedRegions.length > 0) {
     hints.push({
-      code: "aws_capacity_routed",
-      message: `AWS launch routed to ${selectedRegion} after failed attempts in ${failedRegions.join(", ")}`,
-      action:
-        "Keep multiple capacity regions configured and avoid pinning a single AWS region during capacity pressure.",
+      code: `${provider}_capacity_routed`,
+      message: `${providerName} launch routed to ${selectedRegion} after failed attempts in ${failedRegions.join(", ")}`,
+      action: `Keep multiple capacity regions configured and avoid pinning a single ${providerName} region during capacity pressure.`,
       region: selectedRegion,
       market: selectedMarket,
       class: config.class,
@@ -6129,10 +6131,12 @@ function capacityHints(
   }
   if (attempts.some((attempt) => attempt.category === "quota")) {
     hints.push({
-      code: "aws_quota_pressure",
-      message: `AWS quota rejected at least one ${config.class} candidate before selecting ${lease.serverType}`,
+      code: `${provider}_quota_pressure`,
+      message: `${providerName} quota rejected at least one ${config.class} candidate before selecting ${lease.serverType}`,
       action:
-        "Use a smaller class or request more EC2 Standard Spot/On-Demand vCPU quota for the affected regions.",
+        provider === "azure"
+          ? "Use a smaller class or request more Azure vCPU quota for the affected regions."
+          : "Use a smaller class or request more EC2 Standard Spot/On-Demand vCPU quota for the affected regions.",
       region: selectedRegion,
       market: selectedMarket,
       class: config.class,
@@ -6145,8 +6149,8 @@ function capacityHints(
     attempts.some((attempt) => (attempt.market || "spot") === "spot")
   ) {
     hints.push({
-      code: "aws_on_demand_fallback",
-      message: `AWS launch used on-demand after spot capacity attempts for ${config.class}`,
+      code: `${provider}_on_demand_fallback`,
+      message: `${providerName} launch used on-demand after spot capacity attempts for ${config.class}`,
       action:
         "Keep on-demand fallback for reliability, or switch back to spot when cost matters more than launch success.",
       region: selectedRegion,
@@ -6570,8 +6574,17 @@ class AzureProvider implements CloudProvider {
   async finalizeLeaseCreate(
     config: ReturnType<typeof leaseConfig>,
     lease: LeaseRecord,
+    server: ProviderMachine,
+    attempts: ProvisioningAttempt[],
   ): Promise<ProviderLeaseCreateFinalization> {
-    return { config, lease: { ...lease, region: config.azureLocation } };
+    const region = server.region || config.azureLocation;
+    const nextConfig = region ? { ...config, azureLocation: region } : config;
+    const nextLease: LeaseRecord = { ...lease, region };
+    const hints = capacityHints(this.env, nextConfig, nextLease, attempts);
+    if (hints.length > 0) {
+      nextLease.capacityHints = hints;
+    }
+    return { config: nextConfig, lease: nextLease };
   }
 
   async releaseLease(lease: LeaseRecord): Promise<void> {

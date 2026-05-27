@@ -7,10 +7,16 @@
 - Added `--desktop-env gnome` for a GNOME-apps desktop profile on labwc/WayVNC with GNOME Panel taskbars and Xwayland-backed app launches.
 - Added native Windows support for GitHub-runner Actions hydration so workflows can prepare Windows leases before Crabbox attaches to the hydrated workspace.
 - Added a portable `--os`/`os` lease selector with Ubuntu 26.04 as the preferred Linux image where provider catalogs support it, while preserving explicit provider image overrides.
+- Added Azure `capacity.regions` fallback with region-scoped managed network names and Azure capacity hints, matching the AWS capacity-routing model.
+- Added a repo-local Crabbox hydrate workflow and documented Azure as the preferred Windows/WSL2 provider when Azure quota or credits are available.
 
 ### Fixed
 
 - Fixed failed-run summaries so application output mentioning provider auth no longer looks like a provider/auth blocker, shell `&&` command chains explain short-circuit behavior, observed phases identify the likely failed phase, and opt-in automatic JUnit discovery can add structured test failures.
+- Fixed Azure Spot VM provisioning to send `billingProfile.maxPrice: -1` explicitly in both direct and brokered mode, keeping Crabbox leases on Spot pricing without price-threshold evictions.
+- Fixed coordinator-backed lease creation to wait long enough for slow cloud bootstraps such as Azure Windows/WSL2 before timing out locally.
+- Fixed Azure failed-candidate cleanup retries to emit Worker-side progress logs while Azure waits out NIC and public IP dependency locks.
+- Fixed brokered Azure region ordering so an explicit request or `CRABBOX_AZURE_LOCATION` is attempted before the coordinator default.
 - Fixed native Windows `--fresh-pr` runs so PR checkout, local patch application, and post-bootstrap SSH port changes work over PowerShell.
 - Fixed native Windows Actions env handoff so `crabbox run` can consume bash-style hydrate env files and reuse hydrated Node/pnpm paths.
 - Fixed AWS coordinator EC2 polling to tolerate transient `InvalidInstanceID.NotFound` after instance creation and to report parsed AWS XML errors.

@@ -4,8 +4,12 @@ import {
   AzureClient,
   azureLabelsFromTags,
   azureLROPollIntervalMS,
+  azureProvisioningErrorCategory,
+  azureRegionCandidates,
+  azureRegionalName,
   azureSupportsEphemeralOS,
   azureTagsFromLabels,
+  conciseAzureProvisioningMessage,
   isRetryableDeleteError,
   isRetryableProvisioningError,
   preserveNonCrabboxRules,
@@ -96,8 +100,34 @@ describe("azure provider", () => {
     expect(isRetryableProvisioningError("QuotaExceeded for cores")).toBe(true);
     expect(isRetryableProvisioningError("AllocationFailed")).toBe(true);
     expect(isRetryableProvisioningError("OverconstrainedAllocationRequest")).toBe(true);
+    expect(isRetryableProvisioningError("NotAvailableForSubscription")).toBe(true);
     expect(isRetryableProvisioningError("ResourceNotFound")).toBe(false);
     expect(isRetryableProvisioningError("")).toBe(false);
+  });
+
+  it("orders Azure region candidates from defaults, env, and capacity regions", () => {
+    expect(
+      azureRegionCandidates(
+        { azureLocation: "westeurope", capacityRegions: ["northeurope", "westeurope"] },
+        { CRABBOX_AZURE_LOCATION: "centralus", CRABBOX_AZURE_REGIONS: "northeurope,westeurope" },
+        "eastus",
+      ),
+    ).toEqual(["westeurope", "centralus", "eastus", "northeurope"]);
+    expect(azureRegionalName("crabbox-vnet", "West Europe")).toBe("crabbox-vnet-west-europe");
+    expect(azureRegionalName("crabbox-vnet-westeurope", "westeurope")).toBe(
+      "crabbox-vnet-westeurope",
+    );
+  });
+
+  it("classifies and condenses Azure provisioning failures for capacity hints", () => {
+    const body =
+      '{"error":{"code":"SkuNotAvailable","message":"The requested VM size is currently not available. Try another size."}}';
+    expect(azureProvisioningErrorCategory(body)).toBe("capacity");
+    expect(conciseAzureProvisioningMessage(body)).toBe(
+      "The requested VM size is currently not available",
+    );
+    expect(azureProvisioningErrorCategory("QuotaExceeded for cores")).toBe("quota");
+    expect(azureProvisioningErrorCategory("NotAvailableForSubscription")).toBe("policy");
   });
 
   it("classifies transient Azure delete dependency errors as retryable", () => {
@@ -526,6 +556,11 @@ describe("azure provider", () => {
       adminUsername: "crabadmin",
       allowExtensionOperations: true,
       windowsConfiguration: { provisionVMAgent: true, enableAutomaticUpdates: false },
+    });
+    expect(vmBody?.properties).toMatchObject({
+      priority: "Spot",
+      evictionPolicy: "Delete",
+      billingProfile: { maxPrice: -1 },
     });
     expect(String(vmBody?.properties.osProfile.customData ?? "")).toBeTruthy();
     expect(JSON.stringify(vmBody)).toContain("MicrosoftWindowsServer");

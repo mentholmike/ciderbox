@@ -27,6 +27,7 @@ export interface Env {
   AZURE_CLIENT_SECRET?: string;
   AZURE_SUBSCRIPTION_ID?: string;
   CRABBOX_AZURE_LOCATION?: string;
+  CRABBOX_AZURE_REGIONS?: string;
   CRABBOX_AZURE_RESOURCE_GROUP?: string;
   CRABBOX_AZURE_IMAGE?: string;
   CRABBOX_AZURE_OS_DISK?: string;

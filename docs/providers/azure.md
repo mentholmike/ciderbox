@@ -18,6 +18,11 @@ when Microsoft tooling, Entra ID, or Azure-specific networking constraints
 make AWS or Hetzner inappropriate. Use Hetzner for cheaper Linux-only
 capacity and AWS for macOS targets.
 
+For Windows and Windows WSL2, Azure is a good default when the subscription has
+healthy credits or reserved capacity: the class table is smaller than AWS's
+Linux-heavy defaults, WSL2 uses Azure nested-virtualization SKUs, and brokered
+leases now use the same ordered capacity-region fallback model as AWS.
+
 Azure supports direct mode and brokered Linux/native Windows/WSL2 leases. Direct
 mode uses local Azure credentials. Brokered mode uses the operator-owned
 Azure service principal configured on the Worker.
@@ -86,6 +91,7 @@ CRABBOX_AZURE_SUBNET
 CRABBOX_AZURE_NSG
 CRABBOX_AZURE_SSH_CIDRS
 CRABBOX_AZURE_NETWORK
+CRABBOX_AZURE_REGIONS
 ```
 
 `CRABBOX_AZURE_NETWORK` selects the IP used for SSH: `public` (default) uses
@@ -107,7 +113,9 @@ Brokered mode uses the same Azure service-principal secrets on the Worker:
 `AZURE_SUBSCRIPTION_ID`. Operators own the resource group, vnet, subnet,
 NSG, OS disk mode, and SSH CIDR defaults through `CRABBOX_AZURE_*` env vars. A
 lease request may override only `azureLocation`, `azureImage`, and
-`azureOSDisk`.
+`azureOSDisk`. Set `CRABBOX_AZURE_REGIONS` on the Worker for Azure-specific
+broker capacity fallback; `CRABBOX_CAPACITY_REGIONS` remains the AWS region
+fallback list.
 
 Run `crabbox doctor --provider azure --target windows` before leasing through
 the broker. The coordinator readiness check reports missing Worker secret names
@@ -212,8 +220,14 @@ beast     Standard_D16ads_v6, Standard_D16ds_v6, Standard_D16ads_v5, Standard_D1
 Class-based provisioning falls back across the candidate list when Azure
 rejects a SKU for capacity or quota
 (`SkuNotAvailable`, `QuotaExceeded`, `AllocationFailed`,
-`OverconstrainedAllocationRequest`). Spot leases fall back to on-demand when
-`capacity.fallback` starts with `on-demand`. Explicit `--type` is exact.
+`OverconstrainedAllocationRequest`). When `capacity.regions` or broker-side
+`CRABBOX_AZURE_REGIONS` is configured, Crabbox also tries those Azure regions in
+order and uses region-scoped shared network names for the fallback path. Spot
+leases fall back to on-demand when `capacity.fallback` starts with `on-demand`.
+Azure Spot VMs use eviction policy `Delete` and `billingProfile.maxPrice: -1`,
+so price alone does not evict a lease while Azure still charges no more than
+the on-demand price. Explicit `--type` is exact for size selection, but still
+allows configured region fallback.
 The default Linux candidates mirror the AWS Linux class table's vCPU scale.
 The default Windows candidates mirror the AWS native Windows class table's
 vCPU scale. Azure native Windows support covers SSH, sync, run, and optional
@@ -242,11 +256,11 @@ through the POSIX WSL contract.
 - The first acquire in an empty subscription pays the cost of creating the
   shared resource group, vnet, and NSG. Subsequent acquires only create
   per-lease resources.
-- Shared Azure network resources are regional. If `crabbox-nsg` or
-  `crabbox-vnet` already exists in `westcentralus`, a later acquire configured
-  for `eastus` must either set `azure.location: westcentralus` to reuse that
-  shared infra or use different `azure.vnet` / `azure.subnet` / `azure.nsg`
-  names for the new region.
+- Shared Azure network resources are regional. Single-region leases use the
+  configured `azure.vnet` and `azure.nsg` names. Multi-region fallback appends
+  the region to those shared network names, for example
+  `crabbox-vnet-westeurope`, so one managed resource group can hold fallback
+  networks safely.
 - If you already have a resource group / vnet / NSG with the configured
   names, Crabbox will refuse to mutate them unless they carry
   `managed_by=crabbox` as a tag. Either tag them to adopt, choose

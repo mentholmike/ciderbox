@@ -15,6 +15,11 @@ Windows WSL2 bootstrap and then uses the POSIX sync/run contract through WSL.
 It works in direct mode with local Azure auth and in brokered mode through
 Worker-owned service principal secrets.
 
+Prefer Azure for Windows and Windows WSL2 when your Azure subscription has
+credits or available quota. It now has the same capacity-routing shape as AWS
+for brokered leases, while keeping Windows classes smaller and cheaper than the
+large Linux-focused classes.
+
 ## Targets
 
 | Target | Managed | Notes |
@@ -59,7 +64,15 @@ beast     Standard_D16ads_v6, Standard_D16ds_v6, Standard_D16ads_v5, Standard_D1
 Crabbox falls back through the candidate list when Azure rejects a SKU for
 capacity or quota. Explicit `--type` is exact and fails clearly when the
 SKU cannot be created. Spot leases fall back to on-demand when
-`capacity.fallback` starts with `on-demand`.
+`capacity.fallback` starts with `on-demand`. Azure Spot VMs use eviction policy
+`Delete` and `billingProfile.maxPrice: -1`, so price alone does not evict a
+lease while Azure still charges no more than the on-demand price.
+
+Set `capacity.regions`, or broker-side `CRABBOX_AZURE_REGIONS`, to let Azure
+follow the same ordered region fallback model as AWS. Crabbox keeps
+single-region shared network names unchanged, but for multi-region Azure
+fallback it appends the region to the managed vnet and NSG names so one
+resource group can hold independent regional networks.
 
 Default Azure Linux class candidates mirror the vCPU scale of the AWS Linux
 class table. Default Azure Windows candidates mirror the AWS native Windows
@@ -112,6 +125,7 @@ CRABBOX_AZURE_SUBNET
 CRABBOX_AZURE_NSG
 CRABBOX_AZURE_SSH_CIDRS
 CRABBOX_AZURE_NETWORK
+CRABBOX_AZURE_REGIONS
 ```
 
 The service principal needs the
@@ -122,7 +136,9 @@ create the resource group on first use).
 Brokered Azure uses `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
 `AZURE_CLIENT_SECRET`, and `AZURE_SUBSCRIPTION_ID` on the Worker. Operators
 own the shared infra settings through `CRABBOX_AZURE_*`. Lease requests may
-override only `azureLocation`, `azureImage`, and `azureOSDisk`.
+override only `azureLocation`, `azureImage`, and `azureOSDisk`. Use
+`CRABBOX_AZURE_REGIONS` for Azure broker fallback; keep
+`CRABBOX_CAPACITY_REGIONS` for AWS.
 
 ## Shared Infra
 
