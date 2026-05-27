@@ -46,6 +46,25 @@ func TestParseMarkedFiles(t *testing.T) {
 	}
 }
 
+func TestRemoteTouchResultsMarkerUsesGitMetadataWhenAvailable(t *testing.T) {
+	got := remoteTouchResultsMarker("/repo")
+	for _, want := range []string{
+		"cd '/repo'",
+		"marker=.crabbox/results-start",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"marker=$git_marker",
+		"mkdir -p \"$(dirname \"$marker\")\"",
+		": > \"$marker\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("touch marker command missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "mkdir -p .git") || strings.Contains(got, ".git/crabbox/results-start") {
+		t.Fatalf("touch marker command should not hard-code .git:\n%s", got)
+	}
+}
+
 func TestRemoteFindJUnitResultFiles(t *testing.T) {
 	got := remoteFindJUnitResultFiles("/repo", remoteResultsMarker)
 	for _, want := range []string{
@@ -60,8 +79,10 @@ func TestRemoteFindJUnitResultFiles(t *testing.T) {
 		"-name 'results.xml'",
 		"&& { tmp=$(mktemp) || exit 0;",
 		"tmp=$(mktemp) || exit 0",
-		"[ -f '.git/crabbox/results-start' ] || exit 0",
-		"'.git/crabbox/results-start' -nt \"$f\"",
+		"marker=.crabbox/results-start",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"[ -f \"$marker\" ] || exit 0",
+		"\"$marker\" -nt \"$f\"",
 		"| sort > \"$tmp\"",
 		"for want_failed in 1 0",
 		"bs=4096 count=1",
@@ -84,16 +105,39 @@ func TestRemoteFindJUnitResultFiles(t *testing.T) {
 	}
 }
 
+func TestWindowsRemoteTouchResultsMarkerUsesGitMetadataWhenAvailable(t *testing.T) {
+	got := decodePowerShellCommand(t, windowsRemoteTouchResultsMarker(`C:\repo`))
+	for _, want := range []string{
+		"Set-Location -LiteralPath 'C:\\repo'",
+		"$marker = '.crabbox/results-start'",
+		"Get-Command git -ErrorAction SilentlyContinue",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"$marker = ([string]$gitMarker).Trim()",
+		"New-Item -ItemType Directory -Force -Path $markerDir",
+		"Set-Content -LiteralPath $marker",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("windows touch marker command missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "New-Item -ItemType Directory -Force -Path .git/crabbox") || strings.Contains(got, ".git/crabbox/results-start") {
+		t.Fatalf("windows touch marker command should not hard-code .git:\n%s", got)
+	}
+}
+
 func TestWindowsRemoteFindJUnitResultFilesPrintsPathMarker(t *testing.T) {
 	got := decodePowerShellCommand(t, windowsRemoteFindJUnitResultFiles(`C:\repo`, remoteResultsMarker))
 	for _, want := range []string{
 		"$ErrorActionPreference = \"Stop\"",
 		"Set-Location -LiteralPath 'C:\\repo'",
 		"$ErrorActionPreference = \"SilentlyContinue\"",
+		"$marker = '.crabbox/results-start'",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"$marker = ([string]$gitMarker).Trim()",
 		"function Get-CrabboxJUnitFiles",
 		"$_.Name -ne 'node_modules' -and $_.Name -ne '.git'",
-		"if (-not (Test-Path -LiteralPath '.git/crabbox/results-start')) { return }",
-		"$markerTime = (Get-Item -LiteralPath '.git/crabbox/results-start').LastWriteTimeUtc",
+		"if (-not (Test-Path -LiteralPath $marker)) { return }",
+		"$markerTime = (Get-Item -LiteralPath $marker).LastWriteTimeUtc",
 		"$_.LastWriteTimeUtc -ge $markerTime",
 		"$maxBytes = 1048576",
 		"$sniffBytes = 4096",

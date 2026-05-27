@@ -8,7 +8,7 @@ import (
 
 const (
 	resultFileMarker    = "__CRABBOX_RESULT_FILE__:"
-	remoteResultsMarker = ".git/crabbox/results-start"
+	remoteResultsMarker = "crabbox/results-start"
 	autoJUnitMaxFiles   = 50
 	autoJUnitMaxBytes   = 1 << 20
 	autoJUnitSniffBytes = 4 << 10
@@ -80,7 +80,7 @@ func remoteReadResultFiles(workdir string, paths []string) string {
 }
 
 func remoteTouchResultsMarker(workdir string) string {
-	return "cd " + shellQuote(workdir) + " && mkdir -p .git/crabbox && : > " + shellQuote(remoteResultsMarker)
+	return "cd " + shellQuote(workdir) + " && marker=.crabbox/results-start; if git_marker=$(git rev-parse --git-path " + shellQuote(remoteResultsMarker) + " 2>/dev/null); then marker=$git_marker; fi; mkdir -p \"$(dirname \"$marker\")\" && : > \"$marker\""
 }
 
 func remoteFindJUnitResultFiles(workdir, marker string) string {
@@ -90,16 +90,14 @@ func remoteFindJUnitResultFiles(workdir, marker string) string {
 	b.WriteString(" && { ")
 	b.WriteString("tmp=$(mktemp) || exit 0; trap 'rm -f \"$tmp\"' EXIT; count=0; ")
 	if strings.TrimSpace(marker) != "" {
-		b.WriteString("[ -f ")
+		b.WriteString("marker=.crabbox/results-start; if git_marker=$(git rev-parse --git-path ")
 		b.WriteString(shellQuote(marker))
-		b.WriteString(" ] || exit 0; ")
+		b.WriteString(" 2>/dev/null); then marker=$git_marker; fi; [ -f \"$marker\" ] || exit 0; ")
 	}
 	b.WriteString(`find . \( -path './node_modules' -o -path '*/node_modules' -o -path './.git' -o -path '*/.git' \) -prune -o -type f \( -name 'junit*.xml' -o -name 'TEST-*.xml' -o -name 'results.xml' \)`)
 	b.WriteString(` -print 2>/dev/null | sort > "$tmp"; for want_failed in 1 0; do while IFS= read -r f; do `)
 	if strings.TrimSpace(marker) != "" {
-		b.WriteString("if [ ")
-		b.WriteString(shellQuote(marker))
-		b.WriteString(` -nt "$f" ]; then continue; fi; `)
+		b.WriteString(`if [ "$marker" -nt "$f" ]; then continue; fi; `)
 	}
 	b.WriteString(fmt.Sprintf(`dd if="$f" bs=%d count=1 2>/dev/null | grep -Eq '<testsuites?' || continue; has_failed=0; dd if="$f" bs=%d count=1 2>/dev/null | grep -Eq '<(failure|error)([[:space:]>])' && has_failed=1; if [ "$want_failed" != "$has_failed" ]; then continue; fi; count=$((count + 1)); if [ "$count" -gt %d ]; then break 2; fi; `, autoJUnitSniffBytes, autoJUnitMaxBytes, autoJUnitMaxFiles))
 	b.WriteString(`printf '\n`)

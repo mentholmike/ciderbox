@@ -244,8 +244,10 @@ func windowsRemoteReadResultFiles(workdir string, paths []string) string {
 func windowsRemoteTouchResultsMarker(workdir string) string {
 	return powershellCommand(`$ErrorActionPreference = "Stop"
 Set-Location -LiteralPath ` + psQuote(workdir) + `
-New-Item -ItemType Directory -Force -Path .git/crabbox | Out-Null
-Set-Content -LiteralPath ` + psQuote(remoteResultsMarker) + ` -Value ""
+` + windowsResolveResultsMarker() + `
+$markerDir = Split-Path -Parent $marker
+if ($markerDir) { New-Item -ItemType Directory -Force -Path $markerDir | Out-Null }
+Set-Content -LiteralPath $marker -Value ""
 `)
 }
 
@@ -258,8 +260,10 @@ func windowsRemoteFindJUnitResultFiles(workdir, marker string) string {
 	b.WriteString(fmt.Sprintf("$sniffBytes = %d\n", autoJUnitSniffBytes))
 	b.WriteString(fmt.Sprintf("$maxFiles = %d\n", autoJUnitMaxFiles))
 	if strings.TrimSpace(marker) != "" {
-		b.WriteString(`if (-not (Test-Path -LiteralPath ` + psQuote(marker) + `)) { return }` + "\n")
-		b.WriteString(`$markerTime = (Get-Item -LiteralPath ` + psQuote(marker) + `).LastWriteTimeUtc` + "\n")
+		b.WriteString(windowsResolveResultsMarker())
+		b.WriteString("\n")
+		b.WriteString(`if (-not (Test-Path -LiteralPath $marker)) { return }` + "\n")
+		b.WriteString(`$markerTime = (Get-Item -LiteralPath $marker).LastWriteTimeUtc` + "\n")
 	}
 	b.WriteString(`function Get-CrabboxJUnitFiles([string]$Path, [int]$Depth) {` + "\n")
 	b.WriteString(`  if ($Depth -lt 0) { return }` + "\n")
@@ -305,6 +309,14 @@ func windowsRemoteFindJUnitResultFiles(workdir, marker string) string {
 	b.WriteString(`  if ($count -ge $maxFiles) { break }` + "\n")
 	b.WriteString(`}` + "\n")
 	return powershellCommand(b.String())
+}
+
+func windowsResolveResultsMarker() string {
+	return `$marker = '.crabbox/results-start'
+if (Get-Command git -ErrorAction SilentlyContinue) {
+  $gitMarker = & git rev-parse --git-path ` + psQuote(remoteResultsMarker) + ` 2>$null
+  if ($LASTEXITCODE -eq 0 -and $gitMarker) { $marker = ([string]$gitMarker).Trim() }
+}`
 }
 
 func windowsRemoteDoctor() string {
