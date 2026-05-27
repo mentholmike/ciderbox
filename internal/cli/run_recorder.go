@@ -161,7 +161,7 @@ func (r *runRecorder) StreamWriter(stream string) *runEventStreamWriter {
 	return &runEventStreamWriter{recorder: r, stream: stream}
 }
 
-func (r *runRecorder) Finish(ctx context.Context, target SSHTarget, exitCode int, sync, command time.Duration, log string, truncated bool, results *TestResultSummary) {
+func (r *runRecorder) Finish(ctx context.Context, target SSHTarget, exitCode int, sync, command time.Duration, log string, truncated bool, results *TestResultSummary, classification FailureClassification) {
 	if r == nil || r.runID == "" || r.finished {
 		return
 	}
@@ -172,7 +172,7 @@ func (r *runRecorder) Finish(ctx context.Context, target SSHTarget, exitCode int
 	r.recordTelemetrySample(telemetryEnd)
 	ctx, cancel := context.WithTimeout(context.Background(), runRecorderFinishTimeout)
 	defer cancel()
-	if _, err := r.coord.FinishRun(ctx, r.runID, exitCode, sync, command, log, truncated, results, runTelemetrySummary(r.telemetryStart, telemetryEnd, r.telemetrySnapshot())); err != nil {
+	if _, err := r.coord.FinishRun(ctx, r.runID, exitCode, sync, command, log, truncated, results, runTelemetrySummary(r.telemetryStart, telemetryEnd, r.telemetrySnapshot()), classification); err != nil {
 		r.warn("run history finish failed for %s: %v", r.runID, err)
 	}
 }

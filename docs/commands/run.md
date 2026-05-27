@@ -259,7 +259,7 @@ After sync, Crabbox runs a remote sanity check. If the remote checkout reports a
 
 When a coordinator is configured, Crabbox records each remote command as a run history item. `crabbox history` lists those records and `crabbox logs <run-id>` prints retained remote output. Log retention is intentionally bounded so a noisy command cannot fill Durable Object storage.
 
-Add `--junit <path>` or configure `results.junit` to attach JUnit XML summaries to the run record. `crabbox results <run-id>` then prints failed tests without reading the raw log.
+Add `--junit <path>` or configure `results.junit` to attach JUnit XML summaries to the run record. Use `--results-auto` or `results.auto: true` to scan common remote JUnit XML paths written by the command. Auto discovery skips dependency and Git directories and bounds remote file reads before parsing. `crabbox results <run-id>` then prints failed tests without reading the raw log.
 
 Use `crabbox sync-plan` to inspect the same local manifest without leasing a box when a sync estimate looks unexpectedly large.
 

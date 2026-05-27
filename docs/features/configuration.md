@@ -533,6 +533,7 @@ cache:
 
 ```yaml
 results:
+  auto: false
   junit:
     - junit.xml
     - reports/junit.xml

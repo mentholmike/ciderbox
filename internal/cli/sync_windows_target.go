@@ -241,6 +241,63 @@ func windowsRemoteReadResultFiles(workdir string, paths []string) string {
 	return powershellCommand(b.String())
 }
 
+func windowsRemoteTouchResultsMarker(workdir string) string {
+	return powershellCommand(`$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath ` + psQuote(workdir) + `
+New-Item -ItemType Directory -Force -Path .crabbox | Out-Null
+Set-Content -LiteralPath ` + psQuote(remoteResultsMarker) + ` -Value ""
+`)
+}
+
+func windowsRemoteFindJUnitResultFiles(workdir, marker string) string {
+	var b bytes.Buffer
+	b.WriteString(`$ErrorActionPreference = "SilentlyContinue"` + "\n")
+	b.WriteString(fmt.Sprintf("$maxBytes = %d\n", autoJUnitMaxBytes))
+	b.WriteString(fmt.Sprintf("$sniffBytes = %d\n", autoJUnitSniffBytes))
+	b.WriteString(fmt.Sprintf("$maxFiles = %d\n", autoJUnitMaxFiles))
+	b.WriteString(`Set-Location -LiteralPath ` + psQuote(workdir) + "\n")
+	if strings.TrimSpace(marker) != "" {
+		b.WriteString(`$markerTime = (Get-Item -LiteralPath ` + psQuote(marker) + `).LastWriteTimeUtc` + "\n")
+	}
+	b.WriteString(`function Get-CrabboxJUnitFiles([string]$Path, [int]$Depth) {` + "\n")
+	b.WriteString(`  if ($Depth -lt 0) { return }` + "\n")
+	b.WriteString(`  Get-ChildItem -LiteralPath $Path -Force | ForEach-Object {` + "\n")
+	b.WriteString(`    if ($_.PSIsContainer) {` + "\n")
+	b.WriteString(`      if ($_.Name -ne 'node_modules' -and $_.Name -ne '.git') { Get-CrabboxJUnitFiles $_.FullName ($Depth - 1) }` + "\n")
+	b.WriteString(`    } elseif ($_.Name -like 'junit*.xml' -or $_.Name -like 'TEST-*.xml' -or $_.Name -eq 'results.xml') {` + "\n")
+	if strings.TrimSpace(marker) != "" {
+		b.WriteString(`      if ($_.LastWriteTimeUtc -ge $markerTime) { $_ }` + "\n")
+	} else {
+		b.WriteString(`      $_` + "\n")
+	}
+	b.WriteString(`    }` + "\n")
+	b.WriteString(`  }` + "\n")
+	b.WriteString(`}` + "\n")
+	b.WriteString(`$count = 0` + "\n")
+	b.WriteString(`Get-CrabboxJUnitFiles (Get-Location).Path 5 | Sort-Object FullName | ForEach-Object {` + "\n")
+	b.WriteString(`  if ($count -ge $maxFiles) { return }` + "\n")
+	b.WriteString(`  $fs = [System.IO.File]::OpenRead($_.FullName)` + "\n")
+	b.WriteString(`  try {` + "\n")
+	b.WriteString(`    $sniffLength = [Math]::Min([int64]$sniffBytes, $fs.Length)` + "\n")
+	b.WriteString(`    $sniff = New-Object byte[] ([int]$sniffLength)` + "\n")
+	b.WriteString(`    $sniffRead = $fs.Read($sniff, 0, $sniff.Length)` + "\n")
+	b.WriteString(`    $prefix = if ($sniffRead -gt 0) { [System.Text.Encoding]::UTF8.GetString($sniff, 0, $sniffRead) } else { "" }` + "\n")
+	b.WriteString(`    if ($prefix -notmatch '<testsuites?') { return }` + "\n")
+	b.WriteString(`    $count++` + "\n")
+	b.WriteString(`    $fs.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null` + "\n")
+	b.WriteString(`    Write-Output "` + resultFileMarker + `$($_.FullName)"` + "\n")
+	b.WriteString(`    $length = [Math]::Min([int64]$maxBytes, $fs.Length)` + "\n")
+	b.WriteString(`    $buffer = New-Object byte[] ([int]$length)` + "\n")
+	b.WriteString(`    $read = $fs.Read($buffer, 0, $buffer.Length)` + "\n")
+	b.WriteString(`    if ($read -gt 0) { [Console]::Write([System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)) }` + "\n")
+	b.WriteString(`    [Console]::WriteLine()` + "\n")
+	b.WriteString(`  } finally {` + "\n")
+	b.WriteString(`    $fs.Dispose()` + "\n")
+	b.WriteString(`  }` + "\n")
+	b.WriteString(`}` + "\n")
+	return powershellCommand(b.String())
+}
+
 func windowsRemoteDoctor() string {
 	return powershellCommand(`$ErrorActionPreference = "Stop"
 Write-Output ("git=" + (git --version))

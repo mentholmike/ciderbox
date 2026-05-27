@@ -68,6 +68,18 @@ func TestClassifyRunFailureDoesNotTreatApplicationAuthFailuresAsProviderAuth(t *
 	}
 }
 
+func TestClassifyRunFailureDoesNotTreatApplicationProviderAuthTextAsProviderAuth(t *testing.T) {
+	for _, text := range []string{
+		"FAIL src/provider-auth.test.ts\nexpected area provider_auth to be rendered",
+		"normal test failure in provider auth settings panel",
+	} {
+		got := ClassifyRunFailure(1, text, nil)
+		if got.BlockedStage != "unknown" {
+			t.Fatalf("ClassifyRunFailure(%q)=%#v, want unknown", text, got)
+		}
+	}
+}
+
 func TestFormatRunSummaryIncludesFailureClassification(t *testing.T) {
 	got := formatRunSummary(runTimings{
 		sync:         time.Second,
@@ -122,6 +134,86 @@ func TestPrintRunFailureDigest(t *testing.T) {
 		"next: crabbox run --id blue-lobster --fresh-sync -- go test ./...",
 		"tail stderr:",
 		"unit failed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("digest missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintRunFailureDigestExplainsAndChainShortCircuit(t *testing.T) {
+	stderrTail := newStreamTailBuffer(40)
+	_, _ = stderrTail.Write([]byte("pnpm check failed\n"))
+	var buf bytes.Buffer
+	printRunFailureDigest(&buf, runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		CommandDisplay: "pnpm check && pnpm test",
+		ShellMode:      true,
+		Classification: FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"},
+	}, newStreamTailBuffer(40), stderrTail, "", "")
+	out := buf.String()
+	for _, want := range []string{
+		"area: user_command",
+		"shell_chain: pnpm check && pnpm test",
+		"would_skip_if_left_failed: pnpm test",
+		"chain_semantics: && only runs later segments if all earlier segments succeed",
+		"next: crabbox run --id cbx_123 --fresh-sync --shell -- 'pnpm check && pnpm test'",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("digest missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "provider_auth") {
+		t.Fatalf("digest should not mention provider_auth:\n%s", out)
+	}
+}
+
+func TestPrintRunFailureDigestIncludesObservedPhases(t *testing.T) {
+	var buf bytes.Buffer
+	printRunFailureDigest(&buf, runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		CommandDisplay: "pnpm verify",
+		Classification: FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"},
+		Phases: []TimingPhase{
+			{Name: "user-command"},
+			{Name: "check"},
+			{Name: "test"},
+		},
+	}, newStreamTailBuffer(40), newStreamTailBuffer(40), "", "")
+	out := buf.String()
+	for _, want := range []string{
+		"phase: test",
+		"failed_phase: test",
+		"observed_phases: user-command,check,test",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("digest missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintRunFailureDigestIncludesStructuredTestFailures(t *testing.T) {
+	var buf bytes.Buffer
+	printRunFailureDigest(&buf, runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		CommandDisplay: "pnpm test",
+		Classification: FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"},
+		Results: &TestResultSummary{
+			Files:    []string{"junit.xml"},
+			Tests:    2,
+			Failures: 1,
+			Failed: []TestFailure{{
+				File:    "src/example.test.ts",
+				Name:    "renders",
+				Kind:    "failure",
+				Message: "expected true",
+			}},
+		},
+	}, newStreamTailBuffer(40), newStreamTailBuffer(40), "", "")
+	out := buf.String()
+	for _, want := range []string{
+		"test_results: files=1 tests=2 failures=1 errors=0 skipped=0",
+		"failed_test: src/example.test.ts failure  renders - expected true",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("digest missing %q:\n%s", want, out)

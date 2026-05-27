@@ -516,6 +516,7 @@ static:
   port: "22"
   workRoot: /home/peter/crabbox
 results:
+  auto: true
   junit:
     - junit.xml
 run:
@@ -641,7 +642,7 @@ ssh:
 	if cfg.Static.Host != "win-dev.local" || cfg.Static.User != "peter" || cfg.Static.Port != "22" || cfg.WorkRoot != "/home/peter/crabbox" {
 		t.Fatalf("static config not loaded: static=%#v workRoot=%s", cfg.Static, cfg.WorkRoot)
 	}
-	if len(cfg.Results.JUnit) != 1 || cfg.Results.JUnit[0] != "junit.xml" {
+	if len(cfg.Results.JUnit) != 1 || cfg.Results.JUnit[0] != "junit.xml" || !cfg.Results.Auto {
 		t.Fatalf("results config not loaded: %#v", cfg.Results)
 	}
 	if len(cfg.Run.PreflightTools) != 2 || cfg.Run.PreflightTools[0] != "node" || cfg.Run.PreflightTools[1] != "bun" {
@@ -902,6 +903,7 @@ func TestEnvOverridesConfig(t *testing.T) {
 	t.Setenv("CRABBOX_ACTIONS_RUNNER_LABELS", "crabbox,linux-large")
 	t.Setenv("CRABBOX_ACTIONS_EPHEMERAL", "false")
 	t.Setenv("CRABBOX_RESULTS_JUNIT", "junit.xml,build/test.xml")
+	t.Setenv("CRABBOX_RESULTS_AUTO", "true")
 	t.Setenv("CRABBOX_CACHE_PNPM", "false")
 	t.Setenv("CRABBOX_CACHE_NPM", "false")
 	t.Setenv("CRABBOX_CACHE_DOCKER", "true")
@@ -1017,7 +1019,7 @@ func TestEnvOverridesConfig(t *testing.T) {
 	if len(cfg.Actions.RunnerLabels) != 2 || cfg.Actions.RunnerLabels[1] != "linux-large" || cfg.Actions.Ephemeral {
 		t.Fatalf("unexpected actions env: %#v", cfg.Actions)
 	}
-	if len(cfg.Results.JUnit) != 2 || cfg.Results.JUnit[1] != "build/test.xml" {
+	if len(cfg.Results.JUnit) != 2 || cfg.Results.JUnit[1] != "build/test.xml" || !cfg.Results.Auto {
 		t.Fatalf("unexpected results env: %#v", cfg.Results)
 	}
 	if cfg.Cache.Pnpm || cfg.Cache.Npm || !cfg.Cache.Docker || cfg.Cache.Git || !cfg.Cache.PurgeOnRelease {

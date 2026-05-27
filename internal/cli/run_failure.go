@@ -19,10 +19,7 @@ func ClassifyRunFailure(exitCode int, text string, phases []TimingPhase) Failure
 	switch {
 	case strings.Contains(lower, "timed out waiting for ssh"):
 		return FailureClassification{BlockedStage: "ssh", RetryLikely: "true"}
-	case isKnownHTMLAuthBody(lower) ||
-		strings.Contains(lower, "cloudflare access") ||
-		strings.Contains(lower, "provider_auth") ||
-		strings.Contains(lower, "provider auth"):
+	case isKnownHTMLAuthBody(lower):
 		return FailureClassification{BlockedStage: "provider_auth", RetryLikely: "false"}
 	case strings.Contains(lower, "exdev") ||
 		strings.Contains(lower, "enomem") ||
@@ -146,6 +143,7 @@ type runFailureDigestInput struct {
 	StopCommand    string
 	Classification FailureClassification
 	Phases         []TimingPhase
+	Results        *TestResultSummary
 }
 
 func printRunFailureDigest(w io.Writer, input runFailureDigestInput, stdoutTail, stderrTail *streamTailBuffer, stdoutCapture, stderrCapture string) {
@@ -162,6 +160,9 @@ func printRunFailureDigest(w io.Writer, input runFailureDigestInput, stdoutTail,
 	fmt.Fprintf(w, "  phase: %s\n", blank(phase, "unknown"))
 	fmt.Fprintf(w, "  area: %s\n", area)
 	fmt.Fprintf(w, "  retryable: %s\n", retry)
+	printFailureDigestPhases(w, input.Phases)
+	printFailureDigestShellChain(w, input)
+	printFailureDigestResults(w, input.Results)
 	for _, command := range failureDigestNextCommands(input, retry) {
 		fmt.Fprintf(w, "  next: %s\n", command)
 	}
@@ -169,6 +170,26 @@ func printRunFailureDigest(w io.Writer, input runFailureDigestInput, stdoutTail,
 	if stderrCapture != "" || tailLineCount(stderrTail) == 0 {
 		printFailureDigestTail(w, "stdout", stdoutTail, stdoutCapture)
 	}
+}
+
+func printFailureDigestPhases(w io.Writer, phases []TimingPhase) {
+	names := timingPhaseNames(phases)
+	if len(names) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  failed_phase: %s\n", names[len(names)-1])
+	fmt.Fprintf(w, "  observed_phases: %s\n", strings.Join(names, ","))
+}
+
+func timingPhaseNames(phases []TimingPhase) []string {
+	names := make([]string, 0, len(phases))
+	for _, phase := range phases {
+		name := strings.TrimSpace(phase.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func failureDigestPhase(classification FailureClassification, phases []TimingPhase) string {
@@ -229,7 +250,7 @@ func failureDigestNextCommands(input runFailureDigestInput, retry string) []stri
 			if input.ShellMode {
 				runArgs = append(runArgs, "--shell")
 			}
-			runCommand := crabboxCommandString(runArgs) + " -- " + input.CommandDisplay
+			runCommand := crabboxCommandString(runArgs) + " -- " + failureDigestRetryCommand(input)
 			commands = append(commands, runCommand)
 		}
 		stopRouting := append([]string(nil), input.RoutingArgs...)
@@ -239,6 +260,123 @@ func failureDigestNextCommands(input runFailureDigestInput, retry string) []stri
 		commands = append(commands, firstNonBlank(input.StopCommand, crabboxCommandString(append(append([]string{"stop"}, stopRouting...), leaseRef))))
 	}
 	return commands
+}
+
+func failureDigestRetryCommand(input runFailureDigestInput) string {
+	if input.ShellMode {
+		return strings.Join(readableShellWords([]string{input.CommandDisplay}), " ")
+	}
+	return input.CommandDisplay
+}
+
+func printFailureDigestShellChain(w io.Writer, input runFailureDigestInput) {
+	if !input.ShellMode {
+		return
+	}
+	segments := shellAndChainSegments(input.CommandDisplay)
+	if len(segments) < 2 {
+		return
+	}
+	fmt.Fprintf(w, "  shell_chain: %s\n", strings.Join(segments, " && "))
+	fmt.Fprintf(w, "  would_skip_if_left_failed: %s\n", strings.Join(segments[1:], " && "))
+	fmt.Fprintln(w, "  chain_semantics: && only runs later segments if all earlier segments succeed")
+}
+
+func shellAndChainSegments(command string) []string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+	var segments []string
+	var b strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+	depth := 0
+	flush := func() {
+		part := strings.TrimSpace(b.String())
+		if part != "" {
+			segments = append(segments, part)
+		}
+		b.Reset()
+	}
+	for i := 0; i < len(command); i++ {
+		ch := command[i]
+		if escaped {
+			b.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' && !inSingle {
+			b.WriteByte(ch)
+			escaped = true
+			continue
+		}
+		switch ch {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+			b.WriteByte(ch)
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+			b.WriteByte(ch)
+		case '(', '{', '[':
+			if !inSingle && !inDouble {
+				depth++
+			}
+			b.WriteByte(ch)
+		case ')', '}', ']':
+			if !inSingle && !inDouble && depth > 0 {
+				depth--
+			}
+			b.WriteByte(ch)
+		case '&':
+			if !inSingle && !inDouble && depth == 0 && i+1 < len(command) && command[i+1] == '&' {
+				flush()
+				i++
+				continue
+			}
+			b.WriteByte(ch)
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	flush()
+	if len(segments) < 2 {
+		return nil
+	}
+	return segments
+}
+
+func printFailureDigestResults(w io.Writer, results *TestResultSummary) {
+	if results == nil {
+		return
+	}
+	fmt.Fprintf(w, "  test_results: files=%d tests=%d failures=%d errors=%d skipped=%d\n", len(results.Files), results.Tests, results.Failures, results.Errors, results.Skipped)
+	limit := len(results.Failed)
+	if limit > 5 {
+		limit = 5
+	}
+	for i := 0; i < limit; i++ {
+		failure := results.Failed[i]
+		name := failure.Name
+		if failure.Classname != "" {
+			name = failure.Classname + "." + name
+		}
+		location := firstNonBlank(failure.File, failure.Suite, "-")
+		message := strings.TrimSpace(firstLine(failure.Message))
+		if message != "" {
+			fmt.Fprintf(w, "  failed_test: %s %-8s %s - %s\n", location, failure.Kind, name, message)
+			continue
+		}
+		fmt.Fprintf(w, "  failed_test: %s %-8s %s\n", location, failure.Kind, name)
+	}
+	if len(results.Failed) > limit {
+		fmt.Fprintf(w, "  failed_test: +%d more\n", len(results.Failed)-limit)
+	}
 }
 
 func runFailureDigestRoutingArgs(cfg Config) []string {

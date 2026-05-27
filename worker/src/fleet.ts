@@ -3524,6 +3524,14 @@ export class FleetDurableObject implements DurableObject {
     if (Number.isFinite(started)) {
       run.durationMs = now.getTime() - started;
     }
+    const blockedStage = sanitizeRunClassification(input.blockedStage);
+    const retryLikely = sanitizeRunClassification(input.retryLikely);
+    if (blockedStage) {
+      run.blockedStage = blockedStage;
+    }
+    if (retryLikely) {
+      run.retryLikely = retryLikely;
+    }
     run.state = run.exitCode === 0 ? "succeeded" : "failed";
     run.phase = run.state;
     run.endedAt = now.toISOString();
@@ -5698,6 +5706,14 @@ function sanitizeRunLabel(value: unknown): string | undefined {
   }
   const label = value.trim().replace(/\s+/g, " ");
   return label ? label.slice(0, 120) : undefined;
+}
+
+function sanitizeRunClassification(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(text) ? text : undefined;
 }
 
 function phaseForRunEvent(event: RunEventRecord): string {

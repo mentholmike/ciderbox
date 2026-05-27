@@ -162,6 +162,7 @@ func (a App) runCommand(ctx context.Context, args []string) (err error) {
 	fullResync := fs.Bool("full-resync", false, "reset the remote workdir and force a complete sync")
 	freshSync := fs.Bool("fresh-sync", false, "alias for --full-resync")
 	junitResults := fs.String("junit", "", "comma-separated remote JUnit XML paths to record")
+	resultsAuto := fs.Bool("results-auto", false, "scan common remote JUnit XML paths after the command")
 	captureStdout := fs.String("capture-stdout", "", "write remote stdout to a local file instead of the terminal")
 	captureStderr := fs.String("capture-stderr", "", "write remote stderr to a local file instead of the terminal")
 	captureOnFail := fs.Bool("capture-on-fail", false, "compatibility alias; failure bundles are saved by default on non-zero exit")
@@ -292,6 +293,9 @@ func (a App) runCommand(ctx context.Context, args []string) (err error) {
 	}
 	if *junitResults != "" {
 		cfg.Results.JUnit = splitCommaList(*junitResults)
+	}
+	if flagWasSet(fs, "results-auto") {
+		cfg.Results.Auto = *resultsAuto
 	}
 	repo, err := findRepo()
 	if err != nil {
@@ -975,7 +979,7 @@ afterSync:
 			report.Label = runLabelValue
 			finalTimingReport = &report
 		}
-		recorder.Finish(ctx, target, 0, timings.sync, 0, "", false, nil)
+		recorder.Finish(ctx, target, 0, timings.sync, 0, "", false, nil, FailureClassification{})
 		return nil
 	}
 
@@ -1157,6 +1161,17 @@ afterSync:
 	if stderrCaptured {
 		stderrEvents = nil
 	}
+	resultsMarker := ""
+	if cfg.Results.Auto {
+		resultsMarker = remoteResultsMarker
+		markerCommand := remoteTouchResultsMarker(workdir)
+		if isWindowsNativeTarget(target) {
+			markerCommand = windowsRemoteTouchResultsMarker(workdir)
+		}
+		if err := runSSHQuiet(ctx, target, markerCommand); err != nil {
+			return recordFailure(exit(7, "prepare test result freshness marker: %v", err))
+		}
+	}
 	code, streamErr := runSSHStreamResult(ctx, target, remote, stdout, stderr)
 	if err := streamCaptures.closeAfterStream(streamErr, code, a.Stderr); err != nil {
 		return recordFailure(err)
@@ -1172,8 +1187,8 @@ afterSync:
 	timings.command = time.Since(commandStart)
 	timings.commandPhases = phaseTracker.Finish(time.Now())
 	var results *TestResultSummary
-	if len(cfg.Results.JUnit) > 0 {
-		results, err = collectRemoteJUnitResults(ctx, target, workdir, cfg.Results.JUnit)
+	if cfg.Results.Auto || len(cfg.Results.JUnit) > 0 {
+		results, err = collectRemoteJUnitResults(ctx, target, workdir, cfg.Results, resultsMarker)
 		if err != nil {
 			fmt.Fprintf(a.Stderr, "warning: collect test results failed: %v\n", err)
 		} else if line := resultSummaryLine(results); line != "" {
@@ -1238,7 +1253,7 @@ afterSync:
 		report.Artifacts = runArtifacts
 		fmt.Fprintf(a.Stderr, "artifact kind=proof path=%s bytes=%d template=%s\n", proof.Path, proof.Bytes, blank(proof.Template, "default"))
 	}
-	recorder.Finish(ctx, target, code, timings.sync, timings.command, logBuffer.String(), logBuffer.Truncated(), results)
+	recorder.Finish(ctx, target, code, timings.sync, timings.command, logBuffer.String(), logBuffer.Truncated(), results, classification)
 	fmt.Fprintf(a.Stderr, "command complete in %s total=%s\n", timings.command.Round(time.Millisecond), total.Round(time.Millisecond))
 	fmt.Fprintln(a.Stderr, formatRunSummary(timings, total, code))
 	labelField := ""
@@ -1258,13 +1273,14 @@ afterSync:
 			Slug:           serverSlug(server),
 			RunID:          recorder.runID,
 			CommandDisplay: commandDisplay,
-			ShellMode:      *shellMode,
+			ShellMode:      *shellMode || useShell,
 			ScriptMode:     script != nil,
 			RoutingArgs:    runFailureDigestRoutingArgs(cfg),
 			SSHRoutingArgs: runFailureDigestSSHRoutingArgs(cfg),
 			StopCommand:    report.StopCommand,
 			Classification: classification,
 			Phases:         timings.commandPhases,
+			Results:        results,
 		}, stdoutTail, stderrTail, *captureStdout, *captureStderr)
 		capture := FailureCaptureMetadata{
 			Provider:       cfg.Provider,

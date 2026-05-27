@@ -331,6 +331,8 @@ export interface RunRecord {
   durationMs?: number;
   logBytes: number;
   logTruncated: boolean;
+  blockedStage?: string;
+  retryLikely?: string;
   results?: TestResultSummary;
   telemetry?: RunTelemetrySummary;
   startedAt: string;
@@ -357,6 +359,8 @@ export interface RunFinishRequest {
   log?: string;
   logChunks?: string[];
   logTruncated?: boolean;
+  blockedStage?: string;
+  retryLikely?: string;
   results?: TestResultSummary;
   telemetry?: RunTelemetrySummary;
 }
