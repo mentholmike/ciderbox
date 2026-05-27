@@ -360,6 +360,8 @@ type CoordinatorRun struct {
 	DurationMs   int64                `json:"durationMs,omitempty"`
 	LogBytes     int64                `json:"logBytes"`
 	LogTruncated bool                 `json:"logTruncated"`
+	BlockedStage string               `json:"blockedStage,omitempty"`
+	RetryLikely  string               `json:"retryLikely,omitempty"`
 	Results      *TestResultSummary   `json:"results,omitempty"`
 	Telemetry    *RunTelemetrySummary `json:"telemetry,omitempty"`
 	StartedAt    string               `json:"startedAt"`
@@ -1312,7 +1314,7 @@ func (c *CoordinatorClient) CreateRun(ctx context.Context, leaseID string, cfg C
 	return res.Run, err
 }
 
-func (c *CoordinatorClient) FinishRun(ctx context.Context, runID string, exitCode int, sync, command time.Duration, log string, truncated bool, results *TestResultSummary, telemetry *RunTelemetrySummary) (CoordinatorRun, error) {
+func (c *CoordinatorClient) FinishRun(ctx context.Context, runID string, exitCode int, sync, command time.Duration, log string, truncated bool, results *TestResultSummary, telemetry *RunTelemetrySummary, classification FailureClassification) (CoordinatorRun, error) {
 	var res CoordinatorRunResponse
 	logChunks := splitRunLogChunks(log)
 	body := map[string]any{
@@ -1326,6 +1328,12 @@ func (c *CoordinatorClient) FinishRun(ctx context.Context, runID string, exitCod
 	}
 	if telemetry != nil {
 		body["telemetry"] = telemetry
+	}
+	if classification.BlockedStage != "" {
+		body["blockedStage"] = classification.BlockedStage
+	}
+	if classification.RetryLikely != "" {
+		body["retryLikely"] = classification.RetryLikely
 	}
 	err := c.do(ctx, http.MethodPost, "/v1/runs/"+url.PathEscape(runID)+"/finish", body, &res)
 	return res.Run, err

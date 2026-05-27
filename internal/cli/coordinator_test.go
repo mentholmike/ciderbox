@@ -138,7 +138,7 @@ func TestCoordinatorFinishRunSendsLogChunks(t *testing.T) {
 	client := CoordinatorClient{BaseURL: server.URL, Client: server.Client()}
 	log := strings.Repeat("x", coordinatorRunLogChunkBytes) + "tail"
 	load := 0.42
-	if _, err := client.FinishRun(context.Background(), "run_123", 1, time.Second, 2*time.Second, log, false, nil, &RunTelemetrySummary{End: &LeaseTelemetry{Load1: &load}}); err != nil {
+	if _, err := client.FinishRun(context.Background(), "run_123", 1, time.Second, 2*time.Second, log, false, nil, &RunTelemetrySummary{End: &LeaseTelemetry{Load1: &load}}, FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"}); err != nil {
 		t.Fatal(err)
 	}
 	chunks, ok := finishBody["logChunks"].([]any)
@@ -159,6 +159,9 @@ func TestCoordinatorFinishRunSendsLogChunks(t *testing.T) {
 	}
 	if got := finishBody["telemetry"].(map[string]any)["end"].(map[string]any)["load1"]; got != 0.42 {
 		t.Fatalf("telemetry=%#v", finishBody["telemetry"])
+	}
+	if finishBody["blockedStage"] != "unknown" || finishBody["retryLikely"] != "unknown" {
+		t.Fatalf("classification fields missing: %#v", finishBody)
 	}
 }
 

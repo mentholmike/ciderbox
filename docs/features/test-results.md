@@ -12,18 +12,20 @@ Configure per run:
 
 ```sh
 crabbox run --id cbx_... --junit junit.xml -- go test ./...
+crabbox run --id cbx_... --results-auto -- go test ./...
 ```
 
 Or per repo:
 
 ```yaml
 results:
+  auto: true
   junit:
     - junit.xml
     - reports/junit.xml
 ```
 
-After the command exits, the CLI reads those remote files from the workdir, parses JUnit, and sends only the summary to the coordinator. Raw XML is not stored. The coordinator caps stored file lists, failed-case entries, and long strings so a huge report cannot exceed Durable Object storage or response limits.
+After the command exits, the CLI reads configured remote files from the workdir, or scans common JUnit XML names when auto discovery is enabled. Auto discovery only considers reports written after the command starts, using Crabbox metadata when the workdir is a Git checkout so clean-worktree checks are not dirtied, and `.crabbox` metadata otherwise. It skips dependency and Git directories, sniffs for JUnit XML before counting a file, prioritizes reports with failures or errors, and caps remote reads before parsing. It parses JUnit and sends only the summary to the coordinator. Raw XML is not stored. The coordinator caps stored file lists, failed-case entries, and long strings so a huge report cannot exceed Durable Object storage or response limits.
 
 Use:
 

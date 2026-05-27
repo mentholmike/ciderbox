@@ -567,6 +567,8 @@ export function portalRunDetail(
             ${metaRow("server type", run.serverType)}
             ${metaRow("phase", run.phase || run.state)}
             ${metaRow("exit", formatExitCode(run.exitCode))}
+            ${run.blockedStage === "unknown" ? metaRow("area", "command") : run.blockedStage ? metaRow("blocked", run.blockedStage) : ""}
+            ${run.retryLikely && run.retryLikely !== "unknown" ? metaRow("retry", run.retryLikely) : ""}
             ${metaRow("started", shortTime(run.startedAt))}
             ${metaRow("duration", formatDuration(run.durationMs))}
             ${metaRow("log", run.logBytes > 0 ? formatBytes(run.logBytes) : "empty")}

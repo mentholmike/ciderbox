@@ -192,7 +192,7 @@ func TestRunRecorderSuppressesMissingEventEndpoint(t *testing.T) {
 	}
 	stdout.Flush()
 	rec.waitForOutputEvents(time.Second)
-	rec.Finish(context.Background(), SSHTarget{TargetOS: targetWindows}, 0, time.Second, time.Second, "ok", false, nil)
+	rec.Finish(context.Background(), SSHTarget{TargetOS: targetWindows}, 0, time.Second, time.Second, "ok", false, nil, FailureClassification{})
 
 	if eventRequests != 1 {
 		t.Fatalf("event requests=%d, want 1", eventRequests)
@@ -228,7 +228,7 @@ func TestRunRecorderFinishUsesExtendedTimeout(t *testing.T) {
 		})},
 	}
 	rec := &runRecorder{coord: client, runID: "run_123", stderr: io.Discard}
-	rec.Finish(context.Background(), SSHTarget{}, 0, time.Second, time.Second, strings.Repeat("x", 2*runLogFallbackPreviewBytes), true, nil)
+	rec.Finish(context.Background(), SSHTarget{}, 0, time.Second, time.Second, strings.Repeat("x", 2*runLogFallbackPreviewBytes), true, nil, FailureClassification{})
 	if deadlineRemaining < runRecorderFinishTimeout-5*time.Second {
 		t.Fatalf("deadline remaining=%s, want near %s", deadlineRemaining, runRecorderFinishTimeout)
 	}

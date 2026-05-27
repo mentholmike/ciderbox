@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseJUnitResults(t *testing.T) {
 	results, err := parseJUnitResults(map[string]string{"junit.xml": `<testsuite name="pkg" tests="2" failures="1" errors="0" skipped="0" time="1.5">
@@ -40,5 +43,173 @@ func TestParseMarkedFiles(t *testing.T) {
 	files := parseMarkedFiles("\n__CRABBOX_RESULT_FILE__:a.xml\n<a/>\n__CRABBOX_RESULT_FILE__:b.xml\n<b/>\n")
 	if files["a.xml"] != "<a/>" || files["b.xml"] != "<b/>" {
 		t.Fatalf("files=%#v", files)
+	}
+}
+
+func TestRemoteTouchResultsMarkerUsesGitMetadataWhenAvailable(t *testing.T) {
+	got := remoteTouchResultsMarker("/repo")
+	for _, want := range []string{
+		"cd '/repo'",
+		"marker=.crabbox/results-start",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"marker=$git_marker",
+		"mkdir -p \"$(dirname \"$marker\")\"",
+		": > \"$marker\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("touch marker command missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "mkdir -p .git") || strings.Contains(got, ".git/crabbox/results-start") {
+		t.Fatalf("touch marker command should not hard-code .git:\n%s", got)
+	}
+}
+
+func TestRemoteFindJUnitResultFiles(t *testing.T) {
+	got := remoteFindJUnitResultFiles("/repo", remoteResultsMarker)
+	for _, want := range []string{
+		"find .",
+		"-path './node_modules'",
+		"-path '*/node_modules'",
+		"-path './.git'",
+		"-path '*/.git'",
+		"-prune -o -type f",
+		"-name 'junit*.xml'",
+		"-name 'TEST-*.xml'",
+		"-name 'results.xml'",
+		"&& { tmp=$(mktemp) || exit 0;",
+		"tmp=$(mktemp) || exit 0",
+		"marker=.crabbox/results-start",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"[ -f \"$marker\" ] || exit 0",
+		"\"$marker\" -nt \"$f\"",
+		"| sort > \"$tmp\"",
+		"for want_failed in 1 0",
+		"bs=4096 count=1",
+		"grep -Eq '<testsuites?'",
+		"grep -Eq '<(failure|error)([[:space:]>])'",
+		"if [ \"$want_failed\" != \"$has_failed\" ]",
+		"count=$((count + 1))",
+		"bs=1048576 count=1",
+		"done; }",
+		resultFileMarker,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("auto junit command missing %q:\n%s", want, got)
+		}
+	}
+	for _, blocked := range []string{"-maxdepth", "head -20", "depth=gsub", "-newer", "awk 'NR <="} {
+		if strings.Contains(got, blocked) {
+			t.Fatalf("auto junit command should be portable, inclusively fresh, and bounded after sniffing, found %q:\n%s", blocked, got)
+		}
+	}
+}
+
+func TestWindowsRemoteTouchResultsMarkerUsesGitMetadataWhenAvailable(t *testing.T) {
+	got := decodePowerShellCommand(t, windowsRemoteTouchResultsMarker(`C:\repo`))
+	for _, want := range []string{
+		"Set-Location -LiteralPath 'C:\\repo'",
+		"$marker = '.crabbox/results-start'",
+		"Get-Command git -ErrorAction SilentlyContinue",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"$marker = ([string]$gitMarker).Trim()",
+		"New-Item -ItemType Directory -Force -Path $markerDir",
+		"Set-Content -LiteralPath $marker",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("windows touch marker command missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "New-Item -ItemType Directory -Force -Path .git/crabbox") || strings.Contains(got, ".git/crabbox/results-start") {
+		t.Fatalf("windows touch marker command should not hard-code .git:\n%s", got)
+	}
+}
+
+func TestWindowsRemoteFindJUnitResultFilesPrintsPathMarker(t *testing.T) {
+	got := decodePowerShellCommand(t, windowsRemoteFindJUnitResultFiles(`C:\repo`, remoteResultsMarker))
+	for _, want := range []string{
+		"$ErrorActionPreference = \"Stop\"",
+		"Set-Location -LiteralPath 'C:\\repo'",
+		"$ErrorActionPreference = \"SilentlyContinue\"",
+		"$marker = '.crabbox/results-start'",
+		"git rev-parse --git-path 'crabbox/results-start'",
+		"$marker = ([string]$gitMarker).Trim()",
+		"function Get-CrabboxJUnitFiles",
+		"$_.Name -ne 'node_modules' -and $_.Name -ne '.git'",
+		"if (-not (Test-Path -LiteralPath $marker)) { return }",
+		"$markerTime = (Get-Item -LiteralPath $marker).LastWriteTimeUtc",
+		"$_.LastWriteTimeUtc -ge $markerTime",
+		"$maxBytes = 1048576",
+		"$sniffBytes = 4096",
+		"$maxFiles = 50",
+		"$prefix -notmatch '<testsuites?'",
+		"$files = @(Get-CrabboxJUnitFiles (Get-Location).Path 5 | Sort-Object FullName)",
+		"foreach ($wantFailed in @($true, $false))",
+		"$hasFailed = $body -match '<(failure|error)(\\s|>)'",
+		"$hasFailed -ne $wantFailed",
+		"$count++",
+		resultFileMarker + `$($file.FullName)`,
+		"[System.IO.File]::OpenRead($file.FullName)",
+		"[System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)",
+		"[Console]::WriteLine()",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("windows auto junit command missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `${($_.FullName)}`) {
+		t.Fatalf("windows auto junit command uses variable syntax instead of subexpression:\n%s", got)
+	}
+	for _, blocked := range []string{"Get-Content -Raw", "Select-Object -First"} {
+		if strings.Contains(got, blocked) {
+			t.Fatalf("windows auto junit command should cap raw file reads after sniffing, found %q:\n%s", blocked, got)
+		}
+	}
+}
+
+func TestParseAutoJUnitResultsSkipsNonJUnitFiles(t *testing.T) {
+	results, err := parseAutoJUnitResults(map[string]string{
+		"results.xml": "<not-junit/>",
+		"junit.xml":   `<testsuite name="pkg" tests="1" failures="0" errors="0" skipped="0" time="0.1"><testcase name="ok"/></testsuite>`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results == nil || results.Tests != 1 || len(results.Files) != 1 || results.Files[0] != "junit.xml" {
+		t.Fatalf("unexpected auto results: %#v", results)
+	}
+}
+
+func TestParseAutoJUnitResultsKeepsFailuresAfterTwentyFiles(t *testing.T) {
+	files := map[string]string{}
+	for i := 0; i < 25; i++ {
+		name := "TEST-pass-" + string(rune('a'+i)) + ".xml"
+		files[name] = `<testsuite name="pkg" tests="1" failures="0" errors="0" skipped="0"><testcase name="ok"/></testsuite>`
+	}
+	files["TEST-z-fail.xml"] = `<testsuite name="pkg" tests="1" failures="1" errors="0" skipped="0"><testcase classname="pkg.Case" name="fails"><failure message="late failure"/></testcase></testsuite>`
+
+	results, err := parseAutoJUnitResults(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results == nil || results.Failures != 1 || len(results.Failed) != 1 || results.Failed[0].Message != "late failure" {
+		t.Fatalf("late failure was not preserved: %#v", results)
+	}
+}
+
+func TestNormalizeResultPath(t *testing.T) {
+	for _, tc := range []struct {
+		workdir string
+		name    string
+		want    string
+	}{
+		{workdir: "/repo", name: "./junit.xml", want: "junit.xml"},
+		{workdir: "/repo", name: "/repo/reports/junit.xml", want: "reports/junit.xml"},
+		{workdir: `C:\work\repo`, name: `C:\work\repo\reports\junit.xml`, want: "reports/junit.xml"},
+		{workdir: `C:\work\repo`, name: `c:\work\repo\reports\junit.xml`, want: "reports/junit.xml"},
+	} {
+		if got := normalizeResultPath(tc.workdir, tc.name); got != tc.want {
+			t.Fatalf("normalizeResultPath(%q, %q)=%q, want %q", tc.workdir, tc.name, got, tc.want)
+		}
 	}
 }

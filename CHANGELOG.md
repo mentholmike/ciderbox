@@ -11,6 +11,7 @@
 ### Fixed
 
 - Removed the short-lived LXQt desktop profile before release.
+- Fixed failed-run summaries so application output mentioning provider auth no longer looks like a provider/auth blocker, shell `&&` command chains explain short-circuit behavior, observed phases identify the likely failed phase, and opt-in automatic JUnit discovery can add structured test failures.
 - Fixed Daytona provider sandbox inventory to use Daytona's cursor-based listing API.
 - Removed OpenClaw-specific hosted broker defaults and documentation from the generic Crabbox broker login flow.
 

@@ -2423,6 +2423,8 @@ describe("fleet lease identity and idle", () => {
         state: "failed",
         phase: "failed",
         exitCode: 1,
+        blockedStage: "unknown",
+        retryLikely: "unknown",
         durationMs: 1234,
         logBytes: 11,
         telemetry: {
@@ -2561,6 +2563,9 @@ describe("fleet lease identity and idle", () => {
       'data-filter-buttons="run:run,command:command,sync:sync,stdout:stdout,stderr:stderr,all:all"',
     );
     expect(runBody).toContain('data-filter-tags="command failed"');
+    expect(runBody).toContain("<dt>area</dt><dd>command</dd>");
+    expect(runBody).not.toContain("<dt>blocked</dt><dd>unknown</dd>");
+    expect(runBody).not.toContain("<dt>retry</dt><dd>unknown</dd>");
     expect(runBody).toContain('class="run-telemetry-grid"');
     expect(runBody).toContain(".run-artifact-card .button { width:100%; }");
     expect(runBody).toContain("@media (max-width: 980px)");
@@ -5419,6 +5424,8 @@ describe("fleet run history", () => {
           syncMs: 12,
           commandMs: 34,
           log: "ok\n",
+          blockedStage: "unknown",
+          retryLikely: "unknown",
           telemetry: {
             start: {
               capturedAt: "2026-05-01T00:00:00Z",
@@ -5456,12 +5463,16 @@ describe("fleet run history", () => {
       run: {
         state: string;
         logBytes: number;
+        blockedStage?: string;
+        retryLikely?: string;
         results?: { tests: number };
         telemetry?: { end?: { load1?: number; memoryPercent?: number } };
       };
     };
     expect(finished.run.state).toBe("succeeded");
     expect(finished.run.logBytes).toBe(3);
+    expect(finished.run.blockedStage).toBe("unknown");
+    expect(finished.run.retryLikely).toBe("unknown");
     expect(finished.run.results?.tests).toBe(2);
     expect(finished.run.telemetry?.end).toMatchObject({ load1: 0.2, memoryPercent: 75 });
 

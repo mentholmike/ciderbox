@@ -82,8 +82,8 @@ required. `--capture-on-fail` remains accepted for older scripts. Crabbox does
 not redact captured files, so treat them as secret-bearing until reviewed.
 `run --download remote=local` copies successful-run artifacts back to the local
 machine without adding file bytes to coordinator logs.
-Test results are stored as structured summaries when `--junit` or
-`results.junit` is configured.
+Test results are stored as structured summaries when `--junit`,
+`--results-auto`, `results.junit`, or `results.auto` is configured.
 
 `--timing-json` includes sync phases and command phases. Failed runs add
 `blockedStage` and `retryLikely` when Crabbox can classify the likely blocker;
