@@ -168,6 +168,22 @@ func TestPrintRunFailureDigestExplainsAndChainShortCircuit(t *testing.T) {
 	}
 }
 
+func TestPrintRunFailureDigestSuppressesMixedAndOrChain(t *testing.T) {
+	var buf bytes.Buffer
+	printRunFailureDigest(&buf, runFailureDigestInput{
+		LeaseID:        "cbx_123",
+		CommandDisplay: "pnpm build && pnpm test || pnpm cleanup",
+		ShellMode:      true,
+		Classification: FailureClassification{BlockedStage: "unknown", RetryLikely: "unknown"},
+	}, newStreamTailBuffer(40), newStreamTailBuffer(40), "", "")
+	out := buf.String()
+	for _, unexpected := range []string{"shell_chain:", "would_skip_if_left_failed:", "chain_semantics:"} {
+		if strings.Contains(out, unexpected) {
+			t.Fatalf("digest should suppress mixed &&/|| chain note %q:\n%s", unexpected, out)
+		}
+	}
+}
+
 func TestPrintRunFailureDigestIncludesObservedPhases(t *testing.T) {
 	var buf bytes.Buffer
 	printRunFailureDigest(&buf, runFailureDigestInput{

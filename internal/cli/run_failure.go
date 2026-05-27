@@ -340,6 +340,11 @@ func shellAndChainSegments(command string) []string {
 				continue
 			}
 			b.WriteByte(ch)
+		case '|':
+			if !inSingle && !inDouble && depth == 0 && i+1 < len(command) && command[i+1] == '|' {
+				return nil
+			}
+			b.WriteByte(ch)
 		default:
 			b.WriteByte(ch)
 		}
