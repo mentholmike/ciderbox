@@ -303,7 +303,6 @@ func windowsRemoteFindJUnitResultFiles(workdir, marker string) string {
 	b.WriteString(`    }` + "\n")
 	b.WriteString(`  }` + "\n")
 	b.WriteString(`  if ($count -ge $maxFiles) { break }` + "\n")
-	b.WriteString(`  }` + "\n")
 	b.WriteString(`}` + "\n")
 	return powershellCommand(b.String())
 }
