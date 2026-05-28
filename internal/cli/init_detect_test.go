@@ -20,9 +20,9 @@ func TestDetectInitProjectPackageManagers(t *testing.T) {
 
 	got := detectInitProject(dir)
 	for _, want := range []string{
-		"corepack enable && pnpm --dir 'app' install --frozen-lockfile && pnpm --dir 'app' run 'test:ci'",
-		"bun install --cwd 'tool' --frozen-lockfile && bun --cwd 'tool' run 'build'",
-		"corepack enable && yarn --cwd 'web' install --immutable && yarn --cwd 'web' 'test'",
+		"(cd 'app' && corepack enable && pnpm install --frozen-lockfile && pnpm run 'test:ci')",
+		"(cd 'tool' && bun install --frozen-lockfile && bun run 'build')",
+		"(cd 'web' && corepack enable && yarn install --immutable && yarn 'test')",
 		"(cd 'rust' && cargo test)",
 		"make test",
 	} {
@@ -50,7 +50,7 @@ func TestDetectInitProjectSkipsWorkspacePackagesWithoutLockfile(t *testing.T) {
 	got := detectInitProject(dir)
 	for _, want := range []string{
 		"npm install && npm test",
-		"npm --prefix 'packages/b' ci && npm --prefix 'packages/b' test",
+		"(cd 'packages/b' && npm ci && npm test)",
 	} {
 		if !initDetectContains(got.Commands, want) {
 			t.Fatalf("detected commands missing %q: %#v", want, got.Commands)

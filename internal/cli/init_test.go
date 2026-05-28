@@ -119,7 +119,7 @@ func TestInitProjectDetectsRepoCommands(t *testing.T) {
 		"shell: true",
 		"go test ./...",
 		"npm install && npm run 'check' &&",
-		"npm --prefix 'worker' ci && npm --prefix 'worker' test",
+		"(cd 'worker' && npm ci && npm test)",
 	} {
 		if !strings.Contains(configText, want) {
 			t.Fatalf("detected config missing %q:\n%s", want, configText)

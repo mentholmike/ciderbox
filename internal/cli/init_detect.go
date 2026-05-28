@@ -110,7 +110,7 @@ func detectPackageCommand(root, rel string) (string, []string, []string) {
 	if pm.Name == "pnpm" {
 		excludes = append(excludes, ".pnpm-store")
 	}
-	return packageManagerCommand(root, rel, pm, script), tools, excludes
+	return packageManagerCommand(rel, pm, script), tools, excludes
 }
 
 func shouldSkipNestedPackage(root, rel string) bool {
@@ -195,12 +195,9 @@ func packageDirHasLockfile(dir string) bool {
 	return false
 }
 
-func packageManagerCommand(root, rel string, pm detectedPackageManager, script string) string {
-	prefix := ""
-	if rel != "." {
-		prefix = shellQuote(rel)
-	}
+func packageManagerCommand(rel string, pm detectedPackageManager, script string) string {
 	runScript := packageRunArgs(pm.Name, script)
+	var command string
 	switch pm.Name {
 	case "pnpm":
 		install := "pnpm install"
@@ -208,57 +205,33 @@ func packageManagerCommand(root, rel string, pm detectedPackageManager, script s
 			install += " --frozen-lockfile"
 		}
 		run := "pnpm " + runScript
-		if prefix != "" {
-			install = "pnpm --dir " + prefix + " install"
-			if pm.HasLockfile {
-				install += " --frozen-lockfile"
-			}
-			run = "pnpm --dir " + prefix + " " + runScript
-		}
-		return "corepack enable && " + install + " && " + run
+		command = "corepack enable && " + install + " && " + run
 	case "yarn":
 		install := "yarn install"
 		if pm.HasLockfile {
 			install += yarnFrozenInstallFlag(pm.Version)
 		}
 		run := "yarn " + packageDirectScriptName(script)
-		if prefix != "" {
-			install = "yarn --cwd " + prefix + " install"
-			if pm.HasLockfile {
-				install += yarnFrozenInstallFlag(pm.Version)
-			}
-			run = "yarn --cwd " + prefix + " " + packageDirectScriptName(script)
-		}
-		return "corepack enable && " + install + " && " + run
+		command = "corepack enable && " + install + " && " + run
 	case "bun":
 		install := "bun install"
 		if pm.HasLockfile {
 			install += " --frozen-lockfile"
 		}
 		run := "bun " + runScript
-		if prefix != "" {
-			install = "bun install --cwd " + prefix
-			if pm.HasLockfile {
-				install += " --frozen-lockfile"
-			}
-			run = "bun --cwd " + prefix + " " + runScript
-		}
-		return install + " && " + run
+		command = install + " && " + run
 	default:
 		install := "npm install"
 		if pm.HasLockfile {
 			install = "npm ci"
 		}
 		run := "npm " + runScript
-		if prefix != "" {
-			install = "npm --prefix " + prefix + " install"
-			if pm.HasLockfile {
-				install = "npm --prefix " + prefix + " ci"
-			}
-			run = "npm --prefix " + prefix + " " + runScript
-		}
-		return install + " && " + run
+		command = install + " && " + run
 	}
+	if rel != "." {
+		return subshellCommand(rel, command)
+	}
+	return command
 }
 
 func yarnFrozenInstallFlag(version string) string {
