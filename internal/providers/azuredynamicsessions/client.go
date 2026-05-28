@@ -125,10 +125,24 @@ func azureDynamicSessionsEndpoint(cfg Config) (string, error) {
 	if parsed.Scheme != "https" && !isLoopbackHTTPURL(parsed) {
 		return "", exit(2, "%s endpoint %q must use https unless it targets localhost", providerName, endpoint)
 	}
+	if !isAzureDynamicSessionsTrustedEndpointURL(parsed) {
+		return "", exit(2, "%s endpoint %q must target an Azure Container Apps Dynamic Sessions host", providerName, endpoint)
+	}
 	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 		return "", exit(2, "%s endpoint %q must not include query or fragment components", providerName, endpoint)
 	}
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func isAzureDynamicSessionsTrustedEndpointURL(parsed *url.URL) bool {
+	if isLoopbackHTTPURL(parsed) {
+		return true
+	}
+	if parsed.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "azurecontainerapps.io" || strings.HasSuffix(host, ".azurecontainerapps.io")
 }
 
 func isLoopbackHTTPURL(parsed *url.URL) bool {
@@ -304,6 +318,7 @@ func (c *azureDynamicSessionsClient) ListSessions(ctx context.Context) ([]azureD
 	query.Set("skip", "0")
 	next := c.url("/.management/listSessions", query)
 	var out []azureDynamicSessionsSession
+	var err error
 	for next != "" {
 		var page struct {
 			Sessions []azureDynamicSessionsSession `json:"sessions"`
@@ -321,7 +336,10 @@ func (c *azureDynamicSessionsClient) ListSessions(ctx context.Context) ([]azureD
 		for _, session := range sessions {
 			out = append(out, session.normalized(""))
 		}
-		next = c.nextURL(page.NextLink)
+		next, err = c.nextURL(page.NextLink)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -391,27 +409,38 @@ func (c *azureDynamicSessionsClient) responseError(resp *http.Response) error {
 	return &azureDynamicSessionsAPIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: summarizeJSON(data)}
 }
 
-func (c *azureDynamicSessionsClient) nextURL(next string) string {
+func (c *azureDynamicSessionsClient) nextURL(next string) (string, error) {
 	next = strings.TrimSpace(next)
 	if next == "" {
-		return ""
+		return "", nil
 	}
 	parsed, err := url.Parse(next)
 	if err != nil {
-		return next
+		return "", err
 	}
 	if parsed.Scheme == "" && parsed.Host == "" {
 		parsed, err = url.Parse(c.endpoint + "/" + strings.TrimLeft(next, "/"))
 		if err != nil {
-			return next
+			return "", err
 		}
+	}
+	base, err := url.Parse(c.endpoint)
+	if err != nil {
+		return "", err
+	}
+	if !sameOriginURL(base, parsed) {
+		return "", fmt.Errorf("%s nextLink points outside configured endpoint origin", providerName)
 	}
 	query := parsed.Query()
 	if query.Get("api-version") == "" {
 		query.Set("api-version", c.managementAPIVersion)
 		parsed.RawQuery = query.Encode()
 	}
-	return parsed.String()
+	return parsed.String(), nil
+}
+
+func sameOriginURL(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
 }
 
 func (c *azureDynamicSessionsClient) url(path string, query url.Values) string {

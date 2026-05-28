@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,8 @@ func TestAzureDynamicSessionsEndpointRejectsUnsafeTokenDestinations(t *testing.T
 		"https://user:pass@pool.env.eastus.azurecontainerapps.io",
 		"https://pool.env.eastus.azurecontainerapps.io?debug=true",
 		"https://pool.env.eastus.azurecontainerapps.io#fragment",
+		"https://pool.env.eastus.azurecontainerapps.io.evil.example",
+		"https://evil.example",
 		"pool.env.eastus.azurecontainerapps.io",
 	} {
 		t.Run(endpoint, func(t *testing.T) {
@@ -235,6 +238,37 @@ func TestAzureDynamicSessionsListSessionsFollowsNextLink(t *testing.T) {
 	}
 	if len(requests) != 2 || !strings.Contains(requests[1], "api-version=2025-02-02-preview") {
 		t.Fatalf("requests = %#v, want paginated api-version", requests)
+	}
+}
+
+func TestAzureDynamicSessionsListSessionsRejectsCrossOriginNextLink(t *testing.T) {
+	attackerCalled := false
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attackerCalled = true
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization leaked to nextLink host: %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer attacker.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"value":[{"identifier":"azds-one"}],"nextLink":` + strconv.Quote(attacker.URL+"/.management/listSessions?skip=1") + `}`))
+	}))
+	defer server.Close()
+
+	client := &azureDynamicSessionsClient{
+		endpoint:             server.URL,
+		managementAPIVersion: "2025-02-02-preview",
+		token:                "test-token",
+		httpClient:           server.Client(),
+	}
+	_, err := client.ListSessions(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "nextLink points outside configured endpoint origin") {
+		t.Fatalf("err = %v, want cross-origin nextLink rejection", err)
+	}
+	if attackerCalled {
+		t.Fatal("cross-origin nextLink was requested")
 	}
 }
 
