@@ -21,8 +21,10 @@ Microsoft docs:
 
 ## Pool Setup
 
-Build and publish the runner image to a registry Azure can pull, then create a
-custom container session pool with target port `8787`:
+Build and publish the runner image to a registry Azure can pull. For private
+Azure Container Registry images, prefer a managed identity with `AcrPull` on the
+registry and pass that identity through `--registry-identity` instead of putting
+registry passwords on the command line:
 
 ```sh
 az acr build \
@@ -31,13 +33,34 @@ az acr build \
   --file worker/azure-dynamic-sessions.Dockerfile \
   worker
 
+identity_id="$(az identity show \
+  --name <pull-identity> \
+  --resource-group crabbox-sandboxes-rg \
+  --query id \
+  --output tsv)"
+
+identity_principal_id="$(az identity show \
+  --name <pull-identity> \
+  --resource-group crabbox-sandboxes-rg \
+  --query principalId \
+  --output tsv)"
+
+registry_id="$(az acr show \
+  --name <registry> \
+  --query id \
+  --output tsv)"
+
+az role assignment create \
+  --assignee "$identity_principal_id" \
+  --role AcrPull \
+  --scope "$registry_id"
+
 az containerapp sessionpool create \
   --name crabboxpool \
   --resource-group crabbox-sandboxes-rg \
   --environment crabbox-env \
   --registry-server <registry>.azurecr.io \
-  --registry-username <registry-user> \
-  --registry-password <registry-password> \
+  --registry-identity "$identity_id" \
   --container-type CustomContainer \
   --image <registry>.azurecr.io/crabbox-runner:<tag> \
   --target-port 8787 \
