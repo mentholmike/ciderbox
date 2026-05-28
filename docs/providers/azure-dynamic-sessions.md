@@ -27,9 +27,12 @@ registry and pass that identity through `--registry-identity` instead of putting
 registry passwords on the command line:
 
 ```sh
-az acr build \
-  --registry <registry> \
-  --image crabbox-runner:<tag> \
+az acr login --name <registry>
+
+docker buildx build \
+  --platform linux/amd64 \
+  --push \
+  --tag <registry>.azurecr.io/crabbox-runner:<tag> \
   --file worker/azure-dynamic-sessions.Dockerfile \
   worker
 
@@ -68,7 +71,7 @@ az containerapp sessionpool create \
   --memory 0.5Gi \
   --cooldown-period 300 \
   --max-sessions 20 \
-  --ready-sessions 0 \
+  --ready-sessions 1 \
   --network-status EgressEnabled \
   --location francecentral
 ```
