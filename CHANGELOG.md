@@ -1,26 +1,30 @@
 # Changelog
 
-## 0.21.2 - Unreleased
-
-## 0.21.1 - 2026-05-29
+## 0.22.0 - 2026-05-29
 
 ### Added
 
-- Added `crabbox init --detect` to scan common Go, Node, Rust, and Makefile project markers and generate a repo-local `jobs.detected` remote check plus matching preflight tools. Thanks @zozo123.
-- Added Azure backend routing so `provider: azure` can select `azure.backend: dynamic-sessions` or `--azure-backend dynamic-sessions` while still reporting the canonical `azure-dynamic-sessions` provider.
 - Added `provider: azure-dynamic-sessions` for delegated Linux runs through Microsoft Azure Container Apps custom container Dynamic Sessions, including a Crabbox runner image, archive sync, streaming commands, local claims, status/list/stop, and provider docs. Thanks @zozo123.
+- Added `crabbox pond` peer discovery, bridge, and SSH-mesh support for multi-lease networking, including bridge adapters for Cloudflare, E2B, Islo, Modal, Railway, and Tensorlake.
+- Added Azure backend routing so `provider: azure` can select `azure.backend: dynamic-sessions` or `--azure-backend dynamic-sessions` while still reporting the canonical `azure-dynamic-sessions` provider.
+- Added Islo delegated run session handles so `crabbox run --provider islo --keep --lease-output <file>` returns stable lease metadata and cleanup commands for orchestrators. Thanks @zozo123.
+- Added `crabbox init --detect` to scan common Go, Node, Rust, and Makefile project markers and generate a repo-local `jobs.detected` remote check plus matching preflight tools. Thanks @zozo123.
 
 ### Fixed
 
 - Fixed Azure VM provisioning to automatically use region-scoped shared VNet/NSG names when a Crabbox-managed base network already exists in another Azure region.
 - Fixed brokered Azure regional fallback so region-scoped shared network names are computed per lease instead of mutating the Worker client's configured vnet/NSG names.
-- Fixed provider documentation tables to match the registered provider capabilities for Azure, GCP, and Railway.
-- Fixed brokered AWS provisioning to compact stale Crabbox SSH ingress after EC2 reports the security group rule limit, then retry the current source rule before failing.
-- Fixed Blacksmith Testbox config selection so generic Actions hydration workflows are not mistaken for Testbox workflows, and fixed native Windows wrapper commands so PowerShell-based Node bootstraps can run before JavaScript runtime preflight checks.
-- Fixed coordinator lease cleanup so expired AWS leases whose EC2 instance is already gone still clean provider keys before closing.
-- Fixed AWS EC2 Mac host cleanup and selection so stale pending hosts are released by the orphan sweep and hosts with no reported launch capacity are skipped.
+- Hardened Azure Dynamic Sessions endpoint validation, claim boundaries, token destinations, missing-response handling, lifecycle edges, shell string preservation, and runner image behavior.
+- Fixed Islo run session handles to preserve resolved and claimed slugs, keep explicit lease IDs authoritative, return handles after lease creation, and quote cleanup commands safely.
 - Fixed `crabbox stop` to accept `--id <lease>` like every other lease command, and updated the stop hint that `crabbox run` prints so it can be pasted back verbatim. Thanks @edihasaj.
 - Fixed lease commands (`run`, `status`, `stop`, `ssh`, `inspect`, `screenshot`, `vnc`, `webvnc`, `actions`, `artifacts`, `checkpoint`, `egress`) to auto-route `--id static_<slug>` ids to `--provider ssh` and restore the original static host from the local lease claim, so static SSH leases no longer require repeating routing flags after `crabbox warmup`.
+- Fixed `crabbox init --detect` to run nested detected package checks from the package directory and validate generated preflight tools.
+- Fixed Blacksmith Testbox workflow fallback selection so generic Actions hydration workflows are not mistaken for Testbox workflows, and fixed native Windows wrapper commands so PowerShell-based Node bootstraps can run before JavaScript runtime preflight checks.
+- Fixed brokered AWS provisioning to compact stale Crabbox SSH ingress after EC2 reports the security group rule limit, then retry the current source rule before failing.
+- Fixed coordinator lease cleanup so expired AWS leases whose EC2 instance is already gone still clean provider keys before closing.
+- Fixed AWS EC2 Mac host cleanup and selection so stale pending hosts are released by the orphan sweep and hosts with no reported launch capacity are skipped.
+- Fixed Worker AWS Linux user-data compression and hardened command/security boundaries found by CodeQL.
+- Fixed provider documentation tables to match the registered provider capabilities for Azure, GCP, and Railway.
 
 ## 0.21.0 - 2026-05-27
 
