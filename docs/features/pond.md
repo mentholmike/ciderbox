@@ -1,132 +1,299 @@
 # Pond
 
-A preview way to group related Crabbox leases, discover their reachability
-metadata, and release them together. A pond is not a central cluster object: it
-is an emergent set of active leases tagged with the reserved `pond=<name>`
-metadata plus local claim sidecars for providers that do not own cloud labels.
+A pond is a lightweight way to group related leases, discover how to reach each
+one, and release them together. It is not a central cluster object: a pond is an
+emergent set of active leases that share the reserved `pond=<name>` provider
+label, plus local claim sidecars for providers that do not own cloud labels. A
+pond exists for as long as at least one active lease carries the label.
 
-Some pond members can reach each other directly by name, but only on the
-transport plane that supports that. Tailscale gives true peer-to-peer
-`<slug>.cbx` reachability; URL bridge gives HTTP(S) endpoints; SSH-mesh gives
-operator-side `ssh -L` forwards.
+Reachability between pond members depends on the transport plane each member's
+provider supports. Tailscale gives true peer-to-peer `<slug>.cbx` names; the URL
+bridge gives provider-native HTTP(S) endpoints; the SSH-mesh gives operator-side
+`ssh -L` forwards. A pond can mix providers and planes.
 
-A `--pond` of one is the default; existing single-box flows are unchanged.
+A `--pond` of one is the default — single-box flows are unchanged.
 
-## Usage
+> **Preview.** Pond is preview for v0.x. The reserved `pond=` label key is
+> intended to stay, but metadata shape and command flags may evolve before v1.0.
 
+## Quick start
+
+```sh
+# Lease a few members into one pond (slug = stable role name).
+crabbox warmup --pond pr-42 --slug api --provider hetzner --tailscale
+crabbox warmup --pond pr-42 --slug db  --provider hetzner --tailscale
+
+# Discover peers, run work against a member, then tear the pond down.
+crabbox pond peers   --pond pr-42
+crabbox run --id api -- "DB_HOST=db.cbx go test ./..."
+crabbox pond release pr-42
 ```
-crabbox warmup --pond NAME --slug ROLE --provider PROVIDER ...
-crabbox run    --id LEASE_ID -- COMMAND
+
+Use `--slug` as the stable role name; it is what shows up in discovery and in
+`<slug>.cbx` names. Whether that slug is directly dialable from another member
+depends on the transport plane (see below).
+
+## Naming a pond
+
+`--pond <name>` accepts any string and normalizes it: lowercased, characters
+outside `[a-z0-9-]` collapsed to `-`, runs collapsed, leading/trailing dashes
+trimmed. The normalized name must contain at least one letter or digit and be at
+most 41 characters. The same name is reused everywhere the pond appears (the
+label value, the Tailscale ACL tag, peer hostnames), so it stays in a regular
+DNS-like identifier space.
+
+## The three transport planes
+
+Each provider self-declares which planes its leases can serve via its
+`Spec().Features` (`FeatureTailscale`, `FeatureURLBridge`, `FeatureSSH`). A
+single provider can advertise more than one — for example a direct Hetzner box
+advertises both Tailscale and SSH, so Tailscale is the preferred peer mesh while
+`pond connect` can still build operator-side SSH forwards. URL-only sandboxes
+(such as Islo or E2B) do not join the peer mesh; they surface HTTP(S) endpoints
+instead.
+
+| Plane     | Feature flag       | Providers that advertise it (today)                                                                                       | What you get                                                |
+| --------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Tailscale | `FeatureTailscale` | Hetzner, Azure, GCP                                                                                                       | true peer-to-peer mesh, `<slug>.cbx` DNS                    |
+| Bridge    | `FeatureURLBridge` | Islo, E2B, Modal, Cloudflare, Tensorlake (adapters report `unsupported` until they ship a per-sandbox HTTPS ingress)      | provider-native HTTP(S) endpoints for discovery and sharing |
+| SSH-mesh  | `FeatureSSH`       | any provider advertising SSH: Hetzner, Azure, GCP, AWS, Proxmox, static `ssh`, RunPod, exe-dev, Daytona, Sprites, Namespace, Semaphore, local-container, Parallels | operator-side `ssh -L` tunnels via `pond connect`           |
+
+macOS and Windows peer reachability are not covered by any plane yet.
+
+Capabilities are derived from each provider's `FeatureSet`, not from a static
+table — a provider opts into a plane by declaring the feature. See
+[providers.md](providers.md) for the full capability matrix and
+[tailscale.md](tailscale.md) for the Tailscale transport.
+
+## Commands
+
+```sh
+crabbox warmup --pond NAME --slug ROLE --provider PROVIDER [--tailscale] [--expose PORT]...
+crabbox run    --id LEASE_OR_SLUG -- COMMAND
 crabbox list   --pond NAME
 crabbox doctor --pond NAME
-crabbox pond peers   --pond NAME
-crabbox pond connect NAME [--export]
+
+crabbox pond peers      --pond NAME [--provider P] [--share-port PORT] [--share-ttl D] [--json]
+crabbox pond connect    NAME [--provider P] [--export] [--json]
 crabbox pond disconnect NAME
-crabbox pond release NAME
+crabbox pond release    NAME
 ```
 
-Use `--slug` as the stable role name for discovery. Whether that slug is
-directly dialable from another lease depends on the transport plane below.
+### `pond peers`
 
-The plugin surface does not add first-class pond tools in this PR. Agents can
-still create pond-tagged leases through existing argv-forwarding tools;
-`pond peers`, `pond connect`, `pond disconnect`, `pond release`, and Tailscale
-policy bootstrap remain CLI-led.
+Lists every member of the pond, regardless of provider. `--pond` is required.
+With no `--provider`, the resolver fans out across every provider represented in
+the pond and concatenates the result; pass `--provider P` to restrict to one.
 
-## Three transport planes
-
-Each provider self-declares which planes it supports via `Spec().Features`
-(`FeatureTailscale`, `FeatureSSH`, `FeatureURLBridge`). Some providers declare
-more than one: a direct Hetzner box advertises both Tailscale and SSH, so
-Tailscale is the preferred peer mesh and `pond connect` can still build
-operator-side SSH forwards for declared ports. URL-only sandboxes, such as Islo
-and E2B, do not join the peer mesh; they surface HTTP(S) endpoints instead.
-
-Auto-generated `tag:cbx-pond-*` Tailscale tags are direct-provider only in this
-preview. Brokered coordinators keep using their configured
-`CRABBOX_TAILSCALE_TAGS` allowlist; they do not receive dynamic per-pond tags
-until the Worker owns an explicit pond tag policy.
-
-| Plane     | Feature flag       | Providers (today)                                                                                                                                                    | What you get                                                  |
-| --------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Tailscale | `FeatureTailscale` | Hetzner, Azure, GCP                                                                                                                                                  | true peer-to-peer mesh, `<slug>.cbx` DNS                      |
-| Bridge    | `FeatureURLBridge` | Islo, E2B, Railway (live adapters); Modal, Cloudflare, Tensorlake (report `unsupported` until adapters ship)                                                         | provider-native HTTP(S) endpoints for discovery and sharing   |
-| SSH-mesh  | `FeatureSSH`       | **any provider advertising SSH**: Hetzner, Azure, GCP, AWS, Proxmox, static SSH, RunPod, exe-dev, Daytona, Sprites, Namespace, Semaphore, local-container, Parallels | operator-side `ssh -L` tunnels via `pond connect [--export]` |
-| (gap)     | —                  | macOS sandboxes, Windows                                                                                                                                             | not yet covered                                               |
-
-`crabbox pond peers` returns locally known peers with *both* a primary `transport` hint and the
-full `transports` list per member:
+Each row carries a primary `transport` hint plus the full `transports` list of
+every plane that member's provider supports:
 
 ```jsonc
-{ "slug": "api",  "provider": "hetzner",
-  "transport":  "tailnet",            // primary / recommended
-  "transports": ["tailnet", "ssh"],   // every plane this provider supports
-  "endpoint":   "100.64.1.3" }
+// crabbox pond peers --pond pr-42 --json  ->  { "members": [ ... ] }
+{
+  "slug": "api",
+  "leaseID": "cbx_0a1b2c3d4e5f",
+  "provider": "hetzner",
+  "pond": "pr-42",
+  "transport":  "tailnet",          // primary / recommended plane
+  "transports": ["tailnet", "ssh"], // every plane this provider supports
+  "endpoint":   "100.64.1.3"
+}
 ```
 
-So `pond connect` works against any provider that includes `ssh` in its
-`transports` list — including Hetzner / Azure / GCP / AWS, not just the
-old SSH-only class. Tailscale stays the recommended path when it's also
-available; SSH-mesh is an explicit operator-side plane for providers that
-advertise SSH. `pond connect --export` daemon mode is macOS/Linux-only in this
-preview because cleanup validates local daemon process commands before stopping
-them; Windows operators can use foreground `pond connect` until a Windows
-process validator ships.
+The endpoint shape depends on the primary plane: a tailnet IPv4/FQDN for
+Tailscale members, `ssh://host:port` for SSH-lease members, and a per-port
+HTTPS URL for URL-bridge members. Members whose endpoint is not yet recorded
+surface with `transport: "pending"` and an honest note; providers with no
+networking adapter (e.g. Blacksmith) surface with `transport: "none"`.
 
-## Three simple use cases
+The bridge plane is HTTP-only by design. For URL-bridge providers you can
+publish a per-peer public URL for a port:
 
-1. **Per-PR isolated E2E env.** Every PR gets its own staging; pond dies with PR:
-   ```
-   crabbox warmup --pond pr-$PR --slug api/web/db --provider hetzner --tailscale
-   # ... E2E ...
-   crabbox pond release pr-$PR
-   ```
+```sh
+crabbox pond peers --pond pr-42 --provider islo --share-port 8080 --share-ttl 12h --json
+```
 
-2. **API + GPU + DB integration test.** Vendor-mix in 4 lines — CPU on Hetzner,
-   GPU on a delegated provider, DB on Hetzner. Use Tailscale names for
-   tailnet members, URL bridge for HTTP(S) peers, and `pond connect` for
-   operator-side TCP forwards:
-   ```
-   crabbox warmup --pond it-$SHA --slug api --provider hetzner --tailscale
-   crabbox warmup --pond it-$SHA --slug ml  --provider modal   --class a10g
-   crabbox warmup --pond it-$SHA --slug db  --provider hetzner --tailscale
-   crabbox run --id it-$SHA-api -- "DB_HOST=db.cbx go test ./..."
-   ```
+`--share-port` is idempotent (existing shares are reused), bounded to `1..65535`,
+and `--share-ttl` defaults to 24h. Providers without a per-sandbox HTTPS ingress
+report `unsupported` rather than pretending to bridge.
 
-3. **Per-PR build farm.** 30-helper delegated pond per PR, dies with the PR —
-   useful for latency-tolerant work queues. This is not an MPI/NCCL-style
-   low-latency fabric:
-   ```
-   crabbox warmup --pond build-$PR --slug coord --provider hetzner
-   for i in $(seq 1 30); do
-     crabbox warmup --pond build-$PR --slug helper-$i --provider islo &
-   done; wait
-   ```
+### `pond connect` / `pond disconnect`
+
+`pond connect <name>` opens operator-side `ssh -L` forwards to every pond member
+that declared `--expose` ports, across all SSH-mesh-capable providers in the
+pond (not just one). `--provider P` narrows it to a single provider.
+
+For each forwarded port it renders, under `~/.crabbox/pond/<name>/`:
+
+- `hosts` — `<slug>.cbx` aliases pointing at `127.0.0.1`, with the assigned
+  loopback port in a comment (a hosts file cannot encode `host:port`).
+- `env` — shell exports of the form `CRABBOX_POND_<PEER>_<PORT>=127.0.0.1:<local>`,
+  which is the supported way to reach a forwarded peer port.
+
+Local forward ports are auto-allocated from `51820..52819` (probed against the
+kernel so they do not collide with services you already run).
+
+By default `pond connect` runs in the foreground and holds the tunnels open
+until you press Ctrl-C. `--export` daemonizes the tunnels so they survive the
+CLI exit and prints the exports for `eval`:
+
+```sh
+eval "$(crabbox pond connect pr-42 --export)"
+curl "$CRABBOX_POND_API_8080"          # reach api's exposed :8080
+crabbox pond disconnect pr-42          # stop the daemonized forwards
+```
+
+`--export` (and `pond disconnect`) are macOS/Linux only: cleanup validates the
+local daemon process command before stopping it, and that validator is not yet
+implemented for Windows operators. Use foreground `pond connect` on Windows.
+
+`--json` prints the forward table and exits without opening any tunnels.
+
+### `pond release`
+
+Stops every lease in the named pond and removes their local claims, iterating
+across all providers represented in the pond — you do not pass `--provider`.
+Individual failures are logged as warnings and do not block the rest; the first
+error is returned so scripts can tell whether the release was clean.
+
+### `pool` vs `pond`
+
+`pool` is inventory — "what runners exist?" — exposed through `crabbox list` and
+the broker's `/v1/pool`. `pond` is grouping — "which leases belong to this
+environment?" — created by tagging leases with `--pond <name>` and operated
+through `crabbox pond ...`. `crabbox list --pond <name>` filters inventory down
+to one pond.
+
+## Exposing ports for the SSH-mesh
+
+`--expose <port>` (repeatable, comma lists accepted) declares a TCP port a lease
+wants reachable over the SSH-mesh plane. Ports are validated (`1..65535`),
+deduplicated, and stored in the lease's provider label so `pond connect` can
+discover them without a separate store. Up to 10 distinct ports per lease.
+
+```sh
+crabbox warmup --pond pr-42 --slug api --provider hetzner --expose 8080 --expose 5432
+```
+
+## Example use cases
+
+**Per-PR isolated E2E environment.** Every PR gets its own staging; the pond
+dies with the PR:
+
+```sh
+crabbox warmup --pond "pr-$PR" --slug api --provider hetzner --tailscale
+crabbox warmup --pond "pr-$PR" --slug web --provider hetzner --tailscale
+# ... run E2E against api.cbx / web.cbx ...
+crabbox pond release "pr-$PR"
+```
+
+**Mixed-vendor integration test.** CPU on Hetzner, GPU on a delegated provider,
+DB on Hetzner. Use Tailscale names for tailnet members and the URL bridge for
+HTTP(S) peers:
+
+```sh
+crabbox warmup --pond "it-$SHA" --slug api --provider hetzner --tailscale
+crabbox warmup --pond "it-$SHA" --slug ml  --provider modal   --class a10g
+crabbox warmup --pond "it-$SHA" --slug db  --provider hetzner --tailscale
+crabbox run --id api -- "DB_HOST=db.cbx go test ./..."
+```
+
+**Per-PR build farm.** A large delegated pond of latency-tolerant helpers that
+dies with the PR. This is a work queue, not a low-latency fabric:
+
+```sh
+crabbox warmup --pond "build-$PR" --slug coord --provider hetzner
+for i in $(seq 1 30); do
+  crabbox warmup --pond "build-$PR" --slug "helper-$i" --provider islo &
+done
+wait
+```
 
 ## When not to use it
 
-- **Tightly-coupled HPC** (MPI / NCCL) across providers — public-internet latency is too high. Keep tightly-coupled jobs on one provider + region.
-- **macOS / Windows peer reachability** — gap, tracked separately.
-- **Untrusted multi-tenant** — default-allow within a pond. For agent-isolation cases, see `--isolation per-slug` (future).
+- **Tightly-coupled HPC (MPI / NCCL) across providers** — public-internet
+  latency is too high. Keep tightly-coupled jobs on one provider and region.
+- **macOS / Windows peer reachability** — not yet covered by any plane.
+- **Untrusted multi-tenant isolation** — connectivity inside a pond is
+  default-allow. Do not put mutually untrusted workloads in one pond.
 
-## Pool vs pond
+## Tailscale names and the `.cbx` hosts file
 
-`pool` is inventory: "what runners exist?" It is exposed through `crabbox list`
-and `/v1/pool`.
+On every Tailscale-capable Linux peer, bootstrap installs a systemd timer that
+rewrites `/etc/hosts.cbx` and a managed `/etc/hosts` block every 30 seconds from
+the box-local `tailscale status --json` output. Each peer renders as
+`<tailnet-ipv4> <slug>.cbx`, so members resolve each other as `<slug>.cbx`
+within roughly one refresh interval — and the broker never sees a Tailscale
+credential. Discovery is gated by the per-pond ACL tag (below): only peers
+carrying that tag are written.
 
-`pond` is grouping: "which leases belong to this test environment?" It is
-created by tagging leases with `--pond <name>` and operated through
-`crabbox pond ...`.
+## Tailscale ACL bootstrap
 
-## Security
+Every Tailscale pond peer is advertised under the ACL tag
+`tag:cbx-pond-<owner>-<pond>`, so a single concrete policy row gates the whole
+pond. `<owner>` is derived from your local git email's local-part (sanitized,
+and hashed when it would overflow the tag length budget).
 
-Tailscale ACL bootstrap is opt-in. To let `crabbox run --pond ... --tailscale`
-add the concrete `tag:cbx-pond-<owner>-<pond>` policy rows, set both
-`TS_API_KEY` and `CRABBOX_POND_ACL_BOOTSTRAP=1`. Without the opt-in, Crabbox
-prints/verifies the required policy through `doctor --pond` but does not edit
-the tailnet policy. The broker never sees Tailscale credentials.
+Auto-generated pond tags are **direct-provider only**: they are added to the
+provider's Tailscale config when you use a direct (non-brokered) Tailscale-capable
+provider. Brokered coordinators keep enforcing their own configured
+`CRABBOX_TAILSCALE_TAGS` allowlist and do not receive dynamic per-pond tags.
 
-## API stability
+Installing the tag's `tagOwners` and self-peering grant on your tailnet policy
+is **opt-in**. To let lease creation auto-install the rows, set both:
 
-`pond` is **preview** for v0.x. The reserved `pond=` label key is intended to
-stay, but metadata shape and command flags may evolve before v1.0.
+- `TS_API_KEY` — a tailnet API key (optionally `TS_TAILNET` to target a specific
+  tailnet; defaults to `-`, your default tailnet).
+- `CRABBOX_POND_ACL_BOOTSTRAP=1` — explicit consent to edit the tailnet policy.
+  `TS_API_KEY` alone is never treated as consent.
+
+When enabled, Crabbox reads the policy with an ETag, merges in the missing
+`tagOwners` entry and a self-peering rule (grants-shape if the policy already
+uses grants, otherwise a legacy `acls` row), and writes it back with `If-Match`
+so concurrent edits fail fast. If the control plane does not expose a
+Tailscale-compatible policy API (e.g. Headscale), lease creation is not blocked.
+
+Without the opt-in, `crabbox doctor --pond <name>` verifies the required policy
+row (using `TS_API_KEY` read-only) and points you at this document if it is
+missing. The broker never sees Tailscale credentials.
+
+Point the CLI at a self-hosted control plane with `CRABBOX_TS_API_URL` (it wins
+over `TS_API_URL`); the default is `https://api.tailscale.com`.
+
+### Manual policy snippet
+
+If you prefer to manage the policy yourself, add the tag owner and a
+self-peering rule for your pond's tag (replace `cbx-pond-alice-pr-42` with the
+tag `doctor --pond` reports). Grants shape:
+
+```jsonc
+{
+  "tagOwners": {
+    "tag:cbx-pond-alice-pr-42": ["autogroup:admin"]
+  },
+  "grants": [
+    { "src": ["tag:cbx-pond-alice-pr-42"], "dst": ["tag:cbx-pond-alice-pr-42"], "ip": ["*"] }
+  ]
+}
+```
+
+Legacy `acls` shape:
+
+```jsonc
+{
+  "tagOwners": {
+    "tag:cbx-pond-alice-pr-42": ["autogroup:admin"]
+  },
+  "acls": [
+    { "action": "accept", "src": ["tag:cbx-pond-alice-pr-42"], "dst": ["tag:cbx-pond-alice-pr-42:*"] }
+  ]
+}
+```
+
+## See also
+
+- [providers.md](providers.md) — provider capability matrix.
+- [tailscale.md](tailscale.md) — the Tailscale transport and tags.
+- [doctor.md](doctor.md) — readiness checks, including the pond ACL check.
+- [identifiers.md](identifiers.md) — lease IDs and slugs.

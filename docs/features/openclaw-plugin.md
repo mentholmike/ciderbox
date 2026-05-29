@@ -3,19 +3,37 @@
 Read when:
 
 - enabling Crabbox as a plugin inside OpenClaw;
-- changing the plugin tools, schema, or wrapper behavior;
+- changing the plugin tools, parameter schemas, or wrapper behavior;
 - understanding why some Crabbox surfaces are CLI-only and not plugin tools.
 
-The Crabbox repository root is also a native OpenClaw plugin package. When
-OpenClaw loads the plugin, it exposes a small set of agent tools that shell
-out to the user's installed `crabbox` binary. The plugin does not embed the
-CLI or duplicate any of its logic - it is a thin contract for safe, allowlisted
-invocations.
+The Crabbox repository root is also a native OpenClaw plugin package
+(`@openclaw/crabbox-plugin`). When OpenClaw loads the plugin it registers a
+small set of agent tools that shell out to the user's installed `crabbox`
+binary. The plugin embeds no CLI logic and duplicates no provider code: each
+tool builds a typed `crabbox` argv, runs it as a subprocess, and returns the
+captured output. The point is a bounded, allowlisted contract so an agent can
+drive remote boxes without arbitrary shell access.
 
-## Plugin Manifest
+## Package And Manifest
 
-`openclaw.plugin.json` declares the plugin id, the tools it owns, and the
-config schema:
+`package.json` publishes the plugin as `@openclaw/crabbox-plugin`, type
+`module`, with `index.js` as both the npm `main` and the OpenClaw extension
+entrypoint:
+
+```json
+{
+  "name": "@openclaw/crabbox-plugin",
+  "type": "module",
+  "main": "index.js",
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.4.25" }
+  }
+}
+```
+
+`openclaw.plugin.json` declares the plugin id, the tools it owns, its
+activation, and the config schema:
 
 ```json
 {
@@ -32,83 +50,153 @@ config schema:
       "crabbox_stop"
     ]
   },
-  "configSchema": { ... }
+  "configSchema": { "...": "see Config below" }
 }
 ```
 
-The runtime entrypoint is `index.js`. Tests in `index.test.js` lock the tool
-schemas, argv shapes, output trimming, and config validation so a future
-refactor cannot silently change the agent-facing contract.
+The runtime entrypoint is `index.js`; its default export exposes
+`register(api)`, which reads plugin config and registers the five tools. Tests
+in `index.test.js` lock the tool set, the provider enum, argv shapes, env
+passing, and the disabled-tool guard, so a refactor cannot silently change the
+agent-facing contract.
 
 ## Tools
 
+The plugin registers exactly five tools:
+
 ```text
-crabbox_run      run a command on a leased remote box
-crabbox_warmup   acquire a warm box for repeated commands
-crabbox_status   query a lease's state
-crabbox_list     list visible leases for the current owner/org
-crabbox_stop     stop a lease and release its provider resources
+crabbox_run      run a command on an existing lease after syncing the repo
+crabbox_warmup   provision or reuse a lease and wait until it is ready
+crabbox_status   read the current state of a lease
+crabbox_list     list current machines for the owner/org
+crabbox_stop     stop a kept lease by ID or slug
 ```
 
-Each tool accepts an argv array of `string` plus an optional `env` object of
-string values. The plugin enforces these as JSON schema before invoking the
-binary, so an agent cannot pass arbitrary shell commands or non-string env
-values.
+Unlike a generic shell tool, each tool takes a **typed parameter object** (not
+a raw argv array). The plugin maps those fields onto a fixed `crabbox`
+subcommand and a curated subset of its flags, so an agent cannot inject
+arbitrary arguments. Every schema sets `additionalProperties: false`.
 
-`crabbox_run`, `crabbox_warmup`, and `crabbox_stop` can be disabled per
-install by setting `allowRun`, `allowWarmup`, or `allowStop` to `false` in
-plugin config. `crabbox_status` and `crabbox_list` are read-only and always
-allowed.
+### `crabbox_run`
+
+Runs `crabbox run --id <id> [flags] -- <command...>`.
+
+| Parameter | Type | Maps to |
+|:----------|:-----|:--------|
+| `id` (required) | string | `--id` (lease ID or slug) |
+| `command` (required) | string array | positional command after `--` |
+| `provider` | enum | `--provider` |
+| `env` | object of strings | extra subprocess env (not a flag) |
+| `noSync` | boolean | `--no-sync` |
+| `syncOnly` | boolean | `--sync-only` |
+| `forceSyncLarge` | boolean | `--force-sync-large` |
+| `checksum` | boolean | `--checksum` |
+| `debug` | boolean | `--debug` |
+| `reclaim` | boolean | `--reclaim` |
+| `junit` | string | `--junit` (comma-separated remote paths) |
+| `timeoutSeconds` | number | per-call wrapper timeout |
+
+### `crabbox_warmup`
+
+Runs `crabbox warmup [flags]`.
+
+| Parameter | Type | Maps to |
+|:----------|:-----|:--------|
+| `provider` | enum | `--provider` |
+| `profile` | string | `--profile` |
+| `class` | string | `--class` |
+| `type` | string | `--type` (provider server/instance type) |
+| `ttl` | string | `--ttl` (e.g. `90m`) |
+| `idleTimeout` | string | `--idle-timeout` (e.g. `30m`) |
+| `keep` | boolean | `--keep` |
+| `actionsRunner` | boolean | `--actions-runner` |
+| `reclaim` | boolean | `--reclaim` |
+| `timeoutSeconds` | number | per-call wrapper timeout |
+
+### `crabbox_status`
+
+Runs `crabbox status --id <id> [flags]`. Parameters: `id` (required),
+`provider`, `wait` (`--wait`), `waitTimeout` (`--wait-timeout`, e.g. `10m`),
+`json` (`--json`), `timeoutSeconds`.
+
+### `crabbox_list`
+
+Runs `crabbox list [flags]`. Parameters: `provider`, `json` (`--json`),
+`refresh` (`--refresh`), `timeoutSeconds`.
+
+### `crabbox_stop`
+
+Runs `crabbox stop [--provider <p>] <id>`. Parameters: `id` (required),
+`provider`, `timeoutSeconds`. The id is passed positionally, not as `--id`.
+
+## Tool Gating
+
+`crabbox_run`, `crabbox_warmup`, and `crabbox_stop` can be disabled per install
+by setting `allowRun`, `allowWarmup`, or `allowStop` to `false` in plugin
+config. A disabled tool is still registered, but its `execute` throws
+(`"... is disabled by plugin config"`) before the binary is invoked.
+`crabbox_status` and `crabbox_list` are read-only and always allowed.
 
 ## Config
 
-The plugin accepts only four config keys, all optional:
+The plugin accepts six optional config keys; the schema sets
+`additionalProperties: false`, so unknown keys are rejected:
 
-```json
-{
-  "binary": "crabbox",
-  "maxOutputBytes": 60000,
-  "timeoutSeconds": 1800,
-  "allowRun": true,
-  "allowWarmup": true,
-  "allowStop": true
-}
-```
+| Key | Type | Default | Effect |
+|:----|:-----|:--------|:-------|
+| `binary` | string | `crabbox` | Path to the Crabbox executable. Set when it is not on PATH. |
+| `maxOutputBytes` | number | `60000` | Cap on captured stdout/stderr returned to the model per stream. |
+| `timeoutSeconds` | number | `1800` | Default wrapper timeout for a Crabbox CLI invocation. |
+| `allowRun` | boolean | `true` | Gate `crabbox_run`. |
+| `allowWarmup` | boolean | `true` | Gate `crabbox_warmup`. |
+| `allowStop` | boolean | `true` | Gate `crabbox_stop`. |
 
-| Key | Default | Effect |
-|:----|:--------|:-------|
-| `binary` | `crabbox` | Path to the Crabbox binary. Set when the binary is not on PATH. |
-| `maxOutputBytes` | 60000 | Max captured stdout/stderr returned to the model per call. |
-| `timeoutSeconds` | 1800 | Default wrapper timeout for a Crabbox CLI invocation. |
-| `allowRun` | true | Gate `crabbox_run`. |
-| `allowWarmup` | true | Gate `crabbox_warmup`. |
-| `allowStop` | true | Gate `crabbox_stop`. |
+`maxOutputBytes` and `timeoutSeconds` are coerced to positive integers; any
+non-positive or non-finite value falls back to the default. A per-call
+`timeoutSeconds` parameter overrides the configured default for a single
+invocation.
 
-Crabbox config (broker URL, provider, token, profile, class) lives in the
-user/repo config files. The plugin does not duplicate those keys; it inherits
-them from whatever `crabbox config show` would return for the agent's
-working directory.
+Crabbox's own config (broker URL, provider, token, profile, class) lives in the
+user/repo config files, not here. The plugin does not duplicate those keys; the
+subprocess inherits the agent's environment (`process.env` plus any per-call
+`env`), so it resolves the same config a bare `crabbox` would in the working
+directory.
 
 ## Output Handling
 
-The plugin captures stdout and stderr separately, trims each to
-`maxOutputBytes`, and reports the exit code, the trimmed bytes, and a
-truncation flag back to the model. Truncated output gets a tail marker so
-agents know they did not get the full transcript:
+The plugin captures stdout and stderr separately. Each stream is appended
+incrementally and capped at `maxOutputBytes`; once a stream exceeds the cap it
+is sliced to the limit and a `\n[truncated]\n` marker is appended, so an agent
+can tell it did not receive the full transcript.
+
+The tool result text is assembled from the invocation summary and any non-empty
+output:
 
 ```text
-... [output truncated; 12345 of 87654 bytes shown]
+$ crabbox run --id blue-lobster -- go test ./...
+
+exit=1
+
+stdout:
+ok  	example.com/pkg	0.42s
+
+stderr:
+FAIL	example.com/other	[build failed]
 ```
 
-Long-running tools still respect `timeoutSeconds`. When the wrapper times
-out, the plugin sends SIGTERM, waits a short grace period, then escalates to
-SIGKILL. The exit code in the response reflects the wrapper outcome, not the
-inner remote command.
+The result also carries a structured `details` object with `ok`, `code`,
+`signal`, `timedOut`, `stdout`, `stderr`, and the reconstructed `command`
+string, so callers can branch on the exit code rather than parse the text.
+
+When the wrapper timeout fires (or the host aborts the call), the plugin sends
+`SIGTERM` to the subprocess. A timed-out run reports `timedOut: true` and adds a
+`timed out` line to the summary; the exit code reflects the wrapper outcome, not
+the inner remote command.
 
 ## What Belongs In The CLI Instead
 
 History, log inspection, attach, results, usage, pond orchestration, and admin
-operations are intentionally not plugin tools. They are best run from a
+operations are intentionally **not** plugin tools. Run them from a
 shell-capable agent:
 
 ```sh
@@ -118,56 +206,68 @@ crabbox attach run_...
 crabbox logs run_...
 crabbox results run_...
 crabbox usage --scope user
-crabbox pond peers --pond alpha
-crabbox pond connect alpha --export
+crabbox pond peers --pond my-pond
+crabbox pond connect my-pond --export
 crabbox admin leases --state active
 crabbox cleanup --dry-run
 ```
 
-Reasons for keeping these out of the plugin:
+Why they stay out of the plugin:
 
-- they often produce more output than `maxOutputBytes` can usefully capture;
-- agents tend to want raw logs they can grep, not trimmed model output;
-- `pond` is transport-aware preview orchestration and may update operator
-  Tailscale policy or start SSH tunnels, so it stays CLI-led for now;
+- they often produce far more output than `maxOutputBytes` can usefully carry;
+- agents usually want raw logs they can grep, not trimmed model output;
+- `pond` is transport-aware orchestration that can update operator Tailscale
+  policy or start SSH tunnels, so it stays CLI-led;
 - admin tools are easier to gate at the shell level (env, allowlists) than
   through plugin config;
 - `crabbox attach` is interactive by design.
 
 ## Provider Allowlist
 
-The plugin schema constrains the `provider` argument to the providers
-Crabbox actually supports:
+The `provider` parameter is constrained to an enum of provider ids and aliases.
+Adding a provider that an agent should be able to target requires extending this
+enum in `index.js` and the matching fixture in `index.test.js`; the enum is the
+agent-facing contract, and an unlisted value is rejected by schema validation
+before it reaches the binary.
 
 ```text
-aws | azure | gcp | google | google-cloud | hetzner | proxmox | ssh |
-static | static-ssh | blacksmith-testbox | blacksmith | namespace-devbox |
-namespace | namespace-devboxes | semaphore | sem | sprites | daytona | islo |
-e2b | modal | tensorlake | tl | tensorlake-sbx | cloudflare | cf
+aws | azure | azure-dynamic-sessions | gcp | google | google-cloud |
+hetzner | proxmox | ssh | static | static-ssh | blacksmith-testbox |
+blacksmith | namespace-devbox | namespace | namespace-devboxes |
+semaphore | sem | sprites | daytona | islo | e2b | modal | tensorlake |
+tl | tensorlake-sbx | cloudflare | cf
 ```
 
-Adding a provider to the CLI requires updating this list in `index.js` and
-the test fixture in `index.test.js`. The schema is the agent-facing contract;
-without the update, the new provider would be rejected by JSON validation
-before reaching the binary.
+This is a deliberate subset of the provider adapters Crabbox ships. Providers
+absent from the enum (for example local-container, parallels, railway, runpod,
+upstash-box, wandb) are still usable from the CLI; they are simply not offered
+as plugin-selectable targets. When `provider` is omitted, the agent's
+configured default provider applies.
 
 ## When To Update
 
 Edit the plugin when you:
 
-- add or remove a provider;
-- add a new agent-safe tool (read-only, owner-scoped, bounded output);
-- change argv conventions across all `crabbox` commands (rare);
-- update default timeouts or output budgets.
+- add or remove a provider that agents should target (update the enum);
+- add a new agent-safe tool (read-only or bounded, owner-scoped output);
+- change the curated flag set a tool maps onto;
+- change default timeouts or output budgets.
 
-Run `node --test index.test.js` after every change. The tests exercise the
-schema, argv handling, and output trimming end-to-end.
+Run the tests after every change:
+
+```sh
+node --test index.test.js
+```
+
+The tests exercise the tool set, provider enum, argv handling, env passing, and
+the disabled-tool guard end to end.
 
 Related docs:
 
-- [docs/README.md](../README.md) - top-level overview includes the plugin.
-- [Source map](../source-map.md) - `package.json`, `openclaw.plugin.json`,
-  `index.js`, `index.test.js`.
-- [run command](../commands/run.md) - what `crabbox_run` ultimately invokes.
-- [warmup command](../commands/warmup.md) - what `crabbox_warmup` invokes.
-- [stop command](../commands/stop.md) - what `crabbox_stop` invokes.
+- [docs/README.md](../README.md) — top-level overview, includes the plugin.
+- [Source map](../source-map.md) — `package.json`, `openclaw.plugin.json`, `index.js`, `index.test.js`.
+- [run command](../commands/run.md) — what `crabbox_run` ultimately invokes.
+- [warmup command](../commands/warmup.md) — what `crabbox_warmup` invokes.
+- [stop command](../commands/stop.md) — what `crabbox_stop` invokes.
+</content>
+</invoke>
