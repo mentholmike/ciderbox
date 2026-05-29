@@ -135,6 +135,18 @@ func validateProviderTarget(cfg Config) error {
 			return exit(2, "architecture=arm64 currently supports provider=azure or provider=aws")
 		}
 	}
+	if cfg.TargetOS == targetLinux && strings.TrimSpace(cfg.ServerType) != "" {
+		switch provider.Name() {
+		case "aws":
+			if err := validateArchitectureServerType("AWS instance type", cfg, awsInstanceTypeIsARM64(cfg.ServerType)); err != nil {
+				return err
+			}
+		case "azure":
+			if err := validateArchitectureServerType("Azure VM size", cfg, azureVMSizeIsARM64(cfg.ServerType)); err != nil {
+				return err
+			}
+		}
+	}
 	if provider.Name() == "aws" &&
 		cfg.TargetOS == targetWindows &&
 		cfg.WindowsMode == windowsModeWSL2 &&
@@ -150,6 +162,17 @@ func validateProviderTarget(cfg Config) error {
 			return exit(2, "provider=aws target=macos requires --market on-demand; EC2 Mac instances are not Spot")
 		}
 		return nil
+	}
+	return nil
+}
+
+func validateArchitectureServerType(kind string, cfg Config, serverTypeARM64 bool) error {
+	architecture := effectiveArchitectureForConfig(cfg)
+	if architecture == ArchitectureARM64 && !serverTypeARM64 {
+		return exit(2, "architecture=arm64 requires an ARM64 %s; %s is not ARM64", kind, cfg.ServerType)
+	}
+	if cfg.architectureExplicit && cfg.Architecture == ArchitectureAMD64 && serverTypeARM64 {
+		return exit(2, "architecture=amd64 requires an amd64 %s; %s is ARM64", kind, cfg.ServerType)
 	}
 	return nil
 }

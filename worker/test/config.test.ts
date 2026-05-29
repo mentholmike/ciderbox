@@ -413,6 +413,41 @@ describe("lease config", () => {
     ).toThrow("architecture=arm64 currently supports provider=azure or provider=aws");
   });
 
+  it("rejects explicit server types that do not match the requested architecture", () => {
+    expect(() =>
+      leaseConfig({
+        provider: "aws",
+        architecture: "arm64",
+        serverType: "c7a.48xlarge",
+        sshPublicKey: "ssh-ed25519 test",
+      }),
+    ).toThrow("architecture=arm64 requires an ARM64 AWS instance type");
+    expect(() =>
+      leaseConfig({
+        provider: "aws",
+        architecture: "amd64",
+        serverType: "c7g.16xlarge",
+        sshPublicKey: "ssh-ed25519 test",
+      }),
+    ).toThrow("architecture=amd64 requires an amd64 AWS instance type");
+    expect(() =>
+      leaseConfig({
+        provider: "azure",
+        architecture: "arm64",
+        serverType: "Standard_D96ds_v6",
+        sshPublicKey: "ssh-ed25519 test",
+      }),
+    ).toThrow("architecture=arm64 requires an ARM64 Azure VM size");
+    expect(() =>
+      leaseConfig({
+        provider: "azure",
+        architecture: "amd64",
+        serverType: "Standard_D96pds_v6",
+        sshPublicKey: "ssh-ed25519 test",
+      }),
+    ).toThrow("architecture=amd64 requires an amd64 Azure VM size");
+  });
+
   it("normalizes Azure OS disk requests", () => {
     expect(
       leaseConfig({

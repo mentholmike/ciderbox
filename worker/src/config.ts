@@ -159,6 +159,15 @@ export function leaseConfig(input: LeaseRequest, defaults: LeaseConfigDefaults =
   const serverType =
     input.serverType ??
     serverTypeForConfig(provider, target, windowsMode, machineClass, architecture);
+  if (input.serverType) {
+    validateArchitectureServerType(
+      provider,
+      target,
+      architecture,
+      architectureExplicit,
+      serverType,
+    );
+  }
   const ttlSeconds = clampTTL(input.ttlSeconds ?? 5400);
   const idleTimeoutSeconds = clampIdleTimeout(input.idleTimeoutSeconds ?? 1800);
   const sshPublicKey = input.sshPublicKey?.trim() ?? "";
@@ -319,6 +328,41 @@ function inferArchitectureForServerType(
     return "arm64";
   }
   return fallback;
+}
+
+function validateArchitectureServerType(
+  provider: Provider,
+  target: TargetOS,
+  architecture: Architecture,
+  architectureExplicit: boolean,
+  serverType: string,
+): void {
+  if (target !== "linux") {
+    return;
+  }
+  const serverTypeARM64 =
+    (provider === "azure" && azureVMSizeIsARM64(serverType)) ||
+    (provider === "aws" && awsInstanceTypeIsARM64(serverType));
+  if (architecture === "arm64" && !serverTypeARM64) {
+    throw new Error(
+      `architecture=arm64 requires an ARM64 ${providerServerTypeName(provider)}; ${serverType} is not ARM64`,
+    );
+  }
+  if (architectureExplicit && architecture === "amd64" && serverTypeARM64) {
+    throw new Error(
+      `architecture=amd64 requires an amd64 ${providerServerTypeName(provider)}; ${serverType} is ARM64`,
+    );
+  }
+}
+
+function providerServerTypeName(provider: Provider): string {
+  if (provider === "azure") {
+    return "Azure VM size";
+  }
+  if (provider === "aws") {
+    return "AWS instance type";
+  }
+  return "server type";
 }
 
 export function awsPromotedAMIConfigKey(region: string, serverType: string): string {
