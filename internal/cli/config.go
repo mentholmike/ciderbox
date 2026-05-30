@@ -113,6 +113,7 @@ type Config struct {
 	Tensorlake                  TensorlakeConfig
 	Modal                       ModalConfig
 	UpstashBox                  UpstashBoxConfig
+	AsciiBox                    AsciiBoxConfig
 	Cloudflare                  CloudflareConfig
 	Semaphore                   SemaphoreConfig
 	Sprites                     SpritesConfig
@@ -316,6 +317,13 @@ type UpstashBoxConfig struct {
 	Size      string
 	Workdir   string
 	KeepAlive bool
+}
+
+type AsciiBoxConfig struct {
+	APIKey  string
+	BaseURL string
+	CLIPath string
+	Workdir string
 }
 
 type CloudflareConfig struct {
@@ -797,6 +805,11 @@ func baseConfig() Config {
 			Size:    "small",
 			Workdir: "/workspace/home/crabbox",
 		},
+		AsciiBox: AsciiBoxConfig{
+			BaseURL: "https://ascii.dev",
+			CLIPath: "box",
+			Workdir: "/home/user/crabbox",
+		},
 		Cloudflare: CloudflareConfig{
 			Workdir: "/workspace/crabbox",
 		},
@@ -879,6 +892,7 @@ type fileConfig struct {
 	Tensorlake           *fileTensorlakeConfig              `yaml:"tensorlake,omitempty"`
 	Modal                *fileModalConfig                   `yaml:"modal,omitempty"`
 	UpstashBox           *fileUpstashBoxConfig              `yaml:"upstashBox,omitempty"`
+	AsciiBox             *fileAsciiBoxConfig                `yaml:"asciiBox,omitempty"`
 	Cloudflare           *fileCloudflareConfig              `yaml:"cloudflare,omitempty"`
 	Semaphore            *fileSemaphoreConfig               `yaml:"semaphore,omitempty"`
 	Sprites              *fileSpritesConfig                 `yaml:"sprites,omitempty"`
@@ -1192,6 +1206,12 @@ type fileUpstashBoxConfig struct {
 	Size      string `yaml:"size,omitempty"`
 	Workdir   string `yaml:"workdir,omitempty"`
 	KeepAlive *bool  `yaml:"keepAlive,omitempty"`
+}
+
+type fileAsciiBoxConfig struct {
+	BaseURL string `yaml:"baseUrl,omitempty"`
+	CLIPath string `yaml:"cliPath,omitempty"`
+	Workdir string `yaml:"workdir,omitempty"`
 }
 
 type fileCloudflareConfig struct {
@@ -2209,6 +2229,17 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 			cfg.UpstashBox.KeepAlive = *file.UpstashBox.KeepAlive
 		}
 	}
+	if file.AsciiBox != nil {
+		if file.AsciiBox.BaseURL != "" {
+			cfg.AsciiBox.BaseURL = file.AsciiBox.BaseURL
+		}
+		if file.AsciiBox.CLIPath != "" {
+			cfg.AsciiBox.CLIPath = file.AsciiBox.CLIPath
+		}
+		if file.AsciiBox.Workdir != "" {
+			cfg.AsciiBox.Workdir = file.AsciiBox.Workdir
+		}
+	}
 	applyCloudflareFileConfig(cfg, file.Cloudflare)
 	if file.Semaphore != nil {
 		if file.Semaphore.Host != "" {
@@ -2913,6 +2944,10 @@ func applyEnv(cfg *Config) {
 	if value, ok := getenvBool("CRABBOX_UPSTASH_BOX_KEEP_ALIVE"); ok {
 		cfg.UpstashBox.KeepAlive = value
 	}
+	cfg.AsciiBox.APIKey = getenv("CRABBOX_ASCII_BOX_API_KEY", getenv("ASCII_BOX_API_KEY", cfg.AsciiBox.APIKey))
+	cfg.AsciiBox.BaseURL = getenv("CRABBOX_ASCII_BOX_BASE_URL", getenv("ASCII_BOX_BASE_URL", cfg.AsciiBox.BaseURL))
+	cfg.AsciiBox.CLIPath = getenv("CRABBOX_ASCII_BOX_CLI", getenv("BOX_CLI", cfg.AsciiBox.CLIPath))
+	cfg.AsciiBox.Workdir = getenv("CRABBOX_ASCII_BOX_WORKDIR", cfg.AsciiBox.Workdir)
 	cfg.Cloudflare.APIURL = getenv("CRABBOX_CLOUDFLARE_RUNNER_URL", cfg.Cloudflare.APIURL)
 	cfg.Cloudflare.Token = getenv("CRABBOX_CLOUDFLARE_RUNNER_TOKEN", cfg.Cloudflare.Token)
 	cfg.Cloudflare.Workdir = getenv("CRABBOX_CLOUDFLARE_WORKDIR", cfg.Cloudflare.Workdir)

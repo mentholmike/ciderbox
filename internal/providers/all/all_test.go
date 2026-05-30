@@ -30,6 +30,7 @@ func TestAllBuiltInProvidersExposeDoctor(t *testing.T) {
 		"ssh",
 		"tensorlake",
 		"upstash-box",
+		"ascii-box",
 		"wandb",
 	}
 	for _, name := range providers {

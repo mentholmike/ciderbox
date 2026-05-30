@@ -63,6 +63,7 @@ Each page below maps to an adapter under `internal/providers/<dir>`. The
 | [Sprites](sprites.md) | `sprites` | — | Linux | no (direct) |
 | [Daytona](daytona.md) | `daytona` | — | Linux | no (direct) |
 | [RunPod](runpod.md) | `runpod` | `run-pod`, `runpodio` | Linux | no (direct) |
+| [ASCII Box](ascii-box.md) | `ascii-box` | `ascii`, `asciibox` | Linux | no (direct) |
 
 ### Delegated run
 
@@ -90,6 +91,8 @@ reports.
   distinct adapters.
 - Tensorlake is Crabbox's Firecracker-backed delegated provider; Crabbox does
   not provision raw Firecracker instances directly.
+- ASCII Box is an SSH-lease provider. Crabbox uses the documented `box --json`
+  CLI for lifecycle/status/delete, then runs normal sync and commands over SSH.
 - Capability flags (`--desktop`, `--browser`, `--code`, VNC) are validated
   against each provider's declared feature set. Among the SSH-lease providers,
   desktop/browser/code surfaces are richest on `aws`, `azure`, `hetzner`,

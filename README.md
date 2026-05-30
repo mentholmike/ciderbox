@@ -132,6 +132,7 @@ Targets: **L**inux, **M**acOS, **W**indows.
 | [Sprites](docs/providers/sprites.md) | `sprites` | L | direct | Sprites microVMs through `sprite proxy`. |
 | [Daytona](docs/providers/daytona.md) | `daytona` | L | direct | Daytona-managed dev sandbox over SSH. |
 | [RunPod](docs/providers/runpod.md) | `runpod` (`run-pod`, `runpodio`) | L | direct | RunPod GPU pods with public SSH. |
+| [ASCII Box](docs/providers/ascii-box.md) | `ascii-box` (`ascii`, `asciibox`) | L | direct | ASCII Box Ubuntu sandboxes exposed as SSH leases. |
 
 ### Delegated-run providers (sandbox/proof runners, no SSH lease)
 
@@ -386,10 +387,10 @@ blacksmith:
 
 Keep provider tokens in environment variables, not repo config (for example
 `CRABBOX_SEMAPHORE_TOKEN`, `CRABBOX_SPRITES_TOKEN`, `RUNPOD_API_KEY`,
-`E2B_API_KEY`, `DAYTONA_API_KEY`). The full env-var reference, per-provider
-sections, and per-command flags are in [docs/cli.md](docs/cli.md),
-[Configuration](docs/features/configuration.md), and the
-[provider docs](docs/providers/README.md).
+`ASCII_BOX_API_KEY`, `E2B_API_KEY`, `DAYTONA_API_KEY`). The full env-var
+reference, per-provider sections, and per-command flags are in
+[docs/cli.md](docs/cli.md), [Configuration](docs/features/configuration.md),
+and the [provider docs](docs/providers/README.md).
 
 ## OpenClaw plugin
 

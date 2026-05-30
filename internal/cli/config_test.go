@@ -105,6 +105,13 @@ func clearConfigEnv(t *testing.T) {
 		"CRABBOX_TENSORLAKE_DISK_MB",
 		"CRABBOX_TENSORLAKE_TIMEOUT_SECS",
 		"CRABBOX_TENSORLAKE_NO_INTERNET",
+		"CRABBOX_ASCII_BOX_API_KEY",
+		"ASCII_BOX_API_KEY",
+		"CRABBOX_ASCII_BOX_BASE_URL",
+		"ASCII_BOX_BASE_URL",
+		"CRABBOX_ASCII_BOX_CLI",
+		"BOX_CLI",
+		"CRABBOX_ASCII_BOX_WORKDIR",
 		"CRABBOX_WANDB_API_KEY",
 		"WANDB_API_KEY",
 		"CRABBOX_WANDB_DEFAULT_IMAGE",
@@ -169,6 +176,33 @@ func clearConfigEnv(t *testing.T) {
 		"RAILWAY_ENVIRONMENT_ID",
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestAsciiBoxConfigDefaultsFileAndEnv(t *testing.T) {
+	clearConfigEnv(t)
+	cfg := baseConfig()
+	applyFileConfig(&cfg, fileConfig{
+		Provider: "ascii-box",
+		AsciiBox: &fileAsciiBoxConfig{
+			BaseURL: "https://box.example.test",
+			CLIPath: "/tmp/box",
+			Workdir: "/home/user/project",
+		},
+	})
+	if cfg.Provider != "ascii-box" || cfg.AsciiBox.BaseURL != "https://box.example.test" || cfg.AsciiBox.CLIPath != "/tmp/box" || cfg.AsciiBox.Workdir != "/home/user/project" {
+		t.Fatalf("file asciiBox config not applied: %#v", cfg.AsciiBox)
+	}
+
+	t.Setenv("ASCII_BOX_API_KEY", "fallback-key")
+	t.Setenv("ASCII_BOX_BASE_URL", "https://fallback.example.test")
+	t.Setenv("CRABBOX_ASCII_BOX_API_KEY", "override-key")
+	t.Setenv("CRABBOX_ASCII_BOX_BASE_URL", "https://override.example.test")
+	t.Setenv("CRABBOX_ASCII_BOX_CLI", "/opt/box")
+	t.Setenv("CRABBOX_ASCII_BOX_WORKDIR", "/home/user/env-project")
+	applyEnv(&cfg)
+	if cfg.AsciiBox.APIKey != "override-key" || cfg.AsciiBox.BaseURL != "https://override.example.test" || cfg.AsciiBox.CLIPath != "/opt/box" || cfg.AsciiBox.Workdir != "/home/user/env-project" {
+		t.Fatalf("env asciiBox config not applied: %#v", cfg.AsciiBox)
 	}
 }
 

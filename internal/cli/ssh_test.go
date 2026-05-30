@@ -422,6 +422,25 @@ func TestSSHArgsAuthSecretDisablesControlMaster(t *testing.T) {
 	}
 }
 
+func TestSSHArgsNoControlMaster(t *testing.T) {
+	t.Setenv("HOME", "/tmp/crabbox-home")
+	got := strings.Join(sshArgs(SSHTarget{
+		User:            "user",
+		Host:            "203.0.113.10",
+		Port:            "22",
+		Key:             "/tmp/key",
+		NoControlMaster: true,
+	}, "true"), "\n")
+	for _, unwanted := range []string{"ControlMaster=auto", "ControlPersist=", "ControlPath="} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("sshArgs() should omit mux option %q: %q", unwanted, got)
+		}
+	}
+	if !strings.Contains(got, "ControlMaster=no") {
+		t.Fatalf("sshArgs() missing ControlMaster=no: %q", got)
+	}
+}
+
 func TestShouldRetrySSHPortOnlyForTransportExit(t *testing.T) {
 	if !shouldRetrySSHPort(exec.Command("sh", "-c", "exit 255").Run()) {
 		t.Fatal("ssh transport exit 255 should retry fallback ports")
