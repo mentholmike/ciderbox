@@ -2,9 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+)
+
+var (
+	coordinatorCreateLeaseProgressInterval = 30 * time.Second
+	coordinatorCreateLeaseTimeoutForConfig = defaultCoordinatorCreateLeaseTimeoutForConfig
 )
 
 type coordinatorLeaseBackend struct {
@@ -93,25 +99,59 @@ type coordinatorCreateLeaseResult struct {
 }
 
 func (b *coordinatorLeaseBackend) createCoordinatorLeaseWithProgress(ctx context.Context, cfg Config, publicKey string, keep bool, leaseID, slug string) (CoordinatorLease, error) {
+	timeout := coordinatorCreateLeaseTimeoutForConfig(cfg)
+	createCtx, cancelCreate := context.WithTimeout(ctx, timeout)
+	defer cancelCreate()
 	resultCh := make(chan coordinatorCreateLeaseResult, 1)
 	go func() {
-		lease, err := b.coord.CreateLease(ctx, cfg, publicKey, keep, leaseID, slug)
+		lease, err := b.coord.CreateLease(createCtx, cfg, publicKey, keep, leaseID, slug)
 		resultCh <- coordinatorCreateLeaseResult{lease: lease, err: err}
 	}()
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(coordinatorCreateLeaseProgressInterval)
 	defer ticker.Stop()
 	started := time.Now()
 	for {
 		select {
 		case result := <-resultCh:
+			if result.err != nil && errors.Is(result.err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return CoordinatorLease{}, coordinatorCreateLeaseTimeoutError(cfg, leaseID, slug, timeout)
+			}
 			return result.lease, result.err
 		case <-ticker.C:
-			fmt.Fprintf(b.rt.Stderr, "waiting for coordinator lease provider=%s slug=%s elapsed=%s\n", cfg.Provider, slug, time.Since(started).Round(time.Second))
+			fmt.Fprintf(b.rt.Stderr, "waiting for coordinator lease provider=%s slug=%s elapsed=%s timeout=%s\n", cfg.Provider, slug, time.Since(started).Round(time.Second), timeout)
+		case <-createCtx.Done():
+			if ctx.Err() != nil {
+				return CoordinatorLease{}, ctx.Err()
+			}
+			return CoordinatorLease{}, coordinatorCreateLeaseTimeoutError(cfg, leaseID, slug, timeout)
 		case <-ctx.Done():
 			return CoordinatorLease{}, ctx.Err()
 		}
 	}
+}
+
+func defaultCoordinatorCreateLeaseTimeoutForConfig(cfg Config) time.Duration {
+	if cfg.Provider == "azure" && cfg.TargetOS == targetLinux {
+		return 10 * time.Minute
+	}
+	return coordinatorHTTPTimeout
+}
+
+func coordinatorCreateLeaseTimeoutError(cfg Config, leaseID, slug string, timeout time.Duration) error {
+	serverType := blank(cfg.ServerType, "-")
+	return fmt.Errorf(
+		"timed out waiting for coordinator lease after %s provider=%s target=%s type=%s slug=%s lease=%s; no lease was returned; next_action=check coordinator/cloud logs and retry, then run `crabbox stop --provider %s --target %s --id %s` if a late lease appears",
+		timeout,
+		cfg.Provider,
+		cfg.TargetOS,
+		serverType,
+		slug,
+		leaseID,
+		cfg.Provider,
+		cfg.TargetOS,
+		leaseID,
+	)
 }
 
 func (b *coordinatorLeaseBackend) releaseStaleCoordinatorLeaseForRetry(leaseID string) bool {
