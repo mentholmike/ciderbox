@@ -706,15 +706,7 @@ func (c *AzureClient) CreateServerWithFallback(ctx context.Context, cfg Config, 
 }
 
 func (c *AzureClient) createServerWithFallbackInLocation(ctx context.Context, cfg Config, publicKey, leaseID, slug string, keep bool, logf func(string, ...any)) (Server, Config, error) {
-	var candidates []string
-	if cfg.ServerTypeExplicit && cfg.ServerType != "" {
-		candidates = []string{cfg.ServerType}
-	} else {
-		candidates = azureVMSizeCandidatesForConfig(cfg)
-		if cfg.ServerType != "" && cfg.ServerType != candidates[0] {
-			candidates = append([]string{cfg.ServerType}, candidates...)
-		}
-	}
+	candidates := azureProvisioningCandidatesForConfig(cfg)
 	var errs []error
 	sharedInfraReady := false
 	for i, vmSize := range candidates {
@@ -769,6 +761,31 @@ func (c *AzureClient) createServerWithFallbackInLocation(ctx context.Context, cf
 		}
 	}
 	return Server{}, cfg, joinErrors(errs)
+}
+
+func azureProvisioningCandidatesForConfig(cfg Config) []string {
+	if cfg.ServerTypeExplicit && cfg.ServerType != "" {
+		return []string{cfg.ServerType}
+	}
+	candidates := azureVMSizeCandidatesForConfig(cfg)
+	if cfg.ServerType == "" || len(candidates) == 0 || cfg.ServerType == candidates[0] {
+		return candidates
+	}
+	if !azureCanPrependNonExplicitServerType(cfg) {
+		return candidates
+	}
+	return append([]string{cfg.ServerType}, candidates...)
+}
+
+func azureCanPrependNonExplicitServerType(cfg Config) bool {
+	mode, err := NormalizeAzureOSDiskMode(cfg.AzureOSDisk)
+	if err != nil {
+		return true
+	}
+	if azureOSDiskUsesFullCaching(mode) {
+		return azureSupportsEphemeralFullCaching(cfg.ServerType)
+	}
+	return true
 }
 
 func azureRegionCandidates(cfg Config, preferredLocation string) []string {

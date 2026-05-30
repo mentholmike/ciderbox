@@ -187,6 +187,36 @@ func TestAzureVMSizeCandidatesForConfigFiltersEphemeralPreview(t *testing.T) {
 	}
 }
 
+func TestAzureProvisioningCandidatesSkipsStaleEphemeralPreviewDefault(t *testing.T) {
+	t.Parallel()
+	cfg := baseConfig()
+	cfg.Provider = "azure"
+	cfg.TargetOS = targetWindows
+	cfg.WindowsMode = windowsModeNormal
+	cfg.Class = "standard"
+	cfg.AzureOSDisk = AzureOSDiskEphemeralPreview
+	cfg.ServerType = "Standard_D2ads_v6"
+	cfg.ServerTypeExplicit = false
+	got := azureProvisioningCandidatesForConfig(cfg)
+	if len(got) == 0 {
+		t.Fatal("no candidates")
+	}
+	if got[0] != "Standard_D8ads_v6" {
+		t.Fatalf("first candidate=%q, want Standard_D8ads_v6; all=%v", got[0], got)
+	}
+	for _, candidate := range got {
+		if candidate == "Standard_D2ads_v6" {
+			t.Fatalf("stale unsupported default was prepended: %v", got)
+		}
+	}
+
+	cfg.ServerTypeExplicit = true
+	got = azureProvisioningCandidatesForConfig(cfg)
+	if !reflect.DeepEqual(got, []string{"Standard_D2ads_v6"}) {
+		t.Fatalf("explicit candidate=%v, want exact unsupported type preserved", got)
+	}
+}
+
 func TestAzureWindowsVMSizeCandidatesForClass(t *testing.T) {
 	t.Parallel()
 	got := azureWindowsVMSizeCandidatesForClass("beast")

@@ -252,19 +252,7 @@ export class AzureClient {
     market: string;
     attempts?: ProvisioningAttempt[];
   }> {
-    const candidates =
-      config.serverTypeExplicit && config.serverType
-        ? [config.serverType]
-        : prependUnique(
-            config.serverType,
-            azureVMSizeCandidatesForTargetClass(
-              config.target,
-              config.class,
-              config.windowsMode,
-              config.architecture,
-              config.azureOSDisk,
-            ),
-          );
+    const candidates = azureProvisioningCandidatesForConfig(config);
     const failures: string[] = [];
     const attempts: ProvisioningAttempt[] = [];
     let infra: AzureSharedInfraNames | undefined;
@@ -1416,6 +1404,28 @@ function azureOSDiskIsEphemeral(mode: string): boolean {
 
 function azureOSDiskUsesFullCaching(mode: string): boolean {
   return mode === "ephemeral-preview";
+}
+
+function azureProvisioningCandidatesForConfig(config: LeaseConfig): string[] {
+  if (config.serverTypeExplicit && config.serverType) {
+    return [config.serverType];
+  }
+  const candidates = azureVMSizeCandidatesForTargetClass(
+    config.target,
+    config.class,
+    config.windowsMode,
+    config.architecture,
+    config.azureOSDisk,
+  );
+  if (!config.serverType || config.serverType === candidates[0]) {
+    return candidates;
+  }
+  if (azureOSDiskUsesFullCaching(config.azureOSDisk)) {
+    return azureSupportsEphemeralFullCaching(config.serverType)
+      ? prependUnique(config.serverType, candidates)
+      : candidates;
+  }
+  return prependUnique(config.serverType, candidates);
 }
 
 function azureComputeAPIVersionForOSDisk(mode: string): string {
