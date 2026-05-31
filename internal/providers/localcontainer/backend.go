@@ -1237,7 +1237,7 @@ chown "$user" /var/lib/crabbox/desktop.env
 chmod 0644 /var/lib/crabbox/desktop.env
 if ! ss -ltn | grep -q '127.0.0.1:5900'; then
   home_dir="$(getent passwd "$user" | cut -d: -f6)"
-  su "$user" -s /bin/sh -c "XDG_RUNTIME_DIR='$runtime' WAYLAND_DISPLAY='$display' wayvnc --config '$home_dir/.config/wayvnc/config' --render-cursor --max-fps=30 >/tmp/crabbox-wayvnc.log 2>&1 &"
+  su "$user" -s /bin/sh -c "XDG_RUNTIME_DIR='$runtime' WAYLAND_DISPLAY='$display' wayvnc --config '$home_dir/.config/wayvnc/config' --render-cursor --max-fps=60 >/tmp/crabbox-wayvnc.log 2>&1 &"
 fi
 DESKTOP
     chmod 0755 /usr/local/bin/crabbox-start-desktop
@@ -1310,6 +1310,17 @@ XML
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
     <property name="theme" type="string" value="$xfwm_theme"/>
+    <property name="box_move" type="bool" value="false"/>
+    <property name="box_resize" type="bool" value="false"/>
+    <property name="move_opacity" type="int" value="100"/>
+    <property name="resize_opacity" type="int" value="100"/>
+    <property name="snap_resist" type="bool" value="false"/>
+    <property name="snap_to_border" type="bool" value="false"/>
+    <property name="snap_to_windows" type="bool" value="false"/>
+    <property name="snap_width" type="int" value="0"/>
+    <property name="tile_on_move" type="bool" value="false"/>
+    <property name="use_compositing" type="bool" value="false"/>
+    <property name="wrap_windows" type="bool" value="false"/>
   </property>
 </channel>
 XML
@@ -1516,7 +1527,13 @@ if command -v xfconf-query >/dev/null 2>&1; then
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/box_resize -n -t bool -s false >/dev/null 2>&1 || true"
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/move_opacity -n -t int -s 100 >/dev/null 2>&1 || true"
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/resize_opacity -n -t int -s 100 >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/snap_resist -n -t bool -s false >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/snap_to_border -n -t bool -s false >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/snap_to_windows -n -t bool -s false >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/snap_width -n -t int -s 0 >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/tile_on_move -n -t bool -s false >/dev/null 2>&1 || true"
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false >/dev/null 2>&1 || true"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfwm4 -p /general/wrap_windows -n -t bool -s false >/dev/null 2>&1 || true"
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xfconf-query -c xfce4-panel -p /panels/dark-mode -n -t bool -s '$gtk_prefer_dark' >/dev/null 2>&1 || true"
   set -- $panel_rgba
   for panel_id in panel-1 panel-2; do
@@ -1538,7 +1555,7 @@ elif command -v xterm >/dev/null 2>&1 && ! pgrep -u "$user" -f 'xterm -title Cra
   su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' xterm -title 'Crabbox Desktop' -geometry 110x32+48+48 -bg '$terminal_bg' -fg '$terminal_fg' >/tmp/crabbox-terminal.log 2>&1 &" || true
 fi
 if ! ss -ltn | grep -q '127.0.0.1:5900'; then
-  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' x11vnc -display :99 -localhost -rfbport 5900 -forever -shared -rfbauth /var/lib/crabbox/vnc.pass -o /tmp/crabbox-x11vnc.log >/tmp/crabbox-x11vnc.stdout.log 2>&1 &"
+  su "$user" -s /bin/sh -c "DISPLAY=:99 XDG_RUNTIME_DIR='$runtime' x11vnc -display :99 -localhost -rfbport 5900 -forever -shared -rfbauth /var/lib/crabbox/vnc.pass -wait 16 -defer 8 -nowait_bog -o /tmp/crabbox-x11vnc.log >/tmp/crabbox-x11vnc.stdout.log 2>&1 &"
 fi
 DESKTOP
   chmod 0755 /usr/local/bin/crabbox-start-desktop

@@ -13,6 +13,7 @@
 ### Changed
 
 - Raised the coordinator fleet-wide and org-wide reserved monthly caps while keeping per-owner and active lease limits in place, so trusted operators are not blocked by stale reserved-cost accounting.
+- Tuned XFCE/WebVNC desktops for smoother interactive use with low-latency `x11vnc`, 60fps WayVNC, and low-compression noVNC defaults.
 - Updated Go and Worker dependencies, including Wrangler, Vitest, oxlint, Cloudflare Workers types, AWS SDK, Daytona SDK, Google API modules, OpenTelemetry, and the Go toolchain.
 
 ### Fixed

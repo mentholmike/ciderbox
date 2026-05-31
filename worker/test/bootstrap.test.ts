@@ -120,7 +120,11 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain('box_resize" type="bool" value="false');
     expect(got).toContain('move_opacity" type="int" value="100');
     expect(got).toContain('resize_opacity" type="int" value="100');
+    expect(got).toContain('snap_to_border" type="bool" value="false');
+    expect(got).toContain('snap_width" type="int" value="0');
+    expect(got).toContain('tile_on_move" type="bool" value="false');
     expect(got).toContain('use_compositing" type="bool" value="false');
+    expect(got).toContain('wrap_windows" type="bool" value="false');
     expect(got).toContain("gtk-application-prefer-dark-theme=$gtk_prefer_dark_ini");
     expect(got).toContain('mkdir -p "$config_dir/xfce4/xfconf/xfce-perchannel-xml"');
     expect(got).toContain("xfconf-query -c xsettings -p /Gtk/ApplicationPreferDarkTheme");
@@ -129,7 +133,11 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain("xfconf-query -c xfwm4 -p /general/box_resize");
     expect(got).toContain("xfconf-query -c xfwm4 -p /general/move_opacity");
     expect(got).toContain("xfconf-query -c xfwm4 -p /general/resize_opacity");
+    expect(got).toContain("xfconf-query -c xfwm4 -p /general/snap_to_border");
+    expect(got).toContain("xfconf-query -c xfwm4 -p /general/snap_width");
+    expect(got).toContain("xfconf-query -c xfwm4 -p /general/tile_on_move");
     expect(got).toContain("xfconf-query -c xfwm4 -p /general/use_compositing");
+    expect(got).toContain("xfconf-query -c xfwm4 -p /general/wrap_windows");
     expect(got).toContain("xfconf-query -c xfce4-panel -p /panels/dark-mode");
     expect(got).toContain("/panels/$panel_id/background-rgba");
     expect(got).toContain("desktop-background-$mode.svg");
@@ -162,6 +170,7 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain("xterm -title 'Crabbox Desktop'");
     expect(got).toContain("(umask 077 && openssl rand -base64 18 > /var/lib/crabbox/vnc.password)");
     expect(got).toContain("-rfbauth /var/lib/crabbox/vnc.pass");
+    expect(got).toContain("-wait 16 -defer 8 -nowait_bog");
     expect(got).toContain("ss -ltn | grep -q '127.0.0.1:5900'");
     expect(got).toContain("systemctl disable --now crabbox-wayvnc.service 2>/dev/null || true");
     expect(got).toContain(
@@ -188,7 +197,7 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain('for socket in "$XDG_RUNTIME_DIR"/wayland-*');
     expect(got).toContain('WAYLAND_DISPLAY="${socket##*/}"');
     expect(got).toContain(
-      'wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=30',
+      'wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=60',
     );
     expect(got).toContain("systemctl is-active --quiet crabbox-wayvnc.service");
     expect(got).toContain(

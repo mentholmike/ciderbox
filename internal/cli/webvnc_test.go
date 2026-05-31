@@ -65,7 +65,7 @@ func TestWebVNCURLs(t *testing.T) {
 	if values.Get("password") != "JVS/yMb%2B" {
 		t.Fatalf("decoded portal password=%q", values.Get("password"))
 	}
-	if got := localContainerWebVNCURL("5901", "p+a ss"); got != "http://127.0.0.1:5901/vnc.html?autoconnect=1&host=127.0.0.1&password=p%2Ba+ss&path=websockify&port=5901&resize=scale" {
+	if got := localContainerWebVNCURL("5901", "p+a ss"); got != "http://127.0.0.1:5901/vnc.html?autoconnect=1&compression=0&host=127.0.0.1&password=p%2Ba+ss&path=websockify&port=5901&quality=6&resize=scale" {
 		t.Fatalf("local container WebVNC URL=%q", got)
 	}
 	if !isLocalContainerProvider("docker") || !isLocalContainerProvider("local-container") {

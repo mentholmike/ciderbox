@@ -1271,6 +1271,8 @@ func localContainerWebVNCURL(localPort, password string) string {
 	values.Set("path", "websockify")
 	values.Set("autoconnect", "1")
 	values.Set("resize", "scale")
+	values.Set("compression", "0")
+	values.Set("quality", "6")
 	if strings.TrimSpace(password) != "" {
 		values.Set("password", strings.TrimSpace(password))
 	}

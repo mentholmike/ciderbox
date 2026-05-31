@@ -684,7 +684,7 @@ function optionalWriteFiles(config: LeaseConfig): string {
       XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR
       WAYLAND_DISPLAY=$WAYLAND_DISPLAY
 ${displayEnv}      EOF
-          exec /usr/bin/wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=30
+          exec /usr/bin/wayvnc --config "$HOME/.config/wayvnc/config" --render-cursor --max-fps=60
         done
         sleep 1
       done
@@ -812,7 +812,13 @@ ${displayEnv}      EOF
           <property name="box_resize" type="bool" value="false"/>
           <property name="move_opacity" type="int" value="100"/>
           <property name="resize_opacity" type="int" value="100"/>
+          <property name="snap_resist" type="bool" value="false"/>
+          <property name="snap_to_border" type="bool" value="false"/>
+          <property name="snap_to_windows" type="bool" value="false"/>
+          <property name="snap_width" type="int" value="0"/>
+          <property name="tile_on_move" type="bool" value="false"/>
           <property name="use_compositing" type="bool" value="false"/>
+          <property name="wrap_windows" type="bool" value="false"/>
         </property>
       </channel>
       XML
@@ -921,7 +927,13 @@ ${displayEnv}      EOF
         xfconf-query -c xfwm4 -p /general/box_resize -n -t bool -s false >/dev/null 2>&1 || true
         xfconf-query -c xfwm4 -p /general/move_opacity -n -t int -s 100 >/dev/null 2>&1 || true
         xfconf-query -c xfwm4 -p /general/resize_opacity -n -t int -s 100 >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/snap_resist -n -t bool -s false >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/snap_to_border -n -t bool -s false >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/snap_to_windows -n -t bool -s false >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/snap_width -n -t int -s 0 >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/tile_on_move -n -t bool -s false >/dev/null 2>&1 || true
         xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false >/dev/null 2>&1 || true
+        xfconf-query -c xfwm4 -p /general/wrap_windows -n -t bool -s false >/dev/null 2>&1 || true
         xfconf-query -c xfce4-panel -p /panels/dark-mode -n -t bool -s "$gtk_prefer_dark" >/dev/null 2>&1 || true
         set -- $panel_rgba
         for panel_id in panel-1 panel-2; do
@@ -1022,7 +1034,7 @@ ${displayEnv}      EOF
 
       [Service]
       User=crabbox
-      ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -forever -shared -rfbauth /var/lib/crabbox/vnc.pass
+      ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -forever -shared -rfbauth /var/lib/crabbox/vnc.pass -wait 16 -defer 8 -nowait_bog
       Restart=always
 
       [Install]
