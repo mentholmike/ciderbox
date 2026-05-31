@@ -3,7 +3,9 @@ package applecontainer
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,8 +101,8 @@ func TestProviderSpecAndAliases(t *testing.T) {
 	if len(spec.Targets) != 1 || spec.Targets[0].OS != core.TargetLinux {
 		t.Fatalf("targets=%#v want linux", spec.Targets)
 	}
-	if !spec.Features.Has(core.FeatureSSH) || !spec.Features.Has(core.FeatureCrabboxSync) || !spec.Features.Has(core.FeatureCleanup) {
-		t.Fatalf("features=%#v want ssh, crabbox sync, cleanup", spec.Features)
+	if !spec.Features.Has(core.FeatureSSH) || !spec.Features.Has(core.FeatureCrabboxSync) || !spec.Features.Has(core.FeatureCleanup) || !spec.Features.Has(core.FeatureCacheVolume) {
+		t.Fatalf("features=%#v want ssh, crabbox sync, cleanup, cache-volume", spec.Features)
 	}
 }
 
@@ -204,6 +206,56 @@ func TestCreateContainerNoSecretsAsCLIArgs(t *testing.T) {
 	}
 }
 
+func TestCreateContainerMountsCacheVolumes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	runner := &recordingRunner{responses: map[string]core.LocalCommandResult{}}
+	b := testBackend(runner)
+	cfg := b.configForRun()
+	cfg.Cache.Volumes = []core.CacheVolumeConfig{
+		{Key: "my-app/linux node24 lock", Path: "/var/cache/crabbox/pnpm"},
+		{Key: "npm-cache", Path: "/var/cache/crabbox/npm"},
+	}
+	runner.responses[commandKey([]string{"run"})] = core.LocalCommandResult{Stdout: "crabbox-blue\n"}
+
+	if _, err := b.createContainer(context.Background(), cfg, "crabbox-blue", "cbx_123", "blue-lobster", "ssh-ed25519 AAAA test", true); err != nil {
+		t.Fatal(err)
+	}
+	args := recordedArgsForCommand(t, runner, "run")
+	root, err := appleContainerCacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, volume := range cfg.Cache.Volumes {
+		want := "--volume\n" + filepath.Join(root, appleContainerCacheVolumeName(volume.Key)) + ":" + volume.Path
+		if !strings.Contains(args, want) {
+			t.Fatalf("cache volume mount missing %q:\n%s", want, args)
+		}
+	}
+	for i, volume := range cfg.Cache.Volumes {
+		want := "-e\nCRABBOX_CACHE_VOLUME_PATH_" + strconv.Itoa(i) + "=" + volume.Path
+		if !strings.Contains(args, want) {
+			t.Fatalf("cache volume path env missing %q:\n%s", want, args)
+		}
+	}
+}
+
+func TestAppleContainerCacheVolumeNameIsStableAndFilesystemSafe(t *testing.T) {
+	got := appleContainerCacheVolumeName("My App/linux node24 lock")
+	again := appleContainerCacheVolumeName("My App/linux node24 lock")
+	if got != again {
+		t.Fatalf("cache volume name unstable: %q then %q", got, again)
+	}
+	if !strings.HasPrefix(got, "crabbox-cache-my-app-linux-node24-lock-") {
+		t.Fatalf("cache volume name=%q, want sanitized prefix", got)
+	}
+	if strings.ContainsAny(got, " /:") {
+		t.Fatalf("cache volume name contains unsafe characters: %q", got)
+	}
+}
+
 func TestListContainersFiltersByLabel(t *testing.T) {
 	lsJSON := `[
 		` + strings.TrimPrefix(strings.TrimSuffix(sampleInspectJSON("crabbox-blue", "blue-lobster", "cbx_123"), "]"), "[") + `,
@@ -215,14 +267,14 @@ func TestListContainersFiltersByLabel(t *testing.T) {
 		},
 	}
 	b := testBackend(runner)
-	views, err := b.List(context.Background(), core.ListRequest{})
+	containers, err := b.listContainers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(views) != 1 {
-		t.Fatalf("views=%d want 1 (crabbox-owned only)", len(views))
+	if len(containers) != 1 {
+		t.Fatalf("containers=%d want 1 (crabbox-owned only)", len(containers))
 	}
-	v := views[0]
+	v := b.serverFromContainer(containers[0], b.configForRun())
 	if v.Provider != providerName || v.CloudID != "crabbox-blue" || v.Labels["ssh_port"] != "22" || v.PublicNet.IPv4.IP != "192.168.64.7" {
 		t.Fatalf("unexpected view: %#v", v)
 	}
@@ -235,7 +287,11 @@ func TestResolveAndSSHTarget(t *testing.T) {
 		},
 	}
 	b := testBackend(runner)
-	lease, err := b.Resolve(context.Background(), core.ResolveRequest{ID: "blue-lobster"})
+	c, leaseID, slug, err := b.resolveContainer(context.Background(), "blue-lobster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := b.prepareLease(context.Background(), b.configForRun(), c, leaseID, slug, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,6 +303,31 @@ func TestResolveAndSSHTarget(t *testing.T) {
 	}
 	if !strings.Contains(lease.SSH.ReadyCheck, "rsync --version") || !strings.Contains(lease.SSH.ReadyCheck, "test -d '/work/crabbox'") {
 		t.Fatalf("ready check missing expectations: %q", lease.SSH.ReadyCheck)
+	}
+}
+
+func TestRuntimeMethodsRejectUnsupportedHostBeforeContainerCLI(t *testing.T) {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		t.Skip("unsupported-host gate only applies off macOS/Apple silicon")
+	}
+	runner := &recordingRunner{responses: map[string]core.LocalCommandResult{}}
+	b := testBackend(runner)
+	if _, err := b.List(context.Background(), core.ListRequest{}); err == nil || !strings.Contains(err.Error(), "Apple silicon") {
+		t.Fatalf("List error=%v, want Apple silicon gate", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("unsupported host should not invoke container CLI: %#v", runner.calls)
+	}
+}
+
+func TestBootstrapScriptToleratesCacheVolumeChownFailures(t *testing.T) {
+	for _, want := range []string{
+		`CRABBOX_CACHE_VOLUME_PATH_`,
+		`chown -R "$user" "$cache_path" 2>/dev/null || true`,
+	} {
+		if !strings.Contains(bootstrapScript, want) {
+			t.Fatalf("bootstrap script missing %q", want)
+		}
 	}
 }
 

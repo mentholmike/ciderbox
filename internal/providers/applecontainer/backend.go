@@ -2,9 +2,11 @@ package applecontainer
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -143,6 +145,12 @@ func (b *backend) Acquire(ctx context.Context, req core.AcquireRequest) (core.Le
 		}
 		return core.LeaseTarget{}, err
 	}
+	if err := core.UpdateLeaseClaimCacheVolumes(leaseID, core.CacheVolumeStickyDiskSpecs(cfg.Cache.Volumes)); err != nil {
+		if !req.Keep {
+			_ = b.removeContainer(context.Background(), containerID)
+		}
+		return core.LeaseTarget{}, err
+	}
 	cleanupKey = false
 	fmt.Fprintf(b.rt.Stderr, "provisioned lease=%s container=%s state=ready\n", leaseID, c.id())
 	return lease, nil
@@ -150,6 +158,9 @@ func (b *backend) Acquire(ctx context.Context, req core.AcquireRequest) (core.Le
 
 func (b *backend) Resolve(ctx context.Context, req core.ResolveRequest) (core.LeaseTarget, error) {
 	cfg := b.configForRun()
+	if err := requireMacOS(); err != nil {
+		return core.LeaseTarget{}, err
+	}
 	c, leaseID, slug, err := b.resolveContainer(ctx, req.ID)
 	if err != nil {
 		return core.LeaseTarget{}, err
@@ -171,6 +182,9 @@ func (b *backend) Resolve(ctx context.Context, req core.ResolveRequest) (core.Le
 
 func (b *backend) List(ctx context.Context, _ core.ListRequest) ([]core.LeaseView, error) {
 	cfg := b.configForRun()
+	if err := requireMacOS(); err != nil {
+		return nil, err
+	}
 	containers, err := b.listContainers(ctx)
 	if err != nil {
 		return nil, err
@@ -210,6 +224,9 @@ func (b *backend) Doctor(ctx context.Context, _ core.DoctorRequest) (core.Doctor
 }
 
 func (b *backend) ReleaseLease(ctx context.Context, req core.ReleaseLeaseRequest) error {
+	if err := requireMacOS(); err != nil {
+		return err
+	}
 	lease := req.Lease
 	id := strings.TrimSpace(req.Lease.Server.CloudID)
 	if id == "" {
@@ -239,6 +256,9 @@ func (b *backend) ReleaseLeaseMessage(lease core.LeaseTarget) string {
 
 func (b *backend) Cleanup(ctx context.Context, req core.CleanupRequest) error {
 	cfg := b.configForRun()
+	if err := requireMacOS(); err != nil {
+		return err
+	}
 	containers, err := b.listContainers(ctx)
 	if err != nil {
 		return err
@@ -326,6 +346,10 @@ func (b *backend) createContainer(ctx context.Context, cfg core.Config, name, le
 	labels["ssh_user"] = cfg.AppleContainer.User
 	labels["ssh_port"] = sshPort
 	labels["work_root"] = cfg.AppleContainer.WorkRoot
+	cacheVolumeMounts, err := appleContainerCacheVolumeMounts(cfg.Cache.Volumes)
+	if err != nil {
+		return "", err
+	}
 
 	// `container run [<options>] <image> [<arguments>...]`. We detach (-d) and
 	// pass the same Crabbox bootstrap contract used by local-container via
@@ -345,6 +369,9 @@ func (b *backend) createContainer(ctx context.Context, cfg core.Config, name, le
 		"-e", "CRABBOX_WORK_ROOT=" + cfg.AppleContainer.WorkRoot,
 		"-e", "CRABBOX_SSH_PORT=" + sshPort,
 	}
+	for i, volume := range cfg.Cache.Volumes {
+		args = append(args, "-e", fmt.Sprintf("CRABBOX_CACHE_VOLUME_PATH_%d=%s", i, strings.TrimSpace(volume.Path)))
+	}
 	// Labels keep ownership/lease metadata queryable from `container inspect`.
 	for key, value := range labels {
 		args = append(args, "--label", key+"="+value)
@@ -354,6 +381,9 @@ func (b *backend) createContainer(ctx context.Context, cfg core.Config, name, le
 	}
 	if memory := strings.TrimSpace(cfg.AppleContainer.Memory); memory != "" {
 		args = append(args, "--memory", memory)
+	}
+	for _, mount := range cacheVolumeMounts {
+		args = append(args, "--volume", mount)
 	}
 	args = append(args, cfg.AppleContainer.ExtraRunArgs...)
 	args = append(args, cfg.AppleContainer.Image, "/bin/sh", "-lc", bootstrapScript)
@@ -369,6 +399,78 @@ func (b *backend) createContainer(ctx context.Context, cfg core.Config, name, le
 		id = name
 	}
 	return id, nil
+}
+
+func appleContainerCacheVolumeMounts(volumes []core.CacheVolumeConfig) ([]string, error) {
+	if len(volumes) == 0 {
+		return nil, nil
+	}
+	root, err := appleContainerCacheRoot()
+	if err != nil {
+		return nil, err
+	}
+	mounts := make([]string, 0, len(volumes))
+	for _, volume := range volumes {
+		key := strings.TrimSpace(volume.Key)
+		path := strings.TrimSpace(volume.Path)
+		if key == "" {
+			return nil, exit(2, "cache volume key is required")
+		}
+		if strings.Contains(key, ":") {
+			return nil, exit(2, "cache volume key %q must not contain ':'", key)
+		}
+		if path == "" {
+			return nil, exit(2, "cache volume path is required")
+		}
+		if !strings.HasPrefix(path, "/") {
+			return nil, exit(2, "cache volume path %q must be absolute", path)
+		}
+		hostPath := filepath.Join(root, appleContainerCacheVolumeName(key))
+		if err := os.MkdirAll(hostPath, 0o777); err != nil {
+			return nil, exit(2, "create apple-container cache volume %s: %v", hostPath, err)
+		}
+		if err := os.Chmod(hostPath, 0o777); err != nil {
+			return nil, exit(2, "make apple-container cache volume writable %s: %v", hostPath, err)
+		}
+		mounts = append(mounts, hostPath+":"+path)
+	}
+	return mounts, nil
+}
+
+func appleContainerCacheRoot() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", exit(2, "user cache directory is unavailable")
+	}
+	return filepath.Join(dir, "crabbox", "apple-container-cache"), nil
+}
+
+func appleContainerCacheVolumeName(key string) string {
+	key = strings.TrimSpace(key)
+	sum := sha256.Sum256([]byte(key))
+	var safe strings.Builder
+	for _, r := range key {
+		switch {
+		case r >= 'a' && r <= 'z':
+			safe.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			safe.WriteRune(r + ('a' - 'A'))
+		case r >= '0' && r <= '9':
+			safe.WriteRune(r)
+		case r == '.' || r == '_' || r == '-':
+			safe.WriteRune(r)
+		default:
+			safe.WriteByte('-')
+		}
+		if safe.Len() >= 80 {
+			break
+		}
+	}
+	name := strings.Trim(safe.String(), ".-_")
+	if name == "" {
+		name = "volume"
+	}
+	return fmt.Sprintf("crabbox-cache-%s-%x", name, sum[:6])
 }
 
 func (b *backend) listContainers(ctx context.Context) ([]inspectContainer, error) {
@@ -644,6 +746,11 @@ printf '%s\n' "$CRABBOX_AUTHORIZED_KEY" > "$home_dir/.ssh/authorized_keys"
 chmod 700 "$home_dir/.ssh"
 chmod 600 "$home_dir/.ssh/authorized_keys"
 chown -R "$user" "$home_dir/.ssh" "$work_root"
+env | sed -n 's/^CRABBOX_CACHE_VOLUME_PATH_[0-9][0-9]*=//p' | while IFS= read -r cache_path; do
+  [ -n "$cache_path" ] || continue
+  mkdir -p "$cache_path"
+  chown -R "$user" "$cache_path" 2>/dev/null || true
+done
 if command -v sudo >/dev/null 2>&1; then
   printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$user" > /etc/sudoers.d/crabbox
   chmod 440 /etc/sudoers.d/crabbox

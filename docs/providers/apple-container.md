@@ -117,14 +117,17 @@ variable consumed by the bootstrap script.
 3. On Debian/Ubuntu-compatible images, the container installs
    `openssh-server`, `git`, `rsync`, `curl`, and `sudo` when missing, creates the
    SSH user, writes the authorized key, and starts `sshd`.
-4. Crabbox reads the container IP from `container inspect`
+4. Configured `cache.volumes` are created as host cache directories under the
+   local user cache directory and mounted into the container with
+   `container run --volume <host-cache>:<path>`.
+5. Crabbox reads the container IP from `container inspect`
    (`networks[0].address`, stripped of its CIDR suffix), waits for SSH
    readiness, syncs tracked and non-ignored files into `appleContainer.workRoot`,
    then drives the command over the normal SSH executor.
-5. `status`, `list`, and `stop` inspect or remove labeled containers via
+6. `status`, `list`, and `stop` inspect or remove labeled containers via
    `container ls --all --format json`, `container inspect`, and
    `container delete --force`.
-6. `cleanup --provider apple-container` removes stopped containers and running
+7. `cleanup --provider apple-container` removes stopped containers and running
    non-`keep` containers whose local claim is stale past the idle timeout plus a
    safety grace period, and prunes orphaned claims.
 
@@ -139,6 +142,8 @@ variable consumed by the bootstrap script.
 - No desktop, browser, VNC, code-server, Tailscale bootstrap, or checkpoint
   support. Use [Local Container](local-container.md) for local desktop/browser
   smoke.
+- `cache.volumes` are supported for rebuildable dependency caches. They are
+  local to the Mac user account and are not shared with other machines.
 - The default image (the Crabbox OS image, currently `ubuntu:26.04`) bootstraps
   packages on first start. Use a prebuilt image with SSH/Git/rsync packages when
   startup time matters, or when the container has no network egress to install
@@ -149,7 +154,7 @@ variable consumed by the bootstrap script.
 The backend relies on the documented Apple `container` CLI surface:
 
 - `container system start` / `container system status`;
-- `container run -d --name --label --env --cpus --memory <image> <args>`;
+- `container run -d --name --label --env --cpus --memory --volume <image> <args>`;
 - `container ls --all --format json`;
 - `container inspect <id>` (network address from `networks[].address`);
 - `container delete --force <id>`.
