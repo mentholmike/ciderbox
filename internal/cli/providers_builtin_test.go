@@ -542,7 +542,7 @@ func (testBlacksmithProvider) Spec() ProviderSpec {
 		Name:        "blacksmith-testbox",
 		Kind:        ProviderKindDelegatedRun,
 		Targets:     []TargetSpec{{OS: targetLinux}},
-		Features:    FeatureSet{FeatureRunProof},
+		Features:    FeatureSet{FeatureCacheVolume, FeatureRunProof, FeatureRunSession},
 		Coordinator: CoordinatorNever,
 	}
 }

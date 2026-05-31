@@ -278,6 +278,11 @@ box's traffic through the operator's machine over a WebSocket. See
 IDs `chk_...`. Kinds include workspace archives, recipes, and provider-native
 snapshots/images. See [Checkpoints](features/checkpoints.md).
 
+**Cache volume** - provider-backed persistent mount point for speed-only state,
+keyed by repo/runtime/platform inputs and mounted at an absolute cache path.
+Unlike a checkpoint, it is not a forkable scenario handle and the worktree
+remains the source of truth. See [Cache Controls](features/cache.md).
+
 **Capsule** - a portable, replayable failure bundle captured from a GitHub
 Actions run (`crabbox capsule from-actions`) and re-run with `crabbox capsule
 replay`. See [Capsules](features/capsules.md).

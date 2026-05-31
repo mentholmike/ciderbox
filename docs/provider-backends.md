@@ -363,6 +363,7 @@ cli.FeatureCheckpoint   // "workspace-checkpoint"
 cli.FeatureFork         // "workspace-fork"
 cli.FeatureRestore      // "workspace-restore"
 cli.FeatureSnapshot     // "provider-snapshot"
+cli.FeatureCacheVolume  // "cache-volume"
 cli.FeatureRunProof     // "run-proof"
 cli.FeatureRunSession   // "run-session"
 ```
@@ -384,6 +385,8 @@ Checkpoint-related features are reserved for versioned workspaces:
 - `FeatureRestore`: provider can restore an existing workspace to a checkpoint.
 - `FeatureSnapshot`: provider can expose a native snapshot id for Crabbox
   metadata.
+- `FeatureCacheVolume`: provider can mount keyed rebuildable cache volumes on
+  warmup/run.
 - `FeatureRunProof`: delegated provider can return bounded stream/timing metadata
   for core `crabbox run --emit-proof` rendering.
 - `FeatureRunSession`: delegated proof/session runner that exposes a run session

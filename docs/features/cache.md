@@ -30,6 +30,44 @@ authoritative. A disposable lease loses all cache state when its VM is deleted;
 only a kept lease (see [`lifecycle-cleanup.md`](lifecycle-cleanup.md)) carries
 cache state forward.
 
+## Cache volumes
+
+Cache volumes are provider-backed persistent mount points for speed-only state.
+They use the same cache contract as the paths above: the synced worktree remains
+authoritative, and volume contents must be safe to delete and rebuild.
+
+Configure them under `cache.volumes`:
+
+```yaml
+cache:
+  volumes:
+    - name: pnpm-store
+      key: my-app-linux-amd64-node24-pnpm10-lockhash
+      path: /var/cache/crabbox/pnpm
+      sizeGB: 80
+```
+
+For one-off lease creation, use a repeatable flag:
+
+```sh
+crabbox warmup --provider blacksmith-testbox \
+  --cache-volume pnpm-store=my-app-linux-amd64-node24-pnpm10-lockhash:/var/cache/crabbox/pnpm
+```
+
+`key` is the provider cache identity. Include the repository, OS, architecture,
+runtime, package manager, lockfile hash, and image or workflow generation when
+those values can change the bytes. `path` must be absolute and should point
+outside the synced source tree, usually under `/var/cache/crabbox/...`.
+
+Today Blacksmith Testbox implements cache volumes by forwarding each configured
+volume as a Testbox sticky disk. Other providers may expose the same feature
+through attached data disks or host directories; until then, non-required
+configured volumes are ignored by providers that do not advertise cache-volume
+support. Volumes requested with `--cache-volume` are required and fail early when
+the selected provider does not support them, or when reusing an existing lease
+where Crabbox cannot verify from the local lease claim that the provider volume
+was attached during warmup.
+
 ## Config
 
 Set the cache policy in any [config file](configuration.md) under `cache:`:
@@ -55,6 +93,7 @@ also has an environment override:
 | `git`            | `CRABBOX_CACHE_GIT`              |
 | `maxGB`          | `CRABBOX_CACHE_MAX_GB`           |
 | `purgeOnRelease` | `CRABBOX_CACHE_PURGE_ON_RELEASE` |
+| `volumes`        | `CRABBOX_CACHE_VOLUMES`          |
 
 The per-kind toggles drive `cache stats` and `cache purge`: a disabled kind is
 omitted from stats output and is skipped by `--kind all`. Asking to purge a
@@ -97,6 +136,18 @@ Flags: `--id`, `--reclaim`. The command after `--` runs in the synced repo
 directory (or the GitHub Actions workspace if the lease was hydrated via
 [Actions hydration](actions-hydration.md)), with profile-allowed environment
 applied.
+
+### `cache volumes`
+
+List configured cache volumes for the current repo:
+
+```sh
+crabbox cache volumes
+crabbox cache volumes --json
+```
+
+This is a configuration view. Provider-specific attach/mount state is reported
+by the provider run output or future provider diagnostics.
 
 ### `cache purge`
 
