@@ -126,6 +126,7 @@ Targets: **L**inux, **M**acOS, **W**indows.
 | [Proxmox](docs/providers/proxmox.md) | `proxmox` | L | direct | Clone Linux QEMU templates on a private Proxmox VE cluster. |
 | [Static SSH](docs/providers/ssh.md) | `ssh` (`static`, `static-ssh`) | L / M / W | direct | Existing machines; no provisioning. |
 | [Local Container](docs/providers/local-container.md) | `local-container` (`docker`, `container`, `local-docker`) | L | direct | Local Docker-compatible runtime (Docker Desktop, OrbStack, Colima). |
+| [Apple Container](docs/providers/apple-container.md) | `apple-container` (`apple`, `applecontainer`) | L | direct | Apple's native `container` runtime on Apple silicon macOS. |
 | [exe.dev](docs/providers/exe-dev.md) | `exe-dev` (`exe`, `exedev`) | L | direct | exe.dev VMs exposed as public SSH leases. |
 | [Namespace Devbox](docs/providers/namespace-devbox.md) | `namespace-devbox` (`namespace`, `namespace-devboxes`) | L | direct | Namespace.so Devboxes over SSH. |
 | [Semaphore](docs/providers/semaphore.md) | `semaphore` (`sem`) | L | direct | A Semaphore CI job leased as a testbox. |
