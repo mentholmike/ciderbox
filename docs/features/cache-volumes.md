@@ -81,8 +81,10 @@ This command only reads local configuration. It does not connect to a lease.
 ## Provider Support
 
 Providers advertise cache volume support with the `cache-volume` feature.
-Blacksmith Testbox currently implements the feature by forwarding each resolved
-volume as a `blacksmith testbox warmup --sticky-disk key:path` argument.
+Blacksmith Testbox implements the feature by forwarding each resolved volume as
+a `blacksmith testbox warmup --sticky-disk key:path` argument. Local Container
+implements it with Docker named volumes mounted at the configured paths; the
+Docker volume name is derived from the cache key.
 
 Providers that do not advertise `cache-volume` ignore non-required configured
 volumes. Required volumes fail early when the selected provider cannot honor

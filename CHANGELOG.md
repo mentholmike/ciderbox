@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.23.1 - Unreleased
+## 0.24.0 - 2026-05-31
 
 ### Added
 
-- Added provider-backed cache volumes for rebuildable dependency caches, including `cache.volumes`, `CRABBOX_CACHE_VOLUMES`, repeatable `--cache-volume [name=]key:path`, `crabbox cache volumes`, Blacksmith Testbox sticky-disk forwarding, and claim-backed required-volume checks for reused leases.
+- Added provider-backed cache volumes for rebuildable dependency caches, including `cache.volumes`, `CRABBOX_CACHE_VOLUMES`, repeatable `--cache-volume [name=]key:path`, `crabbox cache volumes`, Blacksmith Testbox sticky-disk forwarding, Local Container Docker volume mounts, and claim-backed required-volume checks for reused leases.
 
 ### Fixed
 
