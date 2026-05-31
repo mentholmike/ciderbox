@@ -5,12 +5,19 @@
 ### Added
 
 - Added `provider: apple-container` for local Apple silicon macOS Linux leases, including SSH sync/run lifecycle and provider-backed cache volumes. Thanks @zozo123.
+- Added a repo-local Blacksmith Testbox workflow and Crabbox config so delegated Testbox validation has workflow/job defaults.
 - Added `crabbox prewarm` to lease and hydrate reusable test-ready boxes from configured GitHub Actions, with provider-owned handling for delegated runners such as Blacksmith Testbox.
 - Added `crabbox doctor --all --prepare-check` to report provider matrix readiness, resolved test machine types, and hydration workflow/job setup without creating leases.
 - Added `crabbox webvnc daemon list` to show alive and stale local WebVNC helper daemons after agent runs.
 
+### Changed
+
+- Updated Go and Worker dependencies, including Wrangler, Vitest, oxlint, Cloudflare Workers types, AWS SDK, Daytona SDK, Google API modules, OpenTelemetry, and the Go toolchain.
+
 ### Fixed
 
+- Fixed Apple Container bootstrap on hosts whose runtime does not inherit DNS by passing detected host resolvers while preserving explicit `--apple-container-extra-run-args --dns` overrides.
+- Fixed Apple Container runs to fail as soon as the container exits during SSH bootstrap and include a short container log tail instead of waiting for the full SSH timeout.
 - Classified Blacksmith Testbox cleanup, sync-marker, cancelled Actions, and post-ready stall failures as retryable infra stages instead of generic unknown failures.
 - Fixed local Actions hydration after warmup SSH port fallback so prewarmed SSH-backed boxes reuse the resolved reachable endpoint instead of retrying the configured port.
 
