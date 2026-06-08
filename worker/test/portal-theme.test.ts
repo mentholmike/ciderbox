@@ -14,4 +14,24 @@ describe("portal theme", () => {
     expect(body).toContain('Theme: " + source');
     expect(body).toContain("crabbox-theme-change");
   });
+
+  it("renders an explicit admin summary when the portal is admin scoped", async () => {
+    const response = portalHome(
+      [],
+      [],
+      new Request("https://crabbox.example/portal", {
+        headers: {
+          "x-crabbox-admin": "true",
+          "x-crabbox-owner": "vincentkoc@ieee.org",
+          "x-crabbox-org": "openclaw",
+        },
+      }),
+    );
+    const body = await response.text();
+
+    expect(body).toContain("admin mode");
+    expect(body).toContain("data-admin-panel");
+    expect(body).toContain("leases JSON");
+    expect(body).toContain("vincentkoc@ieee.org / openclaw");
+  });
 });

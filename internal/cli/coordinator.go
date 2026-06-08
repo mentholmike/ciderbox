@@ -159,9 +159,11 @@ type CoordinatorUsageResponse struct {
 }
 
 type CoordinatorWhoami struct {
-	Owner string `json:"owner"`
-	Org   string `json:"org"`
-	Auth  string `json:"auth"`
+	Owner          string `json:"owner"`
+	Org            string `json:"org"`
+	Auth           string `json:"auth"`
+	Admin          bool   `json:"admin,omitempty"`
+	TokenExpiresAt string `json:"tokenExpiresAt,omitempty"`
 }
 
 type CoordinatorProviderReadiness struct {
@@ -271,13 +273,14 @@ type CoordinatorGitHubLoginStart struct {
 }
 
 type CoordinatorGitHubLoginPoll struct {
-	Status   string `json:"status"`
-	Token    string `json:"token,omitempty"`
-	Owner    string `json:"owner,omitempty"`
-	Org      string `json:"org,omitempty"`
-	Login    string `json:"login,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Status         string `json:"status"`
+	Token          string `json:"token,omitempty"`
+	Owner          string `json:"owner,omitempty"`
+	Org            string `json:"org,omitempty"`
+	Login          string `json:"login,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	TokenExpiresAt string `json:"tokenExpiresAt,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 type CoordinatorWebVNCTicket struct {

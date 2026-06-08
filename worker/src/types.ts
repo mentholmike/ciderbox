@@ -56,12 +56,15 @@ export interface Env {
   CRABBOX_SHARED_OWNER?: string;
   CRABBOX_ADMIN_TOKEN?: string;
   CRABBOX_SESSION_SECRET?: string;
+  CRABBOX_USER_TOKEN_TTL_SECONDS?: string;
   CRABBOX_GITHUB_CLIENT_ID?: string;
   CRABBOX_GITHUB_CLIENT_SECRET?: string;
   CRABBOX_GITHUB_ALLOWED_ORG?: string;
   CRABBOX_GITHUB_ALLOWED_ORGS?: string;
   CRABBOX_GITHUB_ALLOWED_TEAM?: string;
   CRABBOX_GITHUB_ALLOWED_TEAMS?: string;
+  CRABBOX_GITHUB_ADMIN_OWNERS?: string;
+  CRABBOX_GITHUB_ADMIN_LOGINS?: string;
   CRABBOX_PUBLIC_URL?: string;
   CRABBOX_DEFAULT_ORG?: string;
   CRABBOX_ACCESS_TEAM_DOMAIN?: string;
@@ -166,7 +169,8 @@ export interface LeaseRequest {
   exposedPorts?: string[];
 }
 
-export type Provider = "hetzner" | "aws" | "azure" | "gcp";
+export const providers = ["hetzner", "aws", "azure", "gcp"] as const;
+export type Provider = (typeof providers)[number];
 export type TargetOS = "linux" | "macos" | "windows";
 export type WindowsMode = "normal" | "wsl2";
 
