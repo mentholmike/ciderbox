@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.26.1 - Unreleased
+## 0.26.1 - 2026-06-09
 
 ### Added
 
@@ -18,6 +18,7 @@
 ### Fixed
 
 - Fixed brokered provider doctor output so expired or rejected broker tokens tell maintainers to renew Crabbox login instead of misreporting AWS, Azure, GCP, or Hetzner credential failures.
+- Fixed delegated run artifact collection so Blacksmith Testbox can satisfy `--require-artifact` and `--artifact-glob` before one-shot lease cleanup.
 - Fixed malformed AWS, Azure, and GCP SSH CIDR configuration to fail closed instead of falling back to broad SSH access. Thanks @coygeek.
 - Fixed local-container warmup on Windows by mounting the generated bootstrap directory instead of passing the script inline to Docker. Thanks @anagnorisis2peripeteia.
 - Fixed SSH-backed status waits to honor `--wait-timeout` while allowing Tenki readiness probes without resuming paused sessions. Thanks @aki-luxor.
