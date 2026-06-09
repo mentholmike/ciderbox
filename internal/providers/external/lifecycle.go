@@ -17,6 +17,7 @@ const (
 	lifecycleOutputNone           = ""
 	lifecycleOutputJSONNameArray  = "json-name-array"
 	lifecycleOutputJSONLeaseArray = "json-lease-array"
+	externalResourceNameLabel     = "externalResourceName"
 )
 
 var lifecyclePlaceholderPattern = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_.-]*)\}\}`)
@@ -31,7 +32,7 @@ func (b *leaseBackend) invokeLifecycle(ctx context.Context, request protocolRequ
 	if len(operation.Argv) == 0 {
 		return b.defaultLifecycleResponse(request)
 	}
-	templateCtx, err := lifecycleContext(request, b.cfg.External.Config)
+	templateCtx, err := b.lifecycleContext(request, "")
 	if err != nil {
 		return protocolResponse{}, err
 	}
@@ -61,6 +62,13 @@ func (b *leaseBackend) invokeLifecycle(ctx context.Context, request protocolRequ
 	case lifecycleOutputNone:
 		return b.defaultLifecycleResponse(request)
 	case lifecycleOutputJSONNameArray:
+		namePrefix := ""
+		if operation.NamePrefix != "" {
+			namePrefix, err = expandLifecycleValue(operation.NamePrefix, templateCtx)
+			if err != nil {
+				return protocolResponse{}, core.Exit(2, "external lifecycle list namePrefix: %v", err)
+			}
+		}
 		var names []string
 		if err := json.Unmarshal([]byte(result.Stdout), &names); err != nil {
 			return protocolResponse{}, core.Exit(5, "external lifecycle %s returned invalid JSON name array: %v", request.Operation, err)
@@ -69,6 +77,9 @@ func (b *leaseBackend) invokeLifecycle(ctx context.Context, request protocolRequ
 		for _, name := range names {
 			name = strings.TrimSpace(name)
 			if name == "" {
+				continue
+			}
+			if namePrefix != "" && !strings.HasPrefix(name, namePrefix) {
 				continue
 			}
 			lease, err := b.lifecycleLeaseForName(name)
@@ -131,6 +142,13 @@ func lifecycleOperation(cfg core.ExternalLifecycleConfig, operation string) core
 }
 
 func (b *leaseBackend) lifecycleLease(request protocolRequest) (protocolLease, error) {
+	resourceName := ""
+	if request.Lease != nil {
+		resourceName = strings.TrimSpace(request.Lease.Labels[externalResourceNameLabel])
+		if resourceName == "" {
+			resourceName = strings.TrimSpace(request.Lease.Name)
+		}
+	}
 	desired := request.Desired
 	if desired == nil && request.Lease != nil {
 		desired = &desiredLease{
@@ -143,11 +161,12 @@ func (b *leaseBackend) lifecycleLease(request protocolRequest) (protocolLease, e
 		name := strings.TrimSpace(request.ID)
 		desired = &desiredLease{LeaseID: name, Slug: core.NormalizeLeaseSlug(name), Name: name}
 	}
-	return b.lifecycleLeaseForDesired(*desired)
+	return b.lifecycleLeaseForDesired(*desired, resourceName)
 }
 
 func (b *leaseBackend) lifecycleLeaseForName(name string) (protocolLease, error) {
 	desired := desiredLease{LeaseID: name, Slug: core.NormalizeLeaseSlug(name), Name: name}
+	resourceName := ""
 	claims, err := core.ListLeaseClaims()
 	if err != nil {
 		return protocolLease{}, err
@@ -156,18 +175,21 @@ func (b *leaseBackend) lifecycleLeaseForName(name string) (protocolLease, error)
 		if !externalClaimMatchesScope(claim, b.claimScope()) {
 			continue
 		}
-		if strings.TrimSpace(claim.Labels["name"]) == name {
+		if strings.TrimSpace(claim.Labels["name"]) == name ||
+			strings.TrimSpace(claim.Labels[externalResourceNameLabel]) == name {
 			desired.LeaseID = claim.LeaseID
 			desired.Slug = claim.Slug
+			desired.Name = strings.TrimSpace(claim.Labels["name"])
+			resourceName = name
 			break
 		}
 	}
-	return b.lifecycleLeaseForDesired(desired)
+	return b.lifecycleLeaseForDesired(desired, resourceName)
 }
 
-func (b *leaseBackend) lifecycleLeaseForDesired(desired desiredLease) (protocolLease, error) {
+func (b *leaseBackend) lifecycleLeaseForDesired(desired desiredLease, resourceName string) (protocolLease, error) {
 	request := protocolRequest{Desired: &desired}
-	templateCtx, err := lifecycleContext(request, b.cfg.External.Config)
+	templateCtx, err := b.lifecycleContext(request, resourceName)
 	if err != nil {
 		return protocolLease{}, err
 	}
@@ -188,6 +210,7 @@ func (b *leaseBackend) lifecycleLeaseForDesired(desired desiredLease) (protocolL
 		}
 		labels[key] = expanded
 	}
+	labels[externalResourceNameLabel] = templateCtx.values["resourceName"]
 	ssh, err := lifecycleSSH(connection.SSH, templateCtx)
 	if err != nil {
 		return protocolLease{}, err
@@ -216,7 +239,7 @@ func lifecycleSSH(cfg core.ExternalSSHConnectionConfig, templateCtx lifecycleTem
 	if err != nil {
 		return protocolSSH{}, err
 	}
-	host, err := expand("host", core.Blank(cfg.Host, "{{name}}"))
+	host, err := expand("host", core.Blank(cfg.Host, "{{resourceName}}"))
 	if err != nil {
 		return protocolSSH{}, err
 	}
@@ -299,6 +322,7 @@ func lifecycleContext(request protocolRequest, config map[string]any) (lifecycle
 	if values["leaseId"] == "" {
 		values["leaseId"] = values["id"]
 	}
+	values["leaseIdSlug"] = core.NormalizeLeaseSlug(values["leaseId"])
 	if request.Repo != nil {
 		values["repo.root"] = request.Repo.Root
 		values["repo.name"] = request.Repo.Name
@@ -310,6 +334,30 @@ func lifecycleContext(request protocolRequest, config map[string]any) (lifecycle
 		addLifecycleConfigValues(values, "config."+key, value)
 	}
 	return lifecycleTemplateContext{values: values}, nil
+}
+
+func (b *leaseBackend) lifecycleContext(request protocolRequest, resourceName string) (lifecycleTemplateContext, error) {
+	templateCtx, err := lifecycleContext(request, b.cfg.External.Config)
+	if err != nil {
+		return lifecycleTemplateContext{}, err
+	}
+	if resourceName == "" && request.Lease != nil {
+		resourceName = strings.TrimSpace(request.Lease.Labels[externalResourceNameLabel])
+		if resourceName == "" {
+			resourceName = strings.TrimSpace(request.Lease.Name)
+		}
+	}
+	if resourceName == "" {
+		resourceName, err = expandLifecycleValue(
+			core.Blank(b.cfg.External.Connection.ResourceName, "{{name}}"),
+			templateCtx,
+		)
+		if err != nil {
+			return lifecycleTemplateContext{}, core.Exit(2, "external connection resourceName: %v", err)
+		}
+	}
+	templateCtx.values["resourceName"] = resourceName
+	return templateCtx, nil
 }
 
 func addLifecycleConfigValues(values map[string]string, key string, value any) {
