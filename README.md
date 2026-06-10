@@ -103,6 +103,35 @@ Terminates all active ciderbox containers.
 | `ciderbox list` | Show active leases |
 | `ciderbox stop <id>` | Stop a specific lease |
 
+### Orchard (AI Agent Swarm)
+
+Orchid is a swarm management feature for running distributed OpenClaw agents:
+
+```sh
+# Initialize an orchard manifest
+ciderbox orchard init
+
+# Spin up the swarm
+ciderbox orchard plant
+
+# Check tree health
+ciderbox orchard tend
+
+# Install OpenClaw on a tree
+ciderbox orchard graft --tree tree-0
+
+# Collect results from all trees
+ciderbox orchard harvest --output results.json
+
+# Aggregate into unified report
+ciderbox orchard press
+
+# Tear down the swarm
+ciderbox orchard chop --yes
+```
+
+See [ORCHID.md](ORCHID.md) for full documentation.
+
 ## How It Works
 
 ```text
@@ -187,6 +216,31 @@ Image lacks SSH server. Use Ubuntu/Debian base images, or install `openssh-serve
 ### SSH connection refused
 
 Container needs time to boot. The provider waits up to 20 minutes for SSH — but usually connects in 1-2 seconds with pre-pulled images.
+
+### "No active ciderbox containers found"
+
+If `chop` reports no containers but VMs are running, they may be protected:
+
+```sh
+# Force chop protected containers
+ciderbox chop --force
+```
+
+## Changelog
+
+### v0.2.0 — Orchid (AI Agent Swarm)
+- Added `orchard` command suite for distributed AI agent workloads
+- Uses `container exec` (no SSH required for tree management)
+- Supports swarm manifests via `.orchard.yaml`
+- See [ORCHID.md](ORCHID.md) for details
+
+### v0.1.0 — Initial Fork
+- Forked from crabbox, stripped to apple-container provider only
+- Added `compile-test` for multi-distro testing
+- Added `build` for single-distro builds
+- Added `chop` with `--force` for protected leases
+- Fixed `strings.Fields` command parsing bug
+- Added macOS 26 version gate
 
 ## License
 
