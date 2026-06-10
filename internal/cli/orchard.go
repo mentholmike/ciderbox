@@ -67,6 +67,10 @@ func (a App) orchardCommand(ctx context.Context, args []string) error {
 		return a.orchardHelp()
 	}
 
+	if args[0] == "--help" || args[0] == "help" {
+		return a.orchardHelp()
+	}
+
 	switch args[0] {
 	case "init":
 		return a.orchardInit(ctx, args[1:])
@@ -742,7 +746,7 @@ func (a App) orchardChop(ctx context.Context, args []string) error {
 		if treeName == "" {
 			treeName = lease.Labels["tree.id"]
 		}
-		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: LeaseTarget{Server: lease, LeaseID: lease.Labels["lease"]}}); err != nil {
+		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: LeaseTarget{Server: lease.Server, LeaseID: lease.Labels["lease"]}}); err != nil {
 			fmt.Fprintf(a.Stderr, "  ✗ %s: %v\n", treeName, err)
 			failed++
 		} else {

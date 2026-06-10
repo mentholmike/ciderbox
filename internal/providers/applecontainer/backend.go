@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -59,7 +58,7 @@ func applyDefaults(cfg *core.Config) {
 		if !isDefaultWorkRoot(cfg.WorkRoot) {
 			cfg.AppleContainer.WorkRoot = cfg.WorkRoot
 		} else {
-			cfg.AppleContainer.WorkRoot = "/work/ciderbox"
+			cfg.AppleContainer.WorkRoot = "/work/crabbox"
 		}
 	}
 	cfg.SSHUser = cfg.AppleContainer.User
@@ -70,7 +69,7 @@ func applyDefaults(cfg *core.Config) {
 
 func isDefaultWorkRoot(value string) bool {
 	value = strings.TrimSpace(value)
-	return value == "" || value == "/work/ciderbox"
+	return value == "" || value == "/work/crabbox"
 }
 
 func (b *backend) Spec() core.ProviderSpec { return b.spec }
@@ -773,60 +772,13 @@ func requireMacOS() error {
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		return exit(2, "provider=%s requires macOS on Apple silicon; current host is %s/%s", providerName, runtime.GOOS, runtime.GOARCH)
 	}
-	// Check macOS version — Apple Container requires macOS 26+ for host-reachable IPs
-	version, err := getMacOSVersion()
-	if err != nil {
-		return exit(2, "provider=%s unable to determine macOS version: %v", providerName, err)
-	}
-	major, _, err := parseVersion(version)
-	if err != nil {
-		return exit(2, "provider=%s unable to parse macOS version %q: %v", providerName, version, err)
-	}
-	if major < 26 {
-		return exit(2, "provider=%s requires macOS 26 (Tahoe) or later for host-reachable container IPs; current version is %s", providerName, version)
-	}
 	return nil
-}
-
-// getMacOSVersion returns the macOS version string using sw_vers.
-func getMacOSVersion() (string, error) {
-	cmd := exec.Command("sw_vers", "-productVersion")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// parseVersion extracts the major version from a semver-like string (e.g., "26.4.1" → 26).
-func parseVersion(v string) (int, int, error) {
-	parts := strings.Split(v, ".")
-	if len(parts) < 1 {
-		return 0, 0, fmt.Errorf("invalid version format")
-	}
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, err
-	}
-	minor := 0
-	if len(parts) > 1 {
-		minor, _ = strconv.Atoi(parts[1])
-	}
-	return major, minor, nil
 }
 
 func shouldCleanup(server core.Server, claim core.LeaseClaim, hasClaim bool, now time.Time) (bool, string) {
 	labels := server.Labels
 	if labels == nil {
 		return false, "missing labels"
-	}
-	// Protected leases (ciderbox-protected) get a 48-hour ceiling even if keep=true
-	if labels["ciderbox-protected"] == "true" {
-		createdAt, _ := time.Parse(time.RFC3339, labels["created_at"])
-		if !createdAt.IsZero() && now.After(createdAt.Add(48*time.Hour)) {
-			return true, "ciderbox-protected ceiling exceeded (48h)"
-		}
-		return false, "ciderbox-protected"
 	}
 	if strings.EqualFold(labels["keep"], "true") {
 		return false, "keep=true"
@@ -971,7 +923,7 @@ if ! command -v /usr/sbin/sshd >/dev/null 2>&1; then
   exit 127
 fi
 user="${CRABBOX_SSH_USER:-crabbox}"
-work_root="${CRABBOX_WORK_ROOT:-/work/ciderbox}"
+work_root="${CRABBOX_WORK_ROOT:-/work/crabbox}"
 ssh_port="${CRABBOX_SSH_PORT:-22}"
 if ! id "$user" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$user"

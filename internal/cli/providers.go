@@ -36,13 +36,13 @@ func (a App) providers(_ context.Context, args []string) error {
 }
 
 func providerMatrix() []providerMatrixEntry {
-	providers := registeredProviders()
+	providers := registeredProvidersList()
 	entries := make([]providerMatrixEntry, 0, len(providers))
 	for _, provider := range providers {
 		spec := provider.Spec()
 		entries = append(entries, providerMatrixEntry{
 			Provider:    firstNonBlank(spec.Name, provider.Name()),
-			Family:      firstNonBlank(spec.Family, provider.Name()),
+			Family:      provider.Name(),
 			Aliases:     append([]string(nil), provider.Aliases()...),
 			Kind:        spec.Kind,
 			Targets:     formatProviderTargets(spec.Targets),
@@ -67,17 +67,13 @@ func printProviderMatrix(out io.Writer, entries []providerMatrixEntry) {
 	}
 }
 
-func formatProviderTargets(targets []TargetSpec) []string {
+func formatProviderTargets(targets []string) []string {
 	out := make([]string, 0, len(targets))
 	for _, target := range targets {
-		value := strings.TrimSpace(target.OS)
-		if value == "" {
-			continue
+		value := strings.TrimSpace(target)
+		if value != "" {
+			out = append(out, value)
 		}
-		if strings.TrimSpace(target.WindowsMode) != "" {
-			value += "/" + strings.TrimSpace(target.WindowsMode)
-		}
-		out = append(out, value)
 	}
 	return out
 }

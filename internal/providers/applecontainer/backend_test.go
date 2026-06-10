@@ -64,7 +64,7 @@ func testBackend(runner *recordingRunner) *backend {
 		CLIPath:  "container",
 		Image:    "debian:bookworm",
 		User:     "runner",
-		WorkRoot: "/work/ciderbox",
+		WorkRoot: "/work/crabbox",
 		CPUs:     4,
 		Memory:   "8g",
 	}
@@ -73,12 +73,12 @@ func testBackend(runner *recordingRunner) *backend {
 
 func sampleInspectJSON(id, slug, lease string) string {
 	return `[{
-		"status":{"state":"running"},
+		"status":"running",
 		"configuration":{
 			"id":"` + id + `",
 			"image":{"reference":"debian:bookworm"},
 			"hostname":"` + id + `",
-			"labels":{"crabbox":"true","provider":"apple-container","lease":"` + lease + `","slug":"` + slug + `","state":"ready","ssh_user":"runner","work_root":"/work/ciderbox","image":"debian:bookworm"}
+			"labels":{"crabbox":"true","provider":"apple-container","lease":"` + lease + `","slug":"` + slug + `","state":"ready","ssh_user":"runner","work_root":"/work/crabbox","image":"debian:bookworm"}
 		},
 		"networks":[{"address":"192.168.64.7/24","gateway":"192.168.64.1","hostname":"` + id + `.test.","network":"default"}]
 	}]`
@@ -129,10 +129,10 @@ func TestApplyDefaults(t *testing.T) {
 	cfg.Provider = providerName
 	cfg.AppleContainer = core.AppleContainerConfig{}
 	applyDefaults(&cfg)
-	if cfg.AppleContainer.CLIPath != "container" || cfg.AppleContainer.Image != "debian:bookworm" || cfg.AppleContainer.User != "crabbox" || cfg.AppleContainer.WorkRoot != "/work/ciderbox" {
+	if cfg.AppleContainer.CLIPath != "container" || cfg.AppleContainer.Image != "debian:bookworm" || cfg.AppleContainer.User != "crabbox" || cfg.AppleContainer.WorkRoot != "/work/crabbox" {
 		t.Fatalf("defaults not applied: %#v", cfg.AppleContainer)
 	}
-	if cfg.SSHUser != "crabbox" || cfg.SSHPort != sshPort || cfg.WorkRoot != "/work/ciderbox" {
+	if cfg.SSHUser != "crabbox" || cfg.SSHPort != sshPort || cfg.WorkRoot != "/work/crabbox" {
 		t.Fatalf("derived ssh fields wrong: user=%s port=%s work=%s", cfg.SSHUser, cfg.SSHPort, cfg.WorkRoot)
 	}
 }
@@ -174,7 +174,7 @@ func TestCreateContainerBuildsRunArgs(t *testing.T) {
 		"--user\nroot",
 		"-e\nCRABBOX_AUTHORIZED_KEY=ssh-ed25519 AAAA test",
 		"-e\nCRABBOX_SSH_USER=runner",
-		"-e\nCRABBOX_WORK_ROOT=/work/ciderbox",
+		"-e\nCRABBOX_WORK_ROOT=/work/crabbox",
 		"-e\nCRABBOX_SSH_PORT=22",
 		"--label\nprovider=apple-container",
 		"--label\nlease=cbx_123",
@@ -317,7 +317,7 @@ func TestAppleContainerCacheVolumeNameIsStableAndFilesystemSafe(t *testing.T) {
 func TestListContainersFiltersByLabel(t *testing.T) {
 	lsJSON := `[
 		` + strings.TrimPrefix(strings.TrimSuffix(sampleInspectJSON("crabbox-blue", "blue-lobster", "cbx_123"), "]"), "[") + `,
-		{"status":{"state":"running"},"configuration":{"id":"someone-elses","image":{"reference":"alpine"},"labels":{"app":"web"}},"networks":[{"address":"192.168.64.9/24"}]}
+		{"status":"running","configuration":{"id":"someone-elses","image":{"reference":"alpine"},"labels":{"app":"web"}},"networks":[{"address":"192.168.64.9/24"}]}
 	]`
 	runner := &recordingRunner{
 		responses: map[string]core.LocalCommandResult{
@@ -359,7 +359,7 @@ func TestResolveAndSSHTarget(t *testing.T) {
 	if lease.SSH.Host != "192.168.64.7" || lease.SSH.Port != "22" || lease.SSH.User != "runner" || lease.SSH.TargetOS != core.TargetLinux {
 		t.Fatalf("unexpected ssh target: %#v", lease.SSH)
 	}
-	if !strings.Contains(lease.SSH.ReadyCheck, "rsync --version") || !strings.Contains(lease.SSH.ReadyCheck, "test -d '/work/ciderbox'") {
+	if !strings.Contains(lease.SSH.ReadyCheck, "rsync --version") || !strings.Contains(lease.SSH.ReadyCheck, "test -d '/work/crabbox'") {
 		t.Fatalf("ready check missing expectations: %q", lease.SSH.ReadyCheck)
 	}
 }
@@ -393,8 +393,8 @@ func TestPrepareLeaseRequiresNetworkAddress(t *testing.T) {
 	b := testBackend(&recordingRunner{responses: map[string]core.LocalCommandResult{}})
 	cfg := b.configForRun()
 	c := inspectContainer{
-		Status:        inspectStatus{State: "running"},
-		Configuration: inspectConfiguration{ID: "crabbox-noip", Labels: map[string]string{"crabbox": "true", "provider": providerName, "ssh_user": "runner", "work_root": "/work/ciderbox"}},
+		Status:        "running",
+		Configuration: inspectConfiguration{ID: "crabbox-noip", Labels: map[string]string{"crabbox": "true", "provider": providerName, "ssh_user": "runner", "work_root": "/work/crabbox"}},
 	}
 	if _, err := b.prepareLease(context.Background(), cfg, c, "cbx_x", "x", false); err == nil {
 		t.Fatal("prepareLease accepted a container without a network address")
@@ -405,14 +405,14 @@ func TestWaitForNetworkAddressPollsInspect(t *testing.T) {
 	runner := &recordingRunner{
 		sequences: map[string][]core.LocalCommandResult{
 			commandKey([]string{"inspect", "crabbox-wait"}): {
-				{Stdout: `[{"status":{"state":"running"},"configuration":{"id":"crabbox-wait","labels":{"crabbox":"true","provider":"apple-container"}}}]`},
+				{Stdout: `[{"status":"running","configuration":{"id":"crabbox-wait","labels":{"crabbox":"true","provider":"apple-container"}}}]`},
 				{Stdout: sampleInspectJSON("crabbox-wait", "wait", "cbx_wait")},
 			},
 		},
 	}
 	b := testBackend(runner)
 	start := inspectContainer{
-		Status:        inspectStatus{State: "running"},
+		Status:        "running",
 		Configuration: inspectConfiguration{ID: "crabbox-wait", Labels: map[string]string{"crabbox": "true", "provider": providerName}},
 	}
 	c, err := b.waitForNetworkAddress(context.Background(), "crabbox-wait", start, 2*time.Second)
@@ -431,7 +431,7 @@ func TestWaitForNetworkAddressPollsInspect(t *testing.T) {
 func TestWaitForNetworkAddressStopsOnExitedContainer(t *testing.T) {
 	b := testBackend(&recordingRunner{responses: map[string]core.LocalCommandResult{}})
 	start := inspectContainer{
-		Status:        inspectStatus{State: "stopped"},
+		Status:        "stopped",
 		Configuration: inspectConfiguration{ID: "crabbox-exited", Labels: map[string]string{"crabbox": "true", "provider": providerName}},
 	}
 	if _, err := b.waitForNetworkAddress(context.Background(), "crabbox-exited", start, time.Minute); err == nil || !strings.Contains(err.Error(), "stopped before a network address") {
@@ -604,37 +604,12 @@ func TestInspectIPStripsCIDR(t *testing.T) {
 }
 
 func TestDecodeInspectToleratesStringImage(t *testing.T) {
-	containers, err := decodeInspect([]byte(`[{"status":{"state":"running"},"configuration":{"id":"x","image":"alpine:3"},"networks":[]}]`))
+	containers, err := decodeInspect([]byte(`[{"status":"running","configuration":{"id":"x","image":"alpine:3"},"networks":[]}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(containers) != 1 || containers[0].image() != "alpine:3" {
 		t.Fatalf("decoded=%#v", containers)
-	}
-}
-
-func TestShouldCleanupProtectedCeiling(t *testing.T) {
-	now := time.Now().UTC()
-
-	// Fresh protected lease — should NOT cleanup
-	server := core.Server{
-		Status: "running",
-		Labels: map[string]string{"ciderbox-protected": "true", "created_at": now.Format(time.RFC3339)},
-	}
-	should, reason := shouldCleanup(server, core.LeaseClaim{}, false, now)
-	if should {
-		t.Fatalf("fresh protected lease should not cleanup, got reason=%q", reason)
-	}
-
-	// Old protected lease (>48h) — SHOULD cleanup
-	old := now.Add(-49 * time.Hour)
-	server.Labels["created_at"] = old.Format(time.RFC3339)
-	should, reason = shouldCleanup(server, core.LeaseClaim{}, false, now)
-	if !should {
-		t.Fatalf("old protected lease should cleanup, got reason=%q", reason)
-	}
-	if reason != "ciderbox-protected ceiling exceeded (48h)" {
-		t.Fatalf("unexpected reason: %q", reason)
 	}
 }
 

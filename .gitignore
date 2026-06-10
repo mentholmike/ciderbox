@@ -10,3 +10,10 @@ coverage.out
 crabbox
 ciderbox
 bin/
+# Generated plan docs
+ciderbox-plan.md
+orchid.md
+# Per-user config
+.orchard.yaml
+# Restored backup files
+*.restored

@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 )
 
 type App struct {
@@ -41,6 +44,12 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return help
 	}
 
+	// Direct-dispatch commands that don't go through kong
+	switch args[0] {
+	case "orchard":
+		return a.orchardCommand(ctx, args[1:])
+	}
+
 	return a.runKong(ctx, args)
 }
 
@@ -52,78 +61,10 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 	switch args[0] {
 	case "init":
 		return a.initProject(ctx, helpArgs), true
-	case "login":
-		return a.login(ctx, helpArgs), true
-	case "logout":
-		return a.logout(ctx, helpArgs), true
-	case "whoami":
-		return a.whoami(ctx, helpArgs), true
-	case "doctor":
-		return a.doctor(ctx, helpArgs), true
-	case "warmup":
-		return a.warmup(ctx, helpArgs), true
-	case "prewarm":
-		return a.prewarm(ctx, helpArgs), true
-	case "compile-test":
-		return a.compileTest(ctx, helpArgs), true
-	case "chop":
-		return a.chopCommand(ctx, helpArgs), true
-	case "build":
-		return a.buildCommand(ctx, helpArgs), true
+	case "config":
+		return nil, false // handled by kong
 	case "orchard":
 		return a.orchardCommand(ctx, helpArgs), true
-	case "run":
-		return a.runCommand(ctx, helpArgs), true
-	case "job":
-		return nil, false
-	case "sync-plan":
-		return a.syncPlan(ctx, helpArgs), true
-	case "providers":
-		return a.providers(ctx, helpArgs), true
-	case "history":
-		return a.history(ctx, helpArgs), true
-	case "logs":
-		return a.logs(ctx, helpArgs), true
-	case "events":
-		return a.events(ctx, helpArgs), true
-	case "attach":
-		return a.attach(ctx, helpArgs), true
-	case "results":
-		return a.results(ctx, helpArgs), true
-	case "status":
-		return a.status(ctx, helpArgs), true
-	case "list":
-		return a.list(ctx, helpArgs), true
-	case "usage":
-		return a.usage(ctx, helpArgs), true
-	case "ssh":
-		return a.ssh(ctx, helpArgs), true
-	case "ports":
-		return a.ports(ctx, helpArgs), true
-	case "cp":
-		return a.copyCommand(ctx, helpArgs), true
-	case "vnc":
-		return a.vnc(ctx, helpArgs), true
-	case "webvnc":
-		return a.webvnc(ctx, helpArgs), true
-	case "code":
-		return a.webCode(ctx, helpArgs), true
-	case "egress":
-		return a.egress(ctx, helpArgs), true
-	case "screenshot":
-		return a.screenshot(ctx, helpArgs), true
-	case "artifacts":
-		return nil, false
-	case "capsule":
-		return nil, false
-	case "checkpoint":
-		return nil, false
-	case "inspect":
-		return a.inspect(ctx, helpArgs), true
-	case "stop", "release":
-		return a.stop(ctx, helpArgs), true
-	case "cleanup":
-		return a.cleanup(ctx, helpArgs), true
 	default:
 		return nil, false
 	}
@@ -141,6 +82,8 @@ Usage:
   ciderbox run [flags] -- <command...>
 
 Start Here:
+  ciderbox doctor
+      Check local tools and provider readiness.
   ciderbox init
       Scaffold .ciderbox.yaml in the current repo.
   ciderbox compile-test
@@ -193,22 +136,73 @@ Environment:
   CIDERBOX_CONFIG              Config file path override
   CRABBOX_CONFIG               Legacy config file path override
   CRABBOX_PROVIDER             Provider override (apple-container, ssh, ...)
-  CRABBOX_IDLE_TIMEOUT         Default idle expiry, e.g. 30m
-  CRABBOX_TTL                  Maximum lease lifetime, e.g. 90m
-  CRABBOX_SSH_FALLBACK_PORTS   Comma-separated SSH fallback ports, or none
 
 Global:
   -h, --help     Show help
   --version      Print version
-
-Docs:
-  docs/commands/README.md`)
+`)
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	return fs
+}
+
+// providerConfigRuntime loads the ciderbox user config and returns a Runtime
+// wired to the app's stdout/stderr streams and the host os/exec runner.
+func (a App) providerConfigRuntime(providerName string) (Config, Runtime, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return Config{}, Runtime{}, err
+	}
+	cfg.Provider = providerName
+	rt := Runtime{
+		Stdout: a.Stdout,
+		Stderr: a.Stderr,
+		Clock:  realClock{},
+		HTTP:   http.DefaultClient,
+		Exec:   osCommandRunner{},
+	}
+	return cfg, rt, nil
+}
+
+// osCommandRunner wraps os/exec to satisfy the CommandRunner interface.
+type osCommandRunner struct{}
+
+func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalCommandResult, error) {
+	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
+	cmd.Dir = req.Dir
+	cmd.Env = req.Env
+	if req.Stdin != nil {
+		cmd.Stdin = req.Stdin
+	}
+	if req.Stdout != nil {
+		cmd.Stdout = req.Stdout
+	}
+	if req.Stderr != nil {
+		cmd.Stderr = req.Stderr
+	}
+	var stdoutBuf, stderrBuf strings.Builder
+	if req.Stdout == nil {
+		cmd.Stdout = &stdoutBuf
+	}
+	if req.Stderr == nil {
+		cmd.Stderr = &stderrBuf
+	}
+	err := cmd.Run()
+	var exitCode int
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return LocalCommandResult{
+		ExitCode: exitCode,
+		Stdout:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
+	}, err
 }
 
 func parseFlags(fs *flag.FlagSet, args []string) error {
