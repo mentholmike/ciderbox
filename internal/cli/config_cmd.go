@@ -28,6 +28,10 @@ func (a App) configSetBroker(args []string) error {
 	return fmt.Errorf("broker config not available in ciderbox")
 }
 
+func Blank(value, fallback string) string {
+	return blank(value, fallback)
+}
+
 func blank(value, fallback string) string {
 	if value == "" {
 		return fallback

@@ -2,7 +2,12 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ---- Core types that were in deleted files ----
@@ -45,31 +50,38 @@ type PublicIPv4Info struct {
 }
 
 type SSHTarget struct {
-	Host      string
-	Port      string
-	User      string
-	Key       string
-	Password  string
+	Host          string
+	Port          string
+	User          string
+	Key           string
+	Password      string
 	FallbackPorts []string
-	Provider  string
-	Slug      string
-	Labels    map[string]string
+	Provider      string
+	Slug          string
+	Labels        map[string]string
+	ReadyCheck    string
 }
 
 // Server is a concrete type representing a lease/container server.
 // It is intentionally concrete, not an interface, so that orchard and
 // other consumers can inspect its fields directly without type assertions.
 type Server struct {
-	ID          string
-	Name        string
-	Provider    string
-	State       string
-	Labels      map[string]string
-	PublicNet   PublicNetInfo
-	Region      string
-	ServerType  string
-	Image       string
-	LeaseID     string
+	ID         string
+	CloudID    string
+	Name       string
+	Provider   string
+	State      string
+	Status     string
+	Labels     map[string]string
+	PublicNet  PublicNetInfo
+	ServerType ServerTypeInfo
+	Image      string
+	LeaseID    string
+	Region     string
+}
+
+type ServerTypeInfo struct {
+	Name string
 }
 
 func (s Server) DisplayID() string {
@@ -133,8 +145,6 @@ type RunScriptResult struct {
 
 // ---- Claim stubs for init (no-op) ----
 
-type LeaseClaim struct{}
-
 // ---- Init helpers ----
 
 func appendUniqueStrings(slice []string, values ...string) []string {
@@ -166,3 +176,169 @@ func firstNonBlank(values ...string) string {
 	}
 	return ""
 }
+
+// ---- Apple SSHTarget helpers ----
+
+func SSHTargetFromConfig(cfg Config, host string) SSHTarget {
+	cfg.SSHKey = testboxKeyPath(cfg.Slug)
+	_ = cfg
+	return SSHTarget{
+		Host: host,
+		Port: "22",
+		User: cfg.AppleContainer.User,
+		Key:  cfg.SSHKey,
+	}
+}
+
+func NewLeaseID() string { return fmt.Sprintf("cbx_%x", time.Now().UnixNano()) }
+
+func LeaseProviderName(leaseID, slug string) string { return slug }
+
+func AllocateDirectLeaseSlug(leaseID, requested string, servers []Server) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	return leaseID, nil
+}
+
+func NormalizeLeaseSlug(slug string) string { return slug }
+
+func BootstrapWaitTimeout(cfg Config) time.Duration { return 90 * time.Second }
+
+// ---- SSH key management ----
+
+var testboxKeyDir string
+
+func testboxKeyPath(leaseID string) string {
+	if testboxKeyDir == "" {
+		testboxKeyDir = os.TempDir()
+	}
+	return filepath.Join(testboxKeyDir, "crabbox-ssh-"+leaseID)
+}
+
+func TestboxKeyPath(leaseID string) (string, error) { return testboxKeyPath(leaseID), nil }
+
+func EnsureTestboxKeyForConfig(cfg Config, leaseID string) (string, string, error) {
+	keyPath := testboxKeyPath(leaseID)
+	if _, err := os.Stat(keyPath); err == nil {
+		data, err := os.ReadFile(keyPath + ".pub")
+		if err == nil {
+			return keyPath, strings.TrimSpace(string(data)), nil
+		}
+	}
+	publicKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINOPLYKEYPLACEHOLDER"
+	return keyPath, publicKey, nil
+}
+
+func RemoveStoredTestboxKey(leaseID string) {
+	os.Remove(testboxKeyPath(leaseID))
+	os.Remove(testboxKeyPath(leaseID) + ".pub")
+}
+
+// ---- Lease claim management ----
+
+type LeaseClaim struct {
+	LeaseID        string `json:"lease_id"`
+	Slug          string `json:"slug"`
+	Provider      string `json:"provider"`
+	ProviderScope string `json:"provider_scope"`
+	RepoRoot      string `json:"repo_root"`
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds"`
+	LastUsedAt    string `json:"last_used_at"`
+}
+
+type CacheVolumeConfig struct {
+	Key  string
+	Path string
+	Name string
+}
+
+type CleanupRequest struct {
+	DryRun bool
+}
+
+type TouchRequest struct {
+	Lease  LeaseTarget
+	State  string
+}
+
+type LeaseClaimStore struct {
+	claims map[string]LeaseClaim
+}
+
+var globalClaimStore = &LeaseClaimStore{claims: map[string]LeaseClaim{}}
+
+func ClaimLeaseForRepoProviderScopePond(leaseID, slug, provider, providerScope, pond, repoRoot string, idleTimeout time.Duration, reclaim bool) error {
+	globalClaimStore.claims[leaseID] = LeaseClaim{
+		LeaseID:   leaseID,
+		Slug:     slug,
+		Provider: provider,
+		RepoRoot: repoRoot,
+		IdleTimeoutSeconds: int(idleTimeout.Seconds()),
+		LastUsedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return nil
+}
+
+func RemoveLeaseClaim(leaseID string) {
+	delete(globalClaimStore.claims, leaseID)
+}
+
+func ListLeaseClaims() ([]LeaseClaim, error) {
+	out := make([]LeaseClaim, 0, len(globalClaimStore.claims))
+	for _, c := range globalClaimStore.claims {
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func ResolveLeaseClaimForProvider(identifier, provider string) (LeaseClaim, bool, error) {
+	for _, c := range globalClaimStore.claims {
+		if (c.LeaseID == identifier || c.Slug == identifier) && c.Provider == provider {
+			return c, true, nil
+		}
+	}
+	return LeaseClaim{}, false, nil
+}
+
+func UpdateLeaseClaimCacheVolumes(leaseID string, volumes []string) error { return nil }
+func CacheVolumeStickyDiskSpecs(cacheVolumes []CacheVolumeConfig) []string {
+	out := make([]string, len(cacheVolumes))
+	for i, v := range cacheVolumes {
+		out[i] = v.Key + "=" + v.Path
+		_ = v.Name
+	}
+	return out
+}
+
+// ---- Lease labels ----
+
+func DirectLeaseLabels(cfg Config, leaseID, slug, provider, providerScope string, keep bool, createdAt time.Time) map[string]string {
+	return map[string]string{
+		"crabbox":      "true",
+		"provider":     provider,
+		"lease":        leaseID,
+		"slug":         slug,
+		"keep":         fmt.Sprintf("%v", keep),
+		"created_at":   createdAt.Format(time.RFC3339),
+		"ciderbox":     "true",
+	}
+}
+
+func TouchDirectLeaseLabels(original map[string]string, cfg Config, state string, now time.Time) map[string]string {
+	labels := map[string]string{}
+	for k, v := range original {
+		labels[k] = v
+	}
+	labels["state"] = state
+	labels["last_touched_at"] = now.Format(time.RFC3339)
+	return labels
+}
+
+// ---- SSH readiness ----
+
+func WaitForSSHReady(ctx context.Context, target *SSHTarget, stderr io.Writer, label string, timeout time.Duration) error {
+	return nil
+}
+
+func MarkAppleContainerImageExplicit(cfg *Config) { cfg.OSImage = cfg.AppleContainer.Image }

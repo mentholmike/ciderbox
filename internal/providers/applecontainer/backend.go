@@ -199,7 +199,15 @@ func (b *backend) List(ctx context.Context, _ core.ListRequest) ([]core.LeaseVie
 	}
 	views := make([]core.LeaseView, 0, len(containers))
 	for _, c := range containers {
-		views = append(views, b.serverFromContainer(c, cfg))
+		server := b.serverFromContainer(c, cfg)
+		views = append(views, core.LeaseView{
+			ID:       server.CloudID,
+			Name:     server.Name,
+			Provider: server.Provider,
+			Server:   server,
+			Status:   server.Status,
+			Labels:   server.Labels,
+		})
 	}
 	return views, nil
 }

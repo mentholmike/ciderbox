@@ -40,12 +40,26 @@ func (a App) Run(ctx context.Context, args []string) error {
 		a.printHelp()
 		return nil
 	}
+
 	if help, ok := a.directCommandHelp(ctx, args); ok {
 		return help
 	}
 
-	// Direct-dispatch commands that don't go through kong
 	switch args[0] {
+	case "run":
+		return a.runCommand(ctx, args[1:])
+	case "compile-test":
+		return a.compileTest(ctx, args[1:])
+	case "build":
+		return a.buildCommand(ctx, args[1:])
+	case "chop":
+		return a.chopCommand(ctx, args[1:])
+	case "doctor":
+		return a.doctor(ctx, args[1:])
+	case "list":
+		return a.list(ctx, args[1:])
+	case "cleanup":
+		return a.cleanup(ctx, args[1:])
 	case "orchard":
 		return a.orchardCommand(ctx, args[1:])
 	}
@@ -57,12 +71,27 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 	if len(args) < 2 || !isHelpArg(args[1]) || isKongCommandGroup(args[0]) {
 		return nil, false
 	}
+
 	helpArgs := []string{"--help"}
 	switch args[0] {
 	case "init":
 		return a.initProject(ctx, helpArgs), true
 	case "config":
 		return nil, false // handled by kong
+	case "run":
+		return a.runCommand(ctx, helpArgs), true
+	case "compile-test":
+		return a.compileTest(ctx, helpArgs), true
+	case "build":
+		return a.buildCommand(ctx, helpArgs), true
+	case "chop":
+		return a.chopCommand(ctx, helpArgs), true
+	case "doctor":
+		return a.doctor(ctx, helpArgs), true
+	case "list":
+		return a.list(ctx, helpArgs), true
+	case "cleanup":
+		return a.cleanup(ctx, helpArgs), true
 	case "orchard":
 		return a.orchardCommand(ctx, helpArgs), true
 	default:
@@ -79,68 +108,41 @@ func (a App) printHelp() {
 
 Usage:
   ciderbox <command> [flags]
-  ciderbox run [flags] -- <command...>
 
-Start Here:
-  ciderbox doctor
-      Check local tools and provider readiness.
+Core:
+  doctor             Check local tools and provider readiness
+  init               Scaffold .ciderbox.yaml in the current repo
+  run -- <cmd>       Copy current dir into a fresh Apple container and run a command
+  compile-test       Run test command across configured distros
+  build              Build project inside an Apple-container VM
+  chop               Remove active ciderbox containers
+  version            Print version
+
+Orchid:
+  orchard init       Scaffold .orchard.yaml
+  orchard plant      Spin up an AI-agent swarm
+  orchard tend       Show live tree health
+  orchard graft      Install OpenClaw on a tree
+  orchard run        Execute a task across trees
+  orchard harvest    Collect tree results
+  orchard chop       Tear down the swarm
+
+Examples:
   ciderbox init
-      Scaffold .ciderbox.yaml in the current repo.
-  ciderbox compile-test
-      Run your test command across multiple Apple-container distros.
-  ciderbox build
-      Build the project inside an Apple-container VM.
-  ciderbox chop
-      Terminate all active ciderbox leases.
-  ciderbox orchard plant
-      Spin up an AI-agent swarm on local Apple-container VMs.
-
-Commands:
-  init          Scaffold repo .ciderbox.yaml config
-  compile-test  Run tests across multiple distros in parallel
-  build         Build project in an Apple-container VM
-  chop          Terminate active leases (respects ciderbox-protected)
-  run           Sync repo and run a command in a container
-  warmup        Lease a box and wait until ready
-  ssh           Print SSH command for a lease
-  cp            Copy files to/from a lease
-  status        Show lease state; --wait blocks until ready
-  list          List active ciderbox machines
-  stop          Release a lease
-  cleanup       Sweep expired direct-provider machines
-  inspect       Print lease/provider details (--json for scripts)
-  doctor        Check local tools and provider readiness
-  config        Show or update user config
-  orchard       Manage an AI-agent swarm on Apple-container VMs
-
-Common Flows:
-  ciderbox init
-  ciderbox compile-test
-  ciderbox chop
-
   ciderbox run -- go test ./...
-  ciderbox warmup
-  ciderbox ssh --id blue-lobster
-  ciderbox cp --id blue-lobster ./out SANDBOX:/tmp/out
-  ciderbox status --id blue-lobster --wait
-  ciderbox stop blue-lobster
-
-  ciderbox orchard init
+  ciderbox compile-test
+  ciderbox build
+  ciderbox chop --yes
   ciderbox orchard plant
-  ciderbox orchard tend
-  ciderbox orchard graft --tree tree-0
-  ciderbox orchard harvest --output results.json
-  ciderbox orchard chop
 
 Environment:
-  CIDERBOX_CONFIG              Config file path override
-  CRABBOX_CONFIG               Legacy config file path override
-  CRABBOX_PROVIDER             Provider override (apple-container, ssh, ...)
+  CIDERBOX_CONFIG    Config file path override
+  CRABBOX_CONFIG     Legacy config file path override
+  CRABBOX_PROVIDER   Provider override (apple-container, ssh, ...)
 
 Global:
-  -h, --help     Show help
-  --version      Print version
-`)
+  -h, --help         Show help
+  --version          Print version`)
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
@@ -156,7 +158,10 @@ func (a App) providerConfigRuntime(providerName string) (Config, Runtime, error)
 	if err != nil {
 		return Config{}, Runtime{}, err
 	}
+
 	cfg.Provider = providerName
+	canonicalizeConfigProvider(&cfg)
+
 	rt := Runtime{
 		Stdout: a.Stdout,
 		Stderr: a.Stderr,
@@ -164,16 +169,17 @@ func (a App) providerConfigRuntime(providerName string) (Config, Runtime, error)
 		HTTP:   http.DefaultClient,
 		Exec:   osCommandRunner{},
 	}
+
 	return cfg, rt, nil
 }
 
-// osCommandRunner wraps os/exec to satisfy the CommandRunner interface.
 type osCommandRunner struct{}
 
 func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalCommandResult, error) {
 	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
 	cmd.Dir = req.Dir
 	cmd.Env = req.Env
+
 	if req.Stdin != nil {
 		cmd.Stdin = req.Stdin
 	}
@@ -183,6 +189,7 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 	if req.Stderr != nil {
 		cmd.Stderr = req.Stderr
 	}
+
 	var stdoutBuf, stderrBuf strings.Builder
 	if req.Stdout == nil {
 		cmd.Stdout = &stdoutBuf
@@ -190,7 +197,9 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 	if req.Stderr == nil {
 		cmd.Stderr = &stderrBuf
 	}
+
 	err := cmd.Run()
+
 	var exitCode int
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -198,6 +207,7 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 			exitCode = exitErr.ExitCode()
 		}
 	}
+
 	return LocalCommandResult{
 		ExitCode: exitCode,
 		Stdout:   stdoutBuf.String(),

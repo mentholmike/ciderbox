@@ -24,9 +24,10 @@ type Provider interface {
 type ProviderSpec struct {
 	Name        string
 	Description string
+	Family      string
 	Kind        ProviderKind
 	Features    FeatureSet
-	Targets     []string
+	Targets     interface{}
 	Coordinator string
 }
 
@@ -40,6 +41,17 @@ const (
 )
 
 const CoordinatorSupported = "supported"
+
+const ProviderKindSSHLease ProviderKind = "ssh-lease"
+const CoordinatorNever = "never"
+const FeatureSSH Feature = "ssh"
+const FeatureCrabboxSync Feature = "crabbox-sync"
+const FeatureCleanup Feature = "cleanup"
+
+type TargetSpec struct {
+	OS string
+}
+
 
 type Feature string
 
@@ -77,6 +89,7 @@ type LeaseTarget struct {
 	Server  Server
 	Target  SSHTarget
 	LeaseID string
+	SSH     SSHTarget
 }
 
 type AcquireRequest struct {
@@ -101,6 +114,7 @@ type ResolveRequest struct {
 	Slug        string
 	ID          string
 	ReleaseOnly bool
+	Reclaim     bool
 	Repo        Repo
 }
 

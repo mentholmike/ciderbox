@@ -67,12 +67,19 @@ func printProviderMatrix(out io.Writer, entries []providerMatrixEntry) {
 	}
 }
 
-func formatProviderTargets(targets []string) []string {
-	out := make([]string, 0, len(targets))
-	for _, target := range targets {
-		value := strings.TrimSpace(target)
-		if value != "" {
-			out = append(out, value)
+func formatProviderTargets(targets interface{}) []string {
+	out := make([]string, 0, 1)
+	switch v := targets.(type) {
+	case []string:
+		for _, target := range v {
+			value := strings.TrimSpace(target)
+			if value != "" {
+				out = append(out, value)
+			}
+		}
+	case []TargetSpec:
+		for _, spec := range v {
+			out = append(out, spec.OS)
 		}
 	}
 	return out
