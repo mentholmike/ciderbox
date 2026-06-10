@@ -77,7 +77,7 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 	case "init":
 		return a.initProject(ctx, helpArgs), true
 	case "config":
-		return nil, false // handled by kong
+		return nil, false
 	case "run":
 		return a.runCommand(ctx, helpArgs), true
 	case "compile-test":
@@ -112,9 +112,9 @@ Usage:
 Core:
   doctor             Check local tools and provider readiness
   init               Scaffold .ciderbox.yaml in the current repo
-  run -- <cmd>       Copy current dir into a fresh Apple container and run a command
+  run -- <cmd>       Run a command in a fresh Apple Container
   compile-test       Run test command across configured distros
-  build              Build project inside an Apple-container VM
+  build              Build project inside an Apple Container
   chop               Remove active ciderbox containers
   version            Print version
 
@@ -137,8 +137,6 @@ Examples:
 
 Environment:
   CIDERBOX_CONFIG    Config file path override
-  CRABBOX_CONFIG     Legacy config file path override
-  CRABBOX_PROVIDER   Provider override (apple-container, ssh, ...)
 
 Global:
   -h, --help         Show help
@@ -151,17 +149,13 @@ func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
-// providerConfigRuntime loads the ciderbox user config and returns a Runtime
-// wired to the app's stdout/stderr streams and the host os/exec runner.
 func (a App) providerConfigRuntime(providerName string) (Config, Runtime, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return Config{}, Runtime{}, err
 	}
-
 	cfg.Provider = providerName
 	canonicalizeConfigProvider(&cfg)
-
 	rt := Runtime{
 		Stdout: a.Stdout,
 		Stderr: a.Stderr,
@@ -169,7 +163,6 @@ func (a App) providerConfigRuntime(providerName string) (Config, Runtime, error)
 		HTTP:   http.DefaultClient,
 		Exec:   osCommandRunner{},
 	}
-
 	return cfg, rt, nil
 }
 
@@ -179,7 +172,6 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
 	cmd.Dir = req.Dir
 	cmd.Env = req.Env
-
 	if req.Stdin != nil {
 		cmd.Stdin = req.Stdin
 	}
@@ -189,7 +181,6 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 	if req.Stderr != nil {
 		cmd.Stderr = req.Stderr
 	}
-
 	var stdoutBuf, stderrBuf strings.Builder
 	if req.Stdout == nil {
 		cmd.Stdout = &stdoutBuf
@@ -197,9 +188,7 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 	if req.Stderr == nil {
 		cmd.Stderr = &stderrBuf
 	}
-
 	err := cmd.Run()
-
 	var exitCode int
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -207,12 +196,7 @@ func (osCommandRunner) Run(ctx context.Context, req LocalCommandRequest) (LocalC
 			exitCode = exitErr.ExitCode()
 		}
 	}
-
-	return LocalCommandResult{
-		ExitCode: exitCode,
-		Stdout:   stdoutBuf.String(),
-		Stderr:   stderrBuf.String(),
-	}, err
+	return LocalCommandResult{ExitCode: exitCode, Stdout: stdoutBuf.String(), Stderr: stderrBuf.String()}, err
 }
 
 func parseFlags(fs *flag.FlagSet, args []string) error {

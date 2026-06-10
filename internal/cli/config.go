@@ -34,8 +34,6 @@ type Config struct {
 	Slug               string        `yaml:"slug,omitempty"`
 	ExposedPorts       []string      `yaml:"expose,omitempty"`
 
-	Run              RunConfig           `yaml:"run,omitempty"`
-
 	AppleContainer AppleContainerConfig `yaml:"appleContainer,omitempty"`
 
 	Cache CacheConfig `yaml:"cache,omitempty"`
@@ -47,11 +45,6 @@ type Config struct {
 
 type CacheConfig struct {
 	Volumes []CacheVolumeConfig `yaml:"volumes,omitempty"`
-}
-
-type RunConfig struct {
-	Provider string `yaml:"provider,omitempty"`
-	Image    string `yaml:"image,omitempty"`
 }
 
 type AppleContainerConfig struct {
