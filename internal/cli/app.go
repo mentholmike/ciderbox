@@ -66,6 +66,8 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 		return a.prewarm(ctx, helpArgs), true
 	case "compile-test":
 		return a.compileTest(ctx, helpArgs), true
+	case "build":
+		return a.buildCommand(ctx, helpArgs), true
 	case "run":
 		return a.runCommand(ctx, helpArgs), true
 	case "job":
