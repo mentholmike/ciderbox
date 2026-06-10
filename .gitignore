@@ -8,3 +8,5 @@ node_modules/
 *.test
 coverage.out
 crabbox
+ciderbox
+bin/

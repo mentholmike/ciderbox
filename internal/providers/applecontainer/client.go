@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+// inspectStatus mirrors the nested status object returned by `container inspect`
+// and `container ls --format json`. In Apple's container CLI v1.0.0, status is an
+// object with state, pid, startedAt, and networks — not a flat string.
+type inspectStatus struct {
+	State     string             `json:"state"`
+	PID       int                `json:"pid,omitempty"`
+	StartedAt string             `json:"startedAt,omitempty"`
+	Networks  []inspectNetwork   `json:"networks,omitempty"`
+}
+
 // inspectContainer mirrors the JSON returned by `container inspect <id>` and
 // `container ls --format json`. Apple's runtime documents the network shape
 // (a `networks` array carrying an IPv4 address in CIDR form) and a
@@ -16,7 +26,7 @@ import (
 //
 // Reference: https://github.com/apple/container/blob/main/docs/how-to.md
 type inspectContainer struct {
-	Status        string               `json:"status"`
+	Status        inspectStatus        `json:"status"`
 	Configuration inspectConfiguration `json:"configuration"`
 	Networks      []inspectNetwork     `json:"networks"`
 	Labels        map[string]string    `json:"labels,omitempty"`
@@ -113,11 +123,27 @@ func (c inspectContainer) image() string {
 }
 
 func (c inspectContainer) status() string {
-	return strings.ToLower(strings.TrimSpace(c.Status))
+	return strings.ToLower(strings.TrimSpace(c.Status.State))
 }
 
 // ip returns the container's first network address without its CIDR suffix.
+// In container CLI v1.0.0, networks live inside status.networks; fall back to
+// the top-level networks field if empty.
 func (c inspectContainer) ip() string {
+	// v1.0.0 shape: networks inside status object
+	for _, n := range c.Status.Networks {
+		addr := firstNonBlank(n.Address, n.IPv4Address)
+		if addr == "" {
+			continue
+		}
+		if idx := strings.IndexByte(addr, '/'); idx >= 0 {
+			addr = addr[:idx]
+		}
+		if addr != "" {
+			return addr
+		}
+	}
+	// legacy / fallback: top-level networks
 	for _, n := range c.Networks {
 		addr := firstNonBlank(n.Address, n.IPv4Address)
 		if addr == "" {
