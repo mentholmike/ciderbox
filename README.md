@@ -193,9 +193,51 @@ build:
   cachePaths:
     - /root/.cache/go-build
     - /root/.npm
-run:
-  provider: apple-container
+```
+
+### Runtime Dependencies
+
+Both `compile-test` and `build` support installing packages at runtime:
+
+```yaml
+compileTest:
+  distros:
+    - name: ubuntu
+      image: ubuntu:26.04
+  command: "make test"
+  dependencies: [build-essential, libssl-dev, python3]
+
+build:
   image: ubuntu:26.04
+  command: "make build"
+  dependencies: [build-essential, git]
+```
+
+This translates to:
+```bash
+apt-get update && apt-get install -y --no-install-recommends build-essential libssl-dev python3 && make test
+```
+
+Use this when your project needs system packages that aren't in the base image.
+
+### `.orchard.yaml`
+
+For AI agent swarms, see [ORCHID.md](ORCHID.md).
+
+```yaml
+name: my-orchard
+trees: 3
+template:
+  image: ubuntu:26.04
+  cpus: 2
+  memory: 4G
+agent:
+  identity: archimedes-clone
+  skills: [web-search, github, discord]
+  model: gpt-5.3-codex-spark
+mesh:
+  mode: gossip
+  broadcast: true
 ```
 
 ## Troubleshooting
