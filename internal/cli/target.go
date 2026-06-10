@@ -14,9 +14,9 @@ const (
 	windowsModeNormal = "normal"
 	windowsModeWSL2   = "wsl2"
 
-	defaultPOSIXWorkRoot   = "/work/crabbox"
-	defaultMacOSWorkRoot   = "/Users/ec2-user/crabbox"
-	defaultWindowsWorkRoot = `C:\crabbox`
+	defaultPOSIXWorkRoot   = "/work/ciderbox"
+	defaultMacOSWorkRoot   = "/Users/ec2-user/ciderbox"
+	defaultWindowsWorkRoot = `C:\ciderbox`
 )
 
 const (

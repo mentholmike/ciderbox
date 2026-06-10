@@ -59,7 +59,7 @@ func applyDefaults(cfg *core.Config) {
 		if !isDefaultWorkRoot(cfg.WorkRoot) {
 			cfg.AppleContainer.WorkRoot = cfg.WorkRoot
 		} else {
-			cfg.AppleContainer.WorkRoot = "/work/crabbox"
+			cfg.AppleContainer.WorkRoot = "/work/ciderbox"
 		}
 	}
 	cfg.SSHUser = cfg.AppleContainer.User
@@ -70,7 +70,7 @@ func applyDefaults(cfg *core.Config) {
 
 func isDefaultWorkRoot(value string) bool {
 	value = strings.TrimSpace(value)
-	return value == "" || value == "/work/crabbox"
+	return value == "" || value == "/work/ciderbox"
 }
 
 func (b *backend) Spec() core.ProviderSpec { return b.spec }
@@ -971,7 +971,7 @@ if ! command -v /usr/sbin/sshd >/dev/null 2>&1; then
   exit 127
 fi
 user="${CRABBOX_SSH_USER:-crabbox}"
-work_root="${CRABBOX_WORK_ROOT:-/work/crabbox}"
+work_root="${CRABBOX_WORK_ROOT:-/work/ciderbox}"
 ssh_port="${CRABBOX_SSH_PORT:-22}"
 if ! id "$user" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$user"

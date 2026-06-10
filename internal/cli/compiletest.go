@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,45 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// bufferedWriter captures output for a single distro and flushes on completion.
+type bufferedWriter struct {
+	name   string
+	prefix string
+	buf    *strings.Builder
+	mu     sync.Mutex
+}
+
+func newBufferedWriter(name string) *bufferedWriter {
+	return &bufferedWriter{
+		name:   name,
+		prefix: fmt.Sprintf("[%s] ", name),
+		buf:    &strings.Builder{},
+	}
+}
+
+func (w *bufferedWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Prefix each line with the distro name for clean interleaved output
+	lines := strings.Split(string(p), "\n")
+	for i, line := range lines {
+		if i > 0 {
+			w.buf.WriteByte('\n')
+		}
+		if line != "" {
+			w.buf.WriteString(w.prefix)
+			w.buf.WriteString(line)
+		}
+	}
+	return len(p), nil
+}
+
+func (w *bufferedWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
 
 // CiderboxConfig is the full repo-level config for ciderbox projects.
 // Lives at .ciderbox.yaml in the project root.
@@ -100,37 +140,43 @@ func (a App) compileTest(ctx context.Context, args []string) error {
 
 	// Run tests
 	results := make([]CompileTestResult, len(cfg.CompileTest.Distros))
-
+	// Per-distro output buffers for clean parallel output
+	buffers := make([]*bufferedWriter, len(cfg.CompileTest.Distros))
+	for i := range cfg.CompileTest.Distros {
+		buffers[i] = newBufferedWriter(cfg.CompileTest.Distros[i].Name)
+	}
 	if *parallel {
 		var wg sync.WaitGroup
 		for i, distro := range cfg.CompileTest.Distros {
 			wg.Add(1)
 			go func(idx int, d DistroConfig) {
 				defer wg.Done()
-				results[idx] = a.runCompileTest(ctx, *provider, d, command)
+				results[idx] = a.runCompileTest(ctx, *provider, d, command, buffers[idx])
 			}(i, distro)
 		}
 		wg.Wait()
+		// Flush all buffered output after completion
+		for _, buf := range buffers {
+			if s := buf.String(); s != "" {
+				fmt.Fprintln(a.Stderr, s)
+			}
+		}
 	} else {
 		for i, distro := range cfg.CompileTest.Distros {
-			results[i] = a.runCompileTest(ctx, *provider, distro, command)
+			results[i] = a.runCompileTest(ctx, *provider, distro, command, nil)
 		}
 	}
-
 	// Display results
 	a.displayCompileTestResults(results)
-
 	return nil
 }
 
-func (a App) runCompileTest(ctx context.Context, provider string, distro DistroConfig, command string) CompileTestResult {
+func (a App) runCompileTest(ctx context.Context, provider string, distro DistroConfig, command string, buf *bufferedWriter) CompileTestResult {
 	result := CompileTestResult{
 		Distro: distro.Name,
 		Image:  distro.Image,
 	}
-
 	start := time.Now()
-
 	// Build ciderbox run args (don't include "run" — runCommand handles that)
 	args := []string{
 		"--provider", provider,
@@ -139,14 +185,17 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 		"--",
 		"/bin/sh", "-lc", command,
 	}
-
-	fmt.Fprintf(a.Stderr, "[%s] starting...\n", distro.Name)
-
+	// Use buffered writer for parallel mode, direct stderr for sequential
+	var outWriter io.Writer
+	if buf != nil {
+		outWriter = buf
+	} else {
+		outWriter = a.Stderr
+	}
+	fmt.Fprintf(outWriter, "[%s] starting...\n", distro.Name)
 	// Run the command
 	err := a.runCommand(ctx, args)
-
 	result.Duration = time.Since(start)
-
 	if err != nil {
 		var exitErr ExitError
 		if AsExitError(err, &exitErr) {
@@ -154,17 +203,16 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 		}
 		result.Success = false
 		result.Error = err.Error()
-		fmt.Fprintf(a.Stderr, "[%s] FAILED (%s)\n", distro.Name, result.Duration)
+		fmt.Fprintf(outWriter, "[%s] FAILED (%s)\n", distro.Name, result.Duration)
 	} else {
 		result.Success = true
 		result.ExitCode = 0
-		fmt.Fprintf(a.Stderr, "[%s] PASSED (%s)\n", distro.Name, result.Duration)
+		fmt.Fprintf(outWriter, "[%s] PASSED (%s)\n", distro.Name, result.Duration)
 		// Release the lease on success — don't accumulate VMs
 		if releaseErr := a.releaseLeaseForCompileTest(ctx, provider, distro.Name); releaseErr != nil {
-			fmt.Fprintf(a.Stderr, "[%s] WARN: failed to release lease: %v\n", distro.Name, releaseErr)
+			fmt.Fprintf(outWriter, "[%s] WARN: failed to release lease: %v\n", distro.Name, releaseErr)
 		}
 	}
-
 	return result
 }
 

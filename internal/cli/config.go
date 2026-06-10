@@ -1259,7 +1259,7 @@ func baseConfig() Config {
 			CLIPath:  "container",
 			Image:    containerImage,
 			User:     "crabbox",
-			WorkRoot: "/work/crabbox",
+			WorkRoot: "/work/ciderbox",
 		},
 		Multipass: MultipassConfig{
 			CLIPath:       "multipass",

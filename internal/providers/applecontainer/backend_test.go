@@ -64,7 +64,7 @@ func testBackend(runner *recordingRunner) *backend {
 		CLIPath:  "container",
 		Image:    "debian:bookworm",
 		User:     "runner",
-		WorkRoot: "/work/crabbox",
+		WorkRoot: "/work/ciderbox",
 		CPUs:     4,
 		Memory:   "8g",
 	}
@@ -78,7 +78,7 @@ func sampleInspectJSON(id, slug, lease string) string {
 			"id":"` + id + `",
 			"image":{"reference":"debian:bookworm"},
 			"hostname":"` + id + `",
-			"labels":{"crabbox":"true","provider":"apple-container","lease":"` + lease + `","slug":"` + slug + `","state":"ready","ssh_user":"runner","work_root":"/work/crabbox","image":"debian:bookworm"}
+			"labels":{"crabbox":"true","provider":"apple-container","lease":"` + lease + `","slug":"` + slug + `","state":"ready","ssh_user":"runner","work_root":"/work/ciderbox","image":"debian:bookworm"}
 		},
 		"networks":[{"address":"192.168.64.7/24","gateway":"192.168.64.1","hostname":"` + id + `.test.","network":"default"}]
 	}]`
@@ -129,10 +129,10 @@ func TestApplyDefaults(t *testing.T) {
 	cfg.Provider = providerName
 	cfg.AppleContainer = core.AppleContainerConfig{}
 	applyDefaults(&cfg)
-	if cfg.AppleContainer.CLIPath != "container" || cfg.AppleContainer.Image != "debian:bookworm" || cfg.AppleContainer.User != "crabbox" || cfg.AppleContainer.WorkRoot != "/work/crabbox" {
+	if cfg.AppleContainer.CLIPath != "container" || cfg.AppleContainer.Image != "debian:bookworm" || cfg.AppleContainer.User != "crabbox" || cfg.AppleContainer.WorkRoot != "/work/ciderbox" {
 		t.Fatalf("defaults not applied: %#v", cfg.AppleContainer)
 	}
-	if cfg.SSHUser != "crabbox" || cfg.SSHPort != sshPort || cfg.WorkRoot != "/work/crabbox" {
+	if cfg.SSHUser != "crabbox" || cfg.SSHPort != sshPort || cfg.WorkRoot != "/work/ciderbox" {
 		t.Fatalf("derived ssh fields wrong: user=%s port=%s work=%s", cfg.SSHUser, cfg.SSHPort, cfg.WorkRoot)
 	}
 }
@@ -174,7 +174,7 @@ func TestCreateContainerBuildsRunArgs(t *testing.T) {
 		"--user\nroot",
 		"-e\nCRABBOX_AUTHORIZED_KEY=ssh-ed25519 AAAA test",
 		"-e\nCRABBOX_SSH_USER=runner",
-		"-e\nCRABBOX_WORK_ROOT=/work/crabbox",
+		"-e\nCRABBOX_WORK_ROOT=/work/ciderbox",
 		"-e\nCRABBOX_SSH_PORT=22",
 		"--label\nprovider=apple-container",
 		"--label\nlease=cbx_123",
@@ -359,7 +359,7 @@ func TestResolveAndSSHTarget(t *testing.T) {
 	if lease.SSH.Host != "192.168.64.7" || lease.SSH.Port != "22" || lease.SSH.User != "runner" || lease.SSH.TargetOS != core.TargetLinux {
 		t.Fatalf("unexpected ssh target: %#v", lease.SSH)
 	}
-	if !strings.Contains(lease.SSH.ReadyCheck, "rsync --version") || !strings.Contains(lease.SSH.ReadyCheck, "test -d '/work/crabbox'") {
+	if !strings.Contains(lease.SSH.ReadyCheck, "rsync --version") || !strings.Contains(lease.SSH.ReadyCheck, "test -d '/work/ciderbox'") {
 		t.Fatalf("ready check missing expectations: %q", lease.SSH.ReadyCheck)
 	}
 }
@@ -394,7 +394,7 @@ func TestPrepareLeaseRequiresNetworkAddress(t *testing.T) {
 	cfg := b.configForRun()
 	c := inspectContainer{
 		Status:        inspectStatus{State: "running"},
-		Configuration: inspectConfiguration{ID: "crabbox-noip", Labels: map[string]string{"crabbox": "true", "provider": providerName, "ssh_user": "runner", "work_root": "/work/crabbox"}},
+		Configuration: inspectConfiguration{ID: "crabbox-noip", Labels: map[string]string{"crabbox": "true", "provider": providerName, "ssh_user": "runner", "work_root": "/work/ciderbox"}},
 	}
 	if _, err := b.prepareLease(context.Background(), cfg, c, "cbx_x", "x", false); err == nil {
 		t.Fatal("prepareLease accepted a container without a network address")
