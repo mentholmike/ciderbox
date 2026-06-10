@@ -63,9 +63,10 @@ type CiderboxConfig struct {
 
 // CompileTestConfig defines the compile-test matrix for a ciderbox repo.
 type CompileTestConfig struct {
-	Distros  []DistroConfig `yaml:"distros"`
-	Command  string         `yaml:"command"`
-	Parallel bool           `yaml:"parallel"`
+	Distros      []DistroConfig `yaml:"distros"`
+	Command      string         `yaml:"command"`
+	Parallel     bool           `yaml:"parallel"`
+	Dependencies []string       `yaml:"dependencies,omitempty"`
 }
 
 // BuildConfig defines how to build the project in a container.
@@ -151,7 +152,7 @@ func (a App) compileTest(ctx context.Context, args []string) error {
 			wg.Add(1)
 			go func(idx int, d DistroConfig) {
 				defer wg.Done()
-				results[idx] = a.runCompileTest(ctx, *provider, d, command, buffers[idx])
+				results[idx] = a.runCompileTest(ctx, *provider, d, command, cfg.CompileTest.Dependencies, buffers[idx])
 			}(i, distro)
 		}
 		wg.Wait()
@@ -163,7 +164,7 @@ func (a App) compileTest(ctx context.Context, args []string) error {
 		}
 	} else {
 		for i, distro := range cfg.CompileTest.Distros {
-			results[i] = a.runCompileTest(ctx, *provider, distro, command, nil)
+			results[i] = a.runCompileTest(ctx, *provider, distro, command, cfg.CompileTest.Dependencies, nil)
 		}
 	}
 	// Display results
@@ -171,19 +172,28 @@ func (a App) compileTest(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (a App) runCompileTest(ctx context.Context, provider string, distro DistroConfig, command string, buf *bufferedWriter) CompileTestResult {
+func (a App) runCompileTest(ctx context.Context, provider string, distro DistroConfig, command string, dependencies []string, buf *bufferedWriter) CompileTestResult {
 	result := CompileTestResult{
 		Distro: distro.Name,
 		Image:  distro.Image,
 	}
 	start := time.Now()
 	// Build ciderbox run args (don't include "run" — runCommand handles that)
+	cmdStr := command
+	
+	// If dependencies are configured for this distro, prepend apt-get install
+	// This allows users to specify packages needed at runtime
+	if len(dependencies) > 0 {
+		deps := strings.Join(dependencies, " ")
+		cmdStr = fmt.Sprintf("apt-get update && apt-get install -y --no-install-recommends %s && %s", deps, command)
+	}
+
 	args := []string{
 		"--provider", provider,
 		"--apple-container-image", distro.Image,
 		"--label", ciderboxProtectedLabel + "=true",
 		"--",
-		"/bin/sh", "-lc", command,
+		"/bin/sh", "-lc", cmdStr,
 	}
 	// Use buffered writer for parallel mode, direct stderr for sequential
 	var outWriter io.Writer
@@ -356,8 +366,9 @@ func (a App) ciderboxInit(ctx context.Context, args []string) error {
 				{Name: "ubuntu", Image: "ubuntu:26.04"},
 				{Name: "debian", Image: "debian:bookworm"},
 			},
-			Command:  "make test",
-			Parallel: true,
+			Command:      "make test",
+			Parallel:     true,
+			Dependencies: []string{"build-essential", "git"},
 		},
 		Build: BuildConfig{
 			Image:        "ubuntu:26.04",
@@ -432,9 +443,19 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 	fmt.Fprintf(a.Stdout, "=== Ciderbox Build ===\n")
 	fmt.Fprintf(a.Stdout, "Project: %s\n", cfg.Project)
 	fmt.Fprintf(a.Stdout, "Image:   %s\n", img)
-	fmt.Fprintf(a.Stdout, "Command: %s\n\n", cfg.Build.Command)
+	fmt.Fprintf(a.Stdout, "Command: %s\n", cfg.Build.Command)
+	if len(cfg.Build.Dependencies) > 0 {
+		fmt.Fprintf(a.Stdout, "Deps:    %s\n", strings.Join(cfg.Build.Dependencies, ", "))
+	}
+	fmt.Fprintln(a.Stdout)
 
 	// Build run args
+	cmdStr := cfg.Build.Command
+	if len(cfg.Build.Dependencies) > 0 {
+		deps := strings.Join(cfg.Build.Dependencies, " ")
+		cmdStr = fmt.Sprintf("apt-get update && apt-get install -y --no-install-recommends %s && %s", deps, cfg.Build.Command)
+	}
+
 	var runArgs []string
 	runArgs = append(runArgs, "--provider", p)
 	runArgs = append(runArgs, "--apple-container-image", img)
@@ -445,7 +466,7 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 		runArgs = append(runArgs, "--keep")
 	}
 	runArgs = append(runArgs, "--")
-	runArgs = append(runArgs, "/bin/sh", "-lc", cfg.Build.Command)
+	runArgs = append(runArgs, "/bin/sh", "-lc", cmdStr)
 
 	return a.runCommand(ctx, runArgs)
 }
