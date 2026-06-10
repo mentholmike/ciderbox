@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,16 +38,17 @@ type AgentConfig struct {
 	Skills         []string `yaml:"skills"`
 	MemoryProvider string   `yaml:"memory_provider,omitempty"`
 	Model          string   `yaml:"model"`
+	Command        string   `yaml:"command,omitempty"`
 }
 
 // TreeState tracks a running tree in the orchard.
 type TreeState struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
-	Status      string    `json:"status"` // planting | growing | ready | wilted
+	Status      string    `json:"status"`
 	IP          string    `json:"ip"`
 	LeaseID     string    `json:"lease_id"`
-	ContainerID string    `json:"container_id"` // Apple Container ID for exec
+	ContainerID string    `json:"container_id"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -61,12 +64,18 @@ const orchardDefaultFile = ".orchard.yaml"
 // orchardResultPath is where trees write their work output for harvest.
 const orchardResultPath = "/tmp/orchard-result.json"
 
+// ContainerRuntimeBackend is implemented by providers that can expose a native
+// container lifecycle runtime. This keeps cli from importing applecontainer
+// directly, which would create an import cycle.
+type ContainerRuntimeBackend interface {
+	ContainerRuntime() (ContainerRuntime, error)
+}
+
 // orchardCommand is the entry point for orchard swarm management.
 func (a App) orchardCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return a.orchardHelp()
 	}
-
 	if args[0] == "--help" || args[0] == "help" {
 		return a.orchardHelp()
 	}
@@ -84,6 +93,12 @@ func (a App) orchardCommand(ctx context.Context, args []string) error {
 		return a.orchardPress(ctx, args[1:])
 	case "graft":
 		return a.orchardGraft(ctx, args[1:])
+	case "run":
+		return a.orchardRun(ctx, args[1:])
+	case "doctor":
+		return a.orchardDoctor(ctx, args[1:])
+	case "logs":
+		return a.orchardLogs(ctx, args[1:])
 	case "chop":
 		return a.orchardChop(ctx, args[1:])
 	case "list", "ls":
@@ -97,20 +112,28 @@ func (a App) orchardHelp() error {
 	fmt.Fprintln(a.Stdout, `Orchard — AI agent swarm management
 
 Subcommands:
-  init      Scaffold .orchard.yaml
-  plant     Spin up N trees from manifest
-  tend      Show swarm status / health (live container state)
-  graft     Install the OpenClaw agent runtime on a tree
-  harvest   Collect `+orchardResultPath+` from every tree
-  press     Aggregate harvested outputs into one report
-  chop      Tear down the entire orchard
-  list      Show active trees (live container state)
+  init       Scaffold .orchard.yaml
+  plant      Spin up N trees from manifest
+  tend       Show swarm status / health from live container state
+  graft      Install the OpenClaw agent runtime on a tree
+  run        Execute a task across one tree or the whole orchard
+  harvest    Collect `+orchardResultPath+` from every tree
+  press      Aggregate harvested outputs into one report
+  doctor     Check host/runtime/tree readiness
+  logs       Show logs for a tree
+  chop       Tear down the entire orchard
+  list       Show active trees across all orchards
 
 Examples:
   ciderbox orchard init
   ciderbox orchard plant --config .orchard.yaml
-  ciderbox orchard tend
-  ciderbox orchard harvest --output results.json`)
+  ciderbox orchard graft --tree tree-0
+  ciderbox orchard run --task "review this repo and write JSON findings"
+  ciderbox orchard harvest --output results.json
+  ciderbox orchard press --input results.json
+  ciderbox orchard doctor
+  ciderbox orchard logs --tree tree-0 --tail 200
+  ciderbox orchard chop --yes`)
 	return nil
 }
 
@@ -139,12 +162,8 @@ func (a App) orchardInit(ctx context.Context, args []string) error {
 		Agent: AgentConfig{
 			Identity: "tree-agent",
 			Skills:   []string{"github", "web-search"},
-			// Set model to a real provider string, e.g.
-			// "openrouter/anthropic/claude-sonnet-4.6"
-			// "openai/gpt-4.1-mini"
-			Model: "CHANGE_ME",
-			// MemoryProvider is intentionally unset; configure separately
-			// if trees have access to a Lethe or other memory endpoint.
+			Model:    "CHANGE_ME",
+			Command:  `openclaw run "$ORCHARD_TASK"`,
 		},
 	}
 
@@ -154,73 +173,95 @@ func (a App) orchardInit(ctx context.Context, args []string) error {
 	}
 
 	header := `# Orchard — AI agent swarm manifest
-# Each tree is an isolated Apple Container VM. Run "orchard graft" after
-# "orchard plant" to install the OpenClaw runtime on each tree.
+# Each tree is an isolated Apple Container VM.
+# Run "ciderbox orchard graft" after "ciderbox orchard plant" to install
+# the OpenClaw runtime on each tree.
 #
-# agent.model is a placeholder — set it to a real model string for your
-# provider before grafting.
+# agent.model is a placeholder. Set it to a real provider/model string
+# before grafting/running.
+#
+# agent.command is executed inside each tree by "orchard run".
+# The task is available as $ORCHARD_TASK. Command stdout is written to
+# /tmp/orchard-result.json and later collected by "orchard harvest".
 #
 # Quick start:
 #   ciderbox orchard plant
 #   ciderbox orchard graft --tree tree-0
-#   ciderbox orchard tend
-
+#   ciderbox orchard run --task "inspect this tree"
+#   ciderbox orchard harvest --output results.json
 `
-
 	if err := os.WriteFile(path, []byte(header+string(data)), 0644); err != nil {
 		return exit(2, "write %s: %v", path, err)
 	}
 
 	fmt.Fprintf(a.Stdout, "Created %s\n\n", path)
 	fmt.Fprintln(a.Stdout, "Next steps:")
-	fmt.Fprintln(a.Stdout, "  1. Edit the manifest with your tree specs (set agent.model!)")
+	fmt.Fprintln(a.Stdout, "  1. Edit the manifest with your tree specs and agent model")
 	fmt.Fprintln(a.Stdout, "  2. Run `ciderbox orchard plant` to spin up the swarm")
-	fmt.Fprintln(a.Stdout, "  3. Run `ciderbox orchard tend` to check tree health")
+	fmt.Fprintln(a.Stdout, "  3. Run `ciderbox orchard graft --tree tree-0` to install OpenClaw")
+	fmt.Fprintln(a.Stdout, "  4. Run `ciderbox orchard run --task \"...\"` to execute work")
 	return nil
 }
 
-// orchardBackend configures the apple-container provider and returns its
-// SSH lease backend plus the resolved config (for the container CLI path).
-func (a App) orchardBackend() (SSHLeaseBackend, Config, error) {
-	cfg, rt, err := a.providerConfigRuntime("apple-container")
+// orchardRuntime returns the native container runtime from the apple-container
+// provider. It intentionally avoids SSHLeaseBackend.
+func (a App) orchardRuntime() (ContainerRuntime, Config, error) {
+	cfg, hostRuntime, err := a.providerConfigRuntime("apple-container")
 	if err != nil {
 		return nil, Config{}, err
 	}
+
 	provider, err := ProviderFor("apple-container")
 	if err != nil {
 		return nil, Config{}, err
 	}
-	backend, err := provider.Configure(cfg, rt)
+
+	backend, err := provider.Configure(cfg, hostRuntime)
 	if err != nil {
 		return nil, Config{}, err
 	}
-	sshBackend, ok := backend.(SSHLeaseBackend)
+
+	runtimeBackend, ok := backend.(ContainerRuntimeBackend)
 	if !ok {
-		return nil, Config{}, fmt.Errorf("apple-container provider does not support SSH leases")
+		return nil, Config{}, fmt.Errorf("apple-container provider does not expose native ContainerRuntime")
 	}
-	return sshBackend, cfg, nil
+
+	containerRuntime, err := runtimeBackend.ContainerRuntime()
+	if err != nil {
+		return nil, Config{}, err
+	}
+
+	return containerRuntime, cfg, nil
 }
 
-// orchardTrees lists live containers belonging to the named orchard.
-func (a App) orchardTrees(ctx context.Context, orchardName string) ([]LeaseView, Config, error) {
-	sshBackend, cfg, err := a.orchardBackend()
+// orchardContainers lists live containers for one orchard. Empty orchardName
+// means all orchard containers.
+func (a App) orchardContainers(ctx context.Context, orchardName string) ([]ContainerInfo, Config, ContainerRuntime, error) {
+	containerRuntime, cfg, err := a.orchardRuntime()
 	if err != nil {
-		return nil, Config{}, err
+		return nil, Config{}, nil, err
 	}
-	leases, err := sshBackend.List(ctx, ListRequest{})
+
+	filters := map[string]string{"orchard": "true"}
+	if orchardName != "" {
+		filters["orchard.name"] = orchardName
+	}
+
+	containers, err := containerRuntime.List(ctx, filters)
 	if err != nil {
-		return nil, Config{}, err
+		return nil, Config{}, nil, err
 	}
-	var trees []LeaseView
-	for _, lease := range leases {
-		if lease.Labels["orchard.name"] == orchardName {
-			trees = append(trees, lease)
+
+	sort.Slice(containers, func(i, j int) bool {
+		leftOrchard := containers[i].Labels["orchard.name"]
+		rightOrchard := containers[j].Labels["orchard.name"]
+		if leftOrchard != rightOrchard {
+			return leftOrchard < rightOrchard
 		}
-	}
-	sort.Slice(trees, func(i, j int) bool {
-		return trees[i].Labels["tree.id"] < trees[j].Labels["tree.id"]
+		return containers[i].Labels["tree.id"] < containers[j].Labels["tree.id"]
 	})
-	return trees, cfg, nil
+
+	return containers, cfg, containerRuntime, nil
 }
 
 // orchardStatePath returns the persisted state file for an orchard.
@@ -273,8 +314,13 @@ func (a App) orchardPlant(ctx context.Context, args []string) error {
 
 	fmt.Fprintf(a.Stdout, "=== Orchard Plant ===\n")
 	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
-	fmt.Fprintf(a.Stdout, "Trees:   %d\n", config.Trees)
-	fmt.Fprintf(a.Stdout, "Image:   %s (%d CPUs, %s RAM)\n\n", config.Template.Image, config.Template.CPUs, config.Template.Memory)
+	fmt.Fprintf(a.Stdout, "Trees: %d\n", config.Trees)
+	fmt.Fprintf(a.Stdout, "Image: %s (%d CPUs, %s RAM)\n\n", config.Template.Image, config.Template.CPUs, config.Template.Memory)
+
+	containerRuntime, cfg, err := a.orchardRuntime()
+	if err != nil {
+		return exit(2, "orchard runtime: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	trees := make([]TreeState, config.Trees)
@@ -283,13 +329,11 @@ func (a App) orchardPlant(ctx context.Context, args []string) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			trees[idx] = a.plantTree(ctx, config, idx)
+			trees[idx] = a.plantTree(ctx, containerRuntime, cfg, config, idx)
 		}(i)
 	}
-
 	wg.Wait()
 
-	// Show results
 	ready := 0
 	failed := 0
 	for _, tree := range trees {
@@ -300,13 +344,15 @@ func (a App) orchardPlant(ctx context.Context, args []string) error {
 		}
 	}
 
-	// Persist state so later commands (and humans) can find the orchard
-	// even though tend/list/harvest derive live state from labels.
-	state := OrchardState{Name: config.Name, PlantedAt: time.Now().UTC(), Trees: trees}
+	state := OrchardState{
+		Name:      config.Name,
+		PlantedAt: time.Now().UTC(),
+		Trees:     trees,
+	}
 	if err := writeOrchardState(state); err != nil {
 		fmt.Fprintf(a.Stderr, "WARN: persist orchard state: %v\n", err)
 	} else if path, perr := orchardStatePath(config.Name); perr == nil {
-		fmt.Fprintf(a.Stdout, "State:   %s\n", path)
+		fmt.Fprintf(a.Stdout, "State: %s\n", path)
 	}
 
 	fmt.Fprintf(a.Stdout, "Planted %d/%d trees.\n", ready, config.Trees)
@@ -318,97 +364,66 @@ func (a App) orchardPlant(ctx context.Context, args []string) error {
 	return nil
 }
 
-// plantTree provisions a single tree via the apple-container provider.
-func (a App) plantTree(ctx context.Context, config *OrchardConfig, idx int) TreeState {
-	treeName := fmt.Sprintf("%s-tree-%d", config.Name, idx)
+// plantTree provisions a single tree via the native Apple ContainerRuntime.
+func (a App) plantTree(ctx context.Context, containerRuntime ContainerRuntime, cfg Config, config *OrchardConfig, idx int) TreeState {
+	treeID := fmt.Sprintf("tree-%d", idx)
+	treeName := fmt.Sprintf("%s-%s", config.Name, treeID)
+	now := time.Now().UTC()
+	leaseID := fmt.Sprintf("orchard-%s-%s-%d", config.Name, treeID, now.UnixNano())
+
 	tree := TreeState{
-		ID:        fmt.Sprintf("tree-%d", idx),
+		ID:        treeID,
 		Name:      treeName,
 		Status:    "planting",
-		CreatedAt: time.Now().UTC(),
+		LeaseID:   leaseID,
+		CreatedAt: now,
 	}
 
 	fmt.Fprintf(a.Stderr, "[%s] planting...\n", treeName)
 
-	// Configure provider
-	cfg, rt, err := a.providerConfigRuntime("apple-container")
+	labels := map[string]string{
+		"ciderbox":     "true",
+		"provider":     "apple-container",
+		"lease":        leaseID,
+		"orchard":      "true",
+		"orchard.name": config.Name,
+		"tree.id":      treeID,
+		"tree.name":    treeName,
+		"created_at":   now.Format(time.RFC3339),
+		"image":        config.Template.Image,
+	}
+
+	spec := ContainerSpec{
+		Name:      treeName,
+		Image:     config.Template.Image,
+		CPUs:      config.Template.CPUs,
+		Memory:    config.Template.Memory,
+		User:      cfg.AppleContainer.User,
+		Labels:    labels,
+		ExtraArgs: append([]string(nil), cfg.AppleContainer.ExtraRunArgs...),
+		Command:   []string{"sleep", "infinity"},
+	}
+
+	info, err := containerRuntime.Run(ctx, spec)
 	if err != nil {
-		fmt.Fprintf(a.Stderr, "[%s] config error: %v\n", treeName, err)
+		fmt.Fprintf(a.Stderr, "[%s] run failed: %v\n", treeName, err)
 		tree.Status = "wilted"
 		return tree
 	}
 
-	// Override with template specs
-	cfg.AppleContainer.Image = config.Template.Image
-	if config.Template.CPUs > 0 {
-		cfg.AppleContainer.CPUs = config.Template.CPUs
-	}
-	if config.Template.Memory != "" {
-		cfg.AppleContainer.Memory = config.Template.Memory
-	}
-
-	// Add orchard labels
-	if cfg.AppleContainer.ExtraRunArgs == nil {
-		cfg.AppleContainer.ExtraRunArgs = []string{}
-	}
-	cfg.AppleContainer.ExtraRunArgs = append(cfg.AppleContainer.ExtraRunArgs,
-		"--label", "orchard=true",
-		"--label", fmt.Sprintf("orchard.name=%s", config.Name),
-		"--label", fmt.Sprintf("tree.id=%s", tree.ID),
-		"--label", fmt.Sprintf("tree.name=%s", treeName),
-	)
-
-	// Get provider and acquire lease
-	provider, err := ProviderFor("apple-container")
-	if err != nil {
-		fmt.Fprintf(a.Stderr, "[%s] provider error: %v\n", treeName, err)
-		tree.Status = "wilted"
-		return tree
-	}
-
-	backend, err := provider.Configure(cfg, rt)
-	if err != nil {
-		fmt.Fprintf(a.Stderr, "[%s] backend error: %v\n", treeName, err)
-		tree.Status = "wilted"
-		return tree
-	}
-
-	sshBackend, ok := backend.(SSHLeaseBackend)
-	if !ok {
-		fmt.Fprintf(a.Stderr, "[%s] provider does not support SSH leases\n", treeName)
-		tree.Status = "wilted"
-		return tree
-	}
-
-	// Acquire lease
-	slug := fmt.Sprintf("%s-%d", config.Name, idx)
-	lease, err := sshBackend.Acquire(ctx, AcquireRequest{
-		Options:       LeaseOptions{TargetOS: cfg.TargetOS},
-		Keep:          true,
-		RequestedSlug: slug,
-	})
-	if err != nil {
-		fmt.Fprintf(a.Stderr, "[%s] acquire failed: %v\n", treeName, err)
-		tree.Status = "wilted"
-		return tree
-	}
-
-	tree.LeaseID = lease.LeaseID
-	tree.IP = lease.Server.PublicNet.IPv4.IP
-	// Extract container ID from lease labels
-	tree.ContainerID = lease.Server.Labels["container_id"]
-	if tree.ContainerID == "" {
-		// Fallback: container ID is usually the server name
-		tree.ContainerID = lease.Server.Name
-	}
+	tree.ContainerID = info.ID
+	tree.IP = info.IP
 	tree.Status = "ready"
-	fmt.Fprintf(a.Stderr, "[%s] ready (lease=%s, container=%s, ip=%s)\n", treeName, lease.LeaseID, tree.ContainerID, tree.IP)
+
+	fmt.Fprintf(a.Stderr, "[%s] ready (lease=%s, container=%s, ip=%s)\n", treeName, leaseID, tree.ContainerID, blank(tree.IP, "-"))
 	return tree
 }
 
-// treeAge formats how long ago a tree was created based on its lease label.
-func treeAge(labels map[string]string, now time.Time) string {
-	createdAt, err := time.Parse(time.RFC3339, labels["created_at"])
+func containerAge(info ContainerInfo, now time.Time) string {
+	if !info.StartedAt.IsZero() {
+		return now.Sub(info.StartedAt).Truncate(time.Second).String()
+	}
+	createdAt, err := time.Parse(time.RFC3339, info.Labels["created_at"])
 	if err != nil || createdAt.IsZero() {
 		return "-"
 	}
@@ -428,7 +443,7 @@ func (a App) orchardTend(ctx context.Context, args []string) error {
 		return exit(2, "orchard config: %v", err)
 	}
 
-	trees, _, err := a.orchardTrees(ctx, config.Name)
+	trees, _, _, err := a.orchardContainers(ctx, config.Name)
 	if err != nil {
 		return exit(2, "orchard tend: %v", err)
 	}
@@ -445,70 +460,36 @@ func (a App) orchardTend(ctx context.Context, args []string) error {
 	now := time.Now().UTC()
 	fmt.Fprintf(a.Stdout, "%-12s %-10s %-16s %s\n", "TREE", "STATUS", "IP", "AGE")
 	fmt.Fprintln(a.Stdout, strings.Repeat("-", 52))
+
 	for _, tree := range trees {
-		id := blank(tree.Labels["tree.id"], tree.Name)
-		fmt.Fprintf(a.Stdout, "%-12s %-10s %-16s %s\n", id, blank(tree.Status, "unknown"), blank(tree.PublicNet.IPv4.IP, "-"), treeAge(tree.Labels, now))
+		treeID := blank(tree.Labels["tree.id"], tree.Name)
+		fmt.Fprintf(a.Stdout, "%-12s %-10s %-16s %s\n", treeID, blank(tree.Status, "unknown"), blank(tree.IP, "-"), containerAge(tree, now))
 	}
+
 	if len(trees) < config.Trees {
 		fmt.Fprintf(a.Stdout, "\nWARNING: %d tree(s) missing.\n", config.Trees-len(trees))
 	}
+
 	return nil
 }
 
-// treeExec runs a command inside a tree using the configured container CLI
-// through the runtime command runner (honors --apple-container-cli).
-func (a App) treeExec(ctx context.Context, cfg Config, containerID string, command []string) error {
-	rt := runtimeForApp(a)
-	cli := blank(cfg.AppleContainer.CLIPath, "container")
-	result, err := rt.Exec.Run(ctx, LocalCommandRequest{
-		Name:   cli,
-		Args:   append([]string{"exec", containerID}, command...),
-		Stdout: a.Stdout,
-		Stderr: a.Stderr,
-	})
-	if err != nil {
-		return fmt.Errorf("container exec: %w (stderr: %s)", err, strings.TrimSpace(result.Stderr))
-	}
-	return nil
+func (a App) treeExec(ctx context.Context, containerRuntime ContainerRuntime, containerID string, command []string) error {
+	return containerRuntime.Exec(ctx, containerID, command, a.Stdout, a.Stderr)
 }
 
-// treeExecCapture runs a command inside a tree and returns its stdout.
-func (a App) treeExecCapture(ctx context.Context, cfg Config, containerID string, command []string) (string, error) {
-	rt := runtimeForApp(a)
-	cli := blank(cfg.AppleContainer.CLIPath, "container")
-	var out strings.Builder
-	result, err := rt.Exec.Run(ctx, LocalCommandRequest{
-		Name:   cli,
-		Args:   append([]string{"exec", containerID}, command...),
-		Stdout: &out,
-		Stderr: nil,
-	})
-	if err != nil {
-		return "", fmt.Errorf("container exec: %w (stderr: %s)", err, strings.TrimSpace(result.Stderr))
+func (a App) treeExecCapture(ctx context.Context, containerRuntime ContainerRuntime, containerID string, command []string) (string, error) {
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := containerRuntime.Exec(ctx, containerID, command, &out, &stderr); err != nil {
+		return "", fmt.Errorf("container exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
 	return out.String(), nil
-}
-
-// treeCopy copies files between host and tree via the container CLI.
-func (a App) treeCopy(ctx context.Context, cfg Config, src, dst string) error {
-	rt := runtimeForApp(a)
-	cli := blank(cfg.AppleContainer.CLIPath, "container")
-	result, err := rt.Exec.Run(ctx, LocalCommandRequest{
-		Name:   cli,
-		Args:   []string{"cp", src, dst},
-		Stdout: a.Stdout,
-		Stderr: a.Stderr,
-	})
-	if err != nil {
-		return fmt.Errorf("container cp: %w (stderr: %s)", err, strings.TrimSpace(result.Stderr))
-	}
-	return nil
 }
 
 // HarvestResult is one tree's collected output.
 type HarvestResult struct {
 	Tree   string          `json:"tree"`
-	Status string          `json:"status"` // ok | missing | error
+	Status string          `json:"status"`
 	Error  string          `json:"error,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
 }
@@ -527,7 +508,7 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 		return exit(2, "orchard config: %v", err)
 	}
 
-	trees, cfg, err := a.orchardTrees(ctx, config.Name)
+	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
 	if err != nil {
 		return exit(2, "orchard harvest: %v", err)
 	}
@@ -544,8 +525,9 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 	results := make([]HarvestResult, 0, len(trees))
 	for _, tree := range trees {
 		name := blank(tree.Labels["tree.id"], tree.Name)
-		containerID := blank(tree.Labels["container_id"], tree.Name)
-		out, execErr := a.treeExecCapture(ctx, cfg, containerID, []string{"cat", orchardResultPath})
+		containerID := tree.ID
+		out, execErr := a.treeExecCapture(ctx, containerRuntime, containerID, []string{"cat", orchardResultPath})
+
 		hr := HarvestResult{Tree: name}
 		switch {
 		case execErr != nil:
@@ -557,7 +539,6 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 			hr.Result = json.RawMessage(out)
 			fmt.Fprintf(a.Stdout, "[%s] harvested %d bytes\n", name, len(out))
 		default:
-			// Not JSON — still capture it as a quoted string.
 			quoted, _ := json.Marshal(out)
 			hr.Status = "ok"
 			hr.Result = quoted
@@ -587,15 +568,15 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-
 	if *inputFile == "" {
-		return exit(2, "press requires --input <harvest.json>; run `orchard harvest --output harvest.json` first")
+		return exit(2, "press requires --input ; run `orchard harvest --output harvest.json` first")
 	}
 
 	data, err := os.ReadFile(*inputFile)
 	if err != nil {
 		return exit(2, "read %s: %v", *inputFile, err)
 	}
+
 	var results []HarvestResult
 	if err := json.Unmarshal(data, &results); err != nil {
 		return exit(2, "parse %s: %v", *inputFile, err)
@@ -613,6 +594,7 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Fprintf(a.Stdout, "Collected: %d | Missing/failed: %d\n\n", ok, missing)
+
 	for _, r := range results {
 		fmt.Fprintf(a.Stdout, "--- %s (%s) ---\n", r.Tree, r.Status)
 		if len(r.Result) > 0 {
@@ -625,8 +607,7 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 	return nil
 }
 
-// orchardGraft installs the OpenClaw agent runtime on a specific tree:
-// Node.js 22, the openclaw npm package, and the tree's identity file.
+// orchardGraft installs the OpenClaw agent runtime on a specific tree.
 func (a App) orchardGraft(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard graft", a.Stderr)
 	treeID := fs.String("tree", "", "tree ID to graft onto")
@@ -634,7 +615,6 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-
 	if *treeID == "" {
 		return exit(2, "--tree required")
 	}
@@ -644,36 +624,20 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 		return exit(2, "orchard graft: config: %v", err)
 	}
 
-	sshBackend, cfg, err := a.orchardBackend()
+	target, containerRuntime, err := a.findOrchardTree(ctx, config.Name, *treeID)
 	if err != nil {
 		return exit(2, "orchard graft: %v", err)
 	}
 
-	leases, err := sshBackend.List(ctx, ListRequest{})
-	if err != nil {
-		return exit(2, "orchard graft: list: %v", err)
-	}
-
-	var targetLease LeaseView
-	for _, lease := range leases {
-		if lease.Labels["tree.id"] == *treeID || strings.Contains(lease.Name, *treeID) {
-			targetLease = lease
-			break
-		}
-	}
-
-	if targetLease.Name == "" {
-		return exit(2, "tree %q not found", *treeID)
-	}
-
-	containerID := blank(targetLease.Labels["container_id"], targetLease.Name)
-
 	fmt.Fprintf(a.Stdout, "=== Orchard Graft ===\n")
-	fmt.Fprintf(a.Stdout, "Tree:      %s\n", *treeID)
-	fmt.Fprintf(a.Stdout, "Container: %s\n", containerID)
+	fmt.Fprintf(a.Stdout, "Tree: %s\n", *treeID)
+	fmt.Fprintf(a.Stdout, "Container: %s\n", target.ID)
 	fmt.Fprintln(a.Stdout, "Installing Node.js 22 + OpenClaw...")
 
 	identity := blank(config.Agent.Identity, *treeID)
+	identityDoc := fmt.Sprintf("# IDENTITY\n\nTree: %s\nIdentity: %s\nModel: %s\n", *treeID, identity, config.Agent.Model)
+	encodedIdentity := base64.StdEncoding.EncodeToString([]byte(identityDoc))
+
 	installScript := strings.Join([]string{
 		"set -e",
 		"export DEBIAN_FRONTEND=noninteractive",
@@ -683,17 +647,222 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 		"if ! command -v node >/dev/null 2>&1 || [ \"$(node -e 'process.stdout.write(String(process.versions.node.split(\".\")[0]))')\" -lt 22 ]; then curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs; fi",
 		"npm install -g openclaw",
 		"mkdir -p /root/.openclaw/workspace",
-		fmt.Sprintf("printf '# IDENTITY\\n\\nTree: %s\\nIdentity: %s\\nModel: %s\\n' > /root/.openclaw/workspace/IDENTITY.md", *treeID, identity, config.Agent.Model),
+		fmt.Sprintf("printf %%s %q | base64 -d > /root/.openclaw/workspace/IDENTITY.md", encodedIdentity),
 		"openclaw --version",
 	}, " && ")
 
-	if err := a.treeExec(ctx, cfg, containerID, []string{"/bin/sh", "-lc", installScript}); err != nil {
+	if err := a.treeExec(ctx, containerRuntime, target.ID, []string{"/bin/sh", "-lc", installScript}); err != nil {
 		return exit(1, "graft failed: %v", err)
 	}
 
 	fmt.Fprintln(a.Stdout, "\nAgent grafted: Node 22 + openclaw installed, identity written.")
-	fmt.Fprintln(a.Stdout, "Note: model/provider credentials are NOT configured — set them up inside the tree before running the agent.")
+	fmt.Fprintln(a.Stdout, "Note: model/provider credentials are NOT configured yet.")
+	return nil
+}
 
+// orchardRun executes one task on one tree or all trees.
+// The task is exposed as ORCHARD_TASK and stdout is captured in orchardResultPath.
+func (a App) orchardRun(ctx context.Context, args []string) error {
+	fs := newFlagSet("orchard run", a.Stderr)
+	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
+	treeID := fs.String("tree", "", "tree ID to run on; defaults to all trees")
+	task := fs.String("task", "", "task prompt/instruction to execute")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *task == "" {
+		return exit(2, "--task required")
+	}
+
+	config, err := readOrchardConfig(*configFile)
+	if err != nil {
+		return exit(2, "orchard config: %v", err)
+	}
+
+	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
+	if err != nil {
+		return exit(2, "orchard run: %v", err)
+	}
+
+	if *treeID != "" {
+		filtered := trees[:0]
+		for _, tree := range trees {
+			if tree.Labels["tree.id"] == *treeID || tree.Name == *treeID || strings.Contains(tree.Name, *treeID) {
+				filtered = append(filtered, tree)
+			}
+		}
+		trees = filtered
+	}
+
+	if len(trees) == 0 {
+		if *treeID != "" {
+			return exit(2, "tree %q not found", *treeID)
+		}
+		return exit(2, "no trees running")
+	}
+
+	command := strings.TrimSpace(config.Agent.Command)
+	if command == "" {
+		command = `openclaw run "$ORCHARD_TASK"`
+	}
+
+	encodedTask := base64.StdEncoding.EncodeToString([]byte(*task))
+	encodedCommand := base64.StdEncoding.EncodeToString([]byte(command))
+
+	fmt.Fprintf(a.Stdout, "=== Orchard Run ===\n")
+	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
+	fmt.Fprintf(a.Stdout, "Trees: %d\n", len(trees))
+	fmt.Fprintf(a.Stdout, "Result path: %s\n\n", orchardResultPath)
+
+	failures := 0
+	for _, tree := range trees {
+		name := blank(tree.Labels["tree.id"], tree.Name)
+		fmt.Fprintf(a.Stdout, "[%s] running task...\n", name)
+
+		script := fmt.Sprintf(`set -e
+export ORCHARD_TASK="$(printf %%s %q | base64 -d)"
+ORCHARD_AGENT_COMMAND="$(printf %%s %q | base64 -d)"
+mkdir -p "$(dirname %q)"
+set +e
+/bin/sh -lc "$ORCHARD_AGENT_COMMAND" > %q 2>&1
+status=$?
+if [ $status -ne 0 ]; then
+  python3 - <<'PY' 2>/dev/null || true
+import json
+p = %q
+try:
+    raw = open(p, "r", encoding="utf-8", errors="replace").read()
+except Exception as exc:
+    raw = str(exc)
+open(p, "w").write(json.dumps({"status":"error","output":raw}))
+PY
+  exit $status
+fi
+`, encodedTask, encodedCommand, orchardResultPath, orchardResultPath, orchardResultPath)
+
+		if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"/bin/sh", "-lc", script}); err != nil {
+			fmt.Fprintf(a.Stderr, "[%s] task failed: %v\n", name, err)
+			failures++
+			continue
+		}
+
+		fmt.Fprintf(a.Stdout, "[%s] complete\n", name)
+	}
+
+	if failures > 0 {
+		return exit(1, "%d tree task(s) failed", failures)
+	}
+
+	return nil
+}
+
+// orchardDoctor checks host/runtime/tree readiness.
+func (a App) orchardDoctor(ctx context.Context, args []string) error {
+	fs := newFlagSet("orchard doctor", a.Stderr)
+	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(a.Stdout, "=== Orchard Doctor ===")
+
+	config, err := readOrchardConfig(*configFile)
+	if err != nil {
+		fmt.Fprintf(a.Stdout, "✗ config: %v\n", err)
+		return exit(2, "orchard config: %v", err)
+	}
+	fmt.Fprintf(a.Stdout, "✓ config: %s\n", *configFile)
+
+	if strings.TrimSpace(config.Agent.Model) == "" || config.Agent.Model == "CHANGE_ME" {
+		fmt.Fprintln(a.Stdout, "! agent.model is not configured")
+	} else {
+		fmt.Fprintf(a.Stdout, "✓ agent.model: %s\n", config.Agent.Model)
+	}
+
+	trees, cfg, containerRuntime, err := a.orchardContainers(ctx, config.Name)
+	if err != nil {
+		fmt.Fprintf(a.Stdout, "✗ runtime: %v\n", err)
+		return exit(2, "orchard runtime: %v", err)
+	}
+	fmt.Fprintf(a.Stdout, "✓ runtime: apple-container (%s)\n", blank(cfg.AppleContainer.CLIPath, "container"))
+
+	if len(trees) == 0 {
+		fmt.Fprintln(a.Stdout, "! trees: none running")
+		return nil
+	}
+
+	failures := 0
+	for _, tree := range trees {
+		name := blank(tree.Labels["tree.id"], tree.Name)
+		fmt.Fprintf(a.Stdout, "\n[%s]\n", name)
+		fmt.Fprintf(a.Stdout, "  container: %s\n", tree.ID)
+		fmt.Fprintf(a.Stdout, "  status: %s\n", blank(tree.Status, "unknown"))
+		fmt.Fprintf(a.Stdout, "  ip: %s\n", blank(tree.IP, "-"))
+
+		checks := []struct {
+			name string
+			cmd  []string
+		}{
+			{"node", []string{"node", "--version"}},
+			{"npm", []string{"npm", "--version"}},
+			{"openclaw", []string{"openclaw", "--version"}},
+			{"identity", []string{"test", "-f", "/root/.openclaw/workspace/IDENTITY.md"}},
+		}
+
+		for _, check := range checks {
+			out, err := a.treeExecCapture(ctx, containerRuntime, tree.ID, check.cmd)
+			if err != nil {
+				fmt.Fprintf(a.Stdout, "  ✗ %s: %v\n", check.name, err)
+				failures++
+				continue
+			}
+			out = strings.TrimSpace(out)
+			if out == "" {
+				out = "ok"
+			}
+			fmt.Fprintf(a.Stdout, "  ✓ %s: %s\n", check.name, out)
+		}
+	}
+
+	if failures > 0 {
+		return exit(1, "orchard doctor found %d failure(s)", failures)
+	}
+
+	return nil
+}
+
+// orchardLogs prints logs for one tree.
+func (a App) orchardLogs(ctx context.Context, args []string) error {
+	fs := newFlagSet("orchard logs", a.Stderr)
+	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
+	treeID := fs.String("tree", "", "tree ID")
+	tailLines := fs.Int("tail", 200, "number of log lines to show")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *treeID == "" {
+		return exit(2, "--tree required")
+	}
+
+	config, err := readOrchardConfig(*configFile)
+	if err != nil {
+		return exit(2, "orchard config: %v", err)
+	}
+
+	target, containerRuntime, err := a.findOrchardTree(ctx, config.Name, *treeID)
+	if err != nil {
+		return exit(2, "orchard logs: %v", err)
+	}
+
+	logs, err := containerRuntime.Logs(ctx, target.ID, *tailLines)
+	if err != nil {
+		return exit(1, "logs failed: %v", err)
+	}
+
+	fmt.Fprint(a.Stdout, logs)
+	if !strings.HasSuffix(logs, "\n") {
+		fmt.Fprintln(a.Stdout)
+	}
 	return nil
 }
 
@@ -724,36 +893,27 @@ func (a App) orchardChop(ctx context.Context, args []string) error {
 		}
 	}
 
-	sshBackend, _, err := a.orchardBackend()
+	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
 	if err != nil {
 		return exit(2, "orchard chop: %v", err)
-	}
-
-	// List all leases and find orchard trees
-	leases, err := sshBackend.List(ctx, ListRequest{})
-	if err != nil {
-		return exit(2, "orchard chop: list: %v", err)
 	}
 
 	fmt.Fprintln(a.Stdout, "\nChopping...")
 	chopped := 0
 	failed := 0
-	for _, lease := range leases {
-		if lease.Labels["orchard.name"] != config.Name {
-			continue
-		}
-		treeName := lease.Labels["tree.name"]
-		if treeName == "" {
-			treeName = lease.Labels["tree.id"]
-		}
-		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: LeaseTarget{Server: lease.Server, LeaseID: lease.Labels["lease"]}}); err != nil {
+
+	for _, tree := range trees {
+		treeName := blank(tree.Labels["tree.name"], blank(tree.Labels["tree.id"], tree.Name))
+		if err := containerRuntime.Remove(ctx, tree.ID, true); err != nil {
 			fmt.Fprintf(a.Stderr, "  ✗ %s: %v\n", treeName, err)
 			failed++
-		} else {
-			fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", treeName)
-			chopped++
+			continue
 		}
+
+		fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", treeName)
+		chopped++
 	}
+
 	fmt.Fprintf(a.Stdout, "Chopped %d/%d trees.", chopped, chopped+failed)
 	if failed > 0 {
 		fmt.Fprintf(a.Stdout, " %d failed.", failed)
@@ -769,52 +929,52 @@ func (a App) orchardChop(ctx context.Context, args []string) error {
 	return nil
 }
 
-// orchardList shows active trees across all orchards, derived from live
-// container labels.
+// orchardList shows active trees across all orchards from live container labels.
 func (a App) orchardList(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard list", a.Stderr)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
-	sshBackend, _, err := a.orchardBackend()
+	trees, _, _, err := a.orchardContainers(ctx, "")
 	if err != nil {
 		return exit(2, "orchard list: %v", err)
 	}
-	leases, err := sshBackend.List(ctx, ListRequest{})
-	if err != nil {
-		return exit(2, "orchard list: %v", err)
-	}
-
-	var trees []LeaseView
-	for _, lease := range leases {
-		if lease.Labels["orchard"] == "true" {
-			trees = append(trees, lease)
-		}
-	}
-	sort.Slice(trees, func(i, j int) bool {
-		if trees[i].Labels["orchard.name"] != trees[j].Labels["orchard.name"] {
-			return trees[i].Labels["orchard.name"] < trees[j].Labels["orchard.name"]
-		}
-		return trees[i].Labels["tree.id"] < trees[j].Labels["tree.id"]
-	})
 
 	fmt.Fprintln(a.Stdout, "=== Active Trees ===")
 	if len(trees) == 0 {
 		fmt.Fprintln(a.Stdout, "(No trees running — plant an orchard first)")
 		return nil
 	}
+
 	fmt.Fprintf(a.Stdout, "%-16s %-12s %-10s %s\n", "ORCHARD", "TREE", "STATUS", "IP")
 	fmt.Fprintln(a.Stdout, strings.Repeat("-", 56))
+
 	for _, tree := range trees {
 		fmt.Fprintf(a.Stdout, "%-16s %-12s %-10s %s\n",
 			blank(tree.Labels["orchard.name"], "-"),
 			blank(tree.Labels["tree.id"], tree.Name),
 			blank(tree.Status, "unknown"),
-			blank(tree.PublicNet.IPv4.IP, "-"))
+			blank(tree.IP, "-"),
+		)
 	}
 
 	return nil
+}
+
+func (a App) findOrchardTree(ctx context.Context, orchardName, treeID string) (ContainerInfo, ContainerRuntime, error) {
+	trees, _, containerRuntime, err := a.orchardContainers(ctx, orchardName)
+	if err != nil {
+		return ContainerInfo{}, nil, err
+	}
+
+	for _, tree := range trees {
+		if tree.Labels["tree.id"] == treeID || tree.Name == treeID || strings.Contains(tree.Name, treeID) {
+			return tree, containerRuntime, nil
+		}
+	}
+
+	return ContainerInfo{}, nil, fmt.Errorf("tree %q not found", treeID)
 }
 
 // readOrchardConfig loads the orchard manifest.
@@ -829,7 +989,6 @@ func readOrchardConfig(path string) (*OrchardConfig, error) {
 		return nil, err
 	}
 
-	// Defaults
 	if config.Trees <= 0 {
 		config.Trees = 1
 	}
@@ -841,6 +1000,9 @@ func readOrchardConfig(path string) (*OrchardConfig, error) {
 	}
 	if config.Template.Memory == "" {
 		config.Template.Memory = "4G"
+	}
+	if config.Agent.Command == "" {
+		config.Agent.Command = `openclaw run "$ORCHARD_TASK"`
 	}
 
 	return &config, nil
@@ -858,6 +1020,7 @@ func findOrchardConfig() (*OrchardConfig, string, error) {
 			cfg, err := readOrchardConfig(path)
 			return cfg, path, err
 		}
+
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
