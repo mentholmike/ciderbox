@@ -1,18 +1,18 @@
 version: 2
 
-project_name: crabbox
+project_name: ciderbox
 
 changelog:
   disable: true
 
 builds:
-  - id: crabbox
-    main: ./cmd/crabbox
-    binary: crabbox
+  - id: ciderbox
+    main: ./cmd/ciderbox
+    binary: ciderbox
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X github.com/openclaw/crabbox/internal/cli.version={{ .Version }}
+      - -s -w -X github.com/mentholmike/ciderbox/internal/cli.version={{ .Version }}
     targets:
       - darwin_amd64
       - darwin_arm64
@@ -22,9 +22,9 @@ builds:
       - windows_arm64
 
 archives:
-  - id: crabbox
+  - id: ciderbox
     ids:
-      - crabbox
+      - ciderbox
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -37,22 +37,22 @@ checksum:
   name_template: checksums.txt
 
 brews:
-  - name: crabbox
+  - name: ciderbox
     ids:
-      - crabbox
+      - ciderbox
     repository:
-      owner: openclaw
-      name: homebrew-tap
+      owner: mentholmike
+      name: homebrew-ciderbox
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     commit_author:
-      name: openclaw-bot
-      email: bot@openclaw.ai
-    commit_msg_template: "brew: update crabbox to {{ .Tag }}"
-    homepage: https://github.com/openclaw/crabbox
-    description: Remote Linux test boxes for dirty worktrees and CI hydration
+      name: mentholmike-bot
+      email: bot@michaelsmacmini.local
+    commit_msg_template: "brew: update ciderbox to {{ .Tag }}"
+    homepage: https://github.com/mentholmike/ciderbox
+    description: Apple-native throwaway dev environments using container CLI
     license: MIT
     install: |
-      bin.install "crabbox"
+      bin.install "ciderbox"
     test: |
-      system bin/"crabbox", "--version"
+      system bin/"ciderbox", "--version"

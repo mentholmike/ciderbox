@@ -1,452 +1,193 @@
-# 🦀 📦 Ciderbox
+# 🍎 Ciderbox
 
-![Ciderbox banner](docs/assets/readme-banner.jpg)
-
-[![CI](https://github.com/openclaw/ciderbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/openclaw/ciderbox/actions/workflows/ci.yml)
-[![Release](https://github.com/openclaw/ciderbox/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/openclaw/ciderbox/actions/workflows/release.yml)
-[![Latest release](https://badgen.net/github/release/openclaw/ciderbox/stable)](https://github.com/openclaw/ciderbox/releases/latest)
-
-**Warm a box, sync the diff, run the suite.**
-
-Ciderbox is a remote software testing and execution control plane for maintainers
-and AI agents. Lease fast managed cloud capacity, point at an existing SSH host,
-or use an agent sandbox provider — then sync your dirty checkout, run commands
-remotely, stream output, collect evidence, and release. Local edit-save-run
-loop, cloud-grade compute, agent-ready observability.
+**Apple-native throwaway dev environments.** A fork of [crabbox](https://github.com/openclaw/crabbox) that replaces Docker with Apple's native `container` CLI for sub-second, hypervisor-isolated Linux VMs on Apple Silicon Macs.
 
 ```sh
-ciderbox run -- pnpm test
+# Test your code across multiple Linux distros
+ciderbox compile-test
+
+# Or run a one-off command in a fresh Ubuntu VM
+ciderbox run -- uname -a
+
+# Clean up everything when done
+ciderbox chop
 ```
 
-Behind that one command: a Go CLI on your laptop, a Cloudflare Worker broker
-that owns provider credentials and lease state, and a managed or delegated
-runner.
+## Requirements
 
-## How it works
-
-```text
-your laptop                Cloudflare Worker            cloud provider
--------------              ------------------           --------------
-ciderbox CLI    -- HTTPS --> Fleet Durable Object  -->   Hetzner / AWS / Azure / GCP
-   |                         lease + cost state              |
-   |                                                         |
-   +------------ SSH + rsync to leased runner <--------------+
-```
-
-- **CLI** — Go binary. Loads config, mints a per-lease SSH key, asks the broker
-  for a lease, waits for SSH, seeds remote Git, rsyncs the dirty checkout (with
-  a fingerprint skip when nothing changed), runs the command, streams output,
-  releases.
-- **Broker** — Cloudflare Worker plus a single Fleet Durable Object. Owns
-  provider credentials, serializes lease state, enforces active-lease and
-  monthly spend caps, and expires stale leases by alarm. Auth is GitHub browser
-  login or a shared bearer token.
-- **Runner** — a throwaway machine reachable over SSH on the primary port
-  (default `2222`) plus configured fallback ports, prepared with Ciderbox's
-  sync/run prerequisites. Linux uses Ubuntu with cloud-init and `/work/ciderbox`;
-  native Windows uses OpenSSH, Git for Windows, and `C:\ciderbox`. No broker
-  credentials live on the box. Project runtimes (Go, Node, Docker, services,
-  secrets) come from your repo's GitHub Actions hydration, devcontainer, Nix,
-  mise/asdf, or setup scripts — not from Ciderbox.
-
-The data plane — SSH, rsync, command execution — always runs directly from the
-CLI to the runner. The broker only manages leases, cost, and observability.
-
-Only `aws`, `azure`, `gcp`, and `hetzner` can be brokered through the Worker,
-and even those run direct from the CLI when no broker URL is configured. Every
-other provider always runs direct. A direct-provider mode
-(`--provider hetzner|aws|azure|gcp|proxmox` with local credentials) exists for
-debugging the broker itself or using private infrastructure.
-
-For the full mental model, see [How Ciderbox Works](docs/how-it-works.md). For
-the doc-to-code map, see [Source Map](docs/source-map.md).
+- Apple Silicon Mac (M1+)
+- macOS 26+ (for container IP reachability)
+- Apple `container` CLI installed
+- Go 1.22+ (for building from source)
 
 ## Install
 
-```sh
-brew install openclaw/tap/ciderbox
-ciderbox --version
-```
-
-No Homebrew? Grab a [GoReleaser archive](https://github.com/openclaw/ciderbox/releases)
-for macOS, Linux, or Windows.
-
-Laptop prerequisites: `git`, `ssh`, `ssh-keygen`, `rsync`, `curl`.
-
-## Quick start
-
-Broker access is deployment-specific. Use a coordinator URL from your team, use
-direct-provider mode for a personal cloud account, or self-host the Worker
-broker with your own provider credentials and spend caps. See
-[Getting started](docs/getting-started.md#choosing-an-access-path) and
-[Infrastructure](docs/infrastructure.md#self-hosted-broker-minimum-setup) for the
-setup paths.
+### Homebrew (coming soon)
 
 ```sh
-# log in once per machine (stores a broker token in user config)
-ciderbox login --url https://broker.example.com
-
-# verify local prerequisites and broker reachability
-ciderbox doctor
-
-# one-shot: lease, sync, run, release
-ciderbox run -- pnpm test
-
-# named repo workflow from .ciderbox.yaml
-ciderbox job run full-ci
-
-# or warm a box once, then reuse it
-ciderbox warmup                                       # prints cbx_... + a slug
-ciderbox prewarm                                      # lease + Actions hydration
-ciderbox run --id blue-lobster -- pnpm test:changed
-ciderbox ssh --id blue-lobster
-ciderbox stop blue-lobster
+brew tap mentholmike/ciderbox
+brew install ciderbox
 ```
 
-Every lease has a stable `cbx_...` ID and a friendly crustacean slug
-(`blue-lobster`, `swift-hermit`, …). Either works wherever an `--id` is
-accepted. Use `--slug <name>` on fresh leases when a specific reusable slug
-helps, and `--label <text>` on `run` when the history entry needs a
-human-readable name.
+### From source
 
-## Providers
+```sh
+git clone https://github.com/mentholmike/ciderbox.git
+cd ciderbox
+go build ./cmd/ciderbox
+mv ciderbox /usr/local/bin/
+```
 
-`Brokered` providers can run through the Worker (or direct when no broker is
-configured); every other provider always runs direct from the CLI.
+## Quick Start
 
-### SSH-lease providers (provision or connect a box, full lifecycle)
+### 1. Initialize a project
 
-| Provider and aliases | Runs on / mode | Notes |
-| --- | --- | --- |
-| [AWS EC2](docs/providers/aws.md) — `aws` | Linux, macOS, Windows · brokered | EC2 instances and EC2 Mac; native AMI/EBS checkpoints. |
-| [Azure](docs/providers/azure.md) — `azure` | Linux, Windows · brokered | VMs with Tailscale support; native Windows and WSL2. |
-| [Google Cloud](docs/providers/gcp.md) — `gcp` (`google`, `google-cloud`) | Linux · brokered | Compute Engine VMs with Tailscale support. |
-| [Hetzner Cloud](docs/providers/hetzner.md) — `hetzner` | Linux · brokered | VMs with desktop/browser/code and Tailscale. |
-| [Parallels](docs/providers/parallels.md) — `parallels` | Linux, macOS, Windows · direct | Local or remote macOS host; checkpoint/fork/restore/snapshot. |
-| [Proxmox](docs/providers/proxmox.md) — `proxmox` | Linux · direct | Clone QEMU templates on a private Proxmox VE cluster. |
-| [Incus](docs/providers/incus.md) — `incus` | Linux · direct | SSH leases through the official Incus Go client. |
-| [Static SSH](docs/providers/ssh.md) — `ssh` (`static`, `static-ssh`) | Linux, macOS, Windows · direct | Existing machines; no provisioning. |
-| [Local Container](docs/providers/local-container.md) — `local-container` (`docker`, `container`, `local-docker`) | Linux · direct | Local Docker-compatible runtime (Docker Desktop, OrbStack, Colima, Podman). |
-| [Apple Container](docs/providers/apple-container.md) — `apple-container` (`apple`, `applecontainer`) | Linux · direct | Apple's native `container` runtime on Apple silicon macOS. |
-| [exe.dev](docs/providers/exe-dev.md) — `exe-dev` (`exe`, `exedev`) | Linux · direct | exe.dev VMs exposed as public SSH leases. |
-| [KubeVirt](docs/providers/kubevirt.md) — `kubevirt` (`kubernetes-vm`) | Linux · direct | Generic KubeVirt VMs through `kubectl`, `virtctl`, and control-plane SSH forwarding. |
-| [External](docs/providers/external.md) — `external` (`exec-provider`) | Linux · direct | Configured executable implementing the Ciderbox provider protocol. |
-| [Namespace Devbox](docs/providers/namespace-devbox.md) — `namespace-devbox` (`namespace`, `namespace-devboxes`) | Linux · direct | Namespace.so Devboxes over SSH. |
-| [Semaphore](docs/providers/semaphore.md) — `semaphore` (`sem`) | Linux · direct | A Semaphore CI job leased as a testbox. |
-| [Sprites](docs/providers/sprites.md) — `sprites` | Linux · direct | Sprites microVMs through `sprite proxy`. |
-| [Tenki](docs/providers/tenki.md) — `tenki` | Linux · direct | Tenki sandbox VMs through `tenki sandbox ssh-proxy`. |
-| [Daytona](docs/providers/daytona.md) — `daytona` | Linux · direct | Daytona-managed dev sandbox over SSH. |
-| [RunPod](docs/providers/runpod.md) — `runpod` (`run-pod`, `runpodio`) | Linux · direct | RunPod GPU pods with public SSH. |
-| [ASCII Box](docs/providers/ascii-box.md) — `ascii-box` (`ascii`, `asciibox`) | Linux · direct | ASCII Box Ubuntu sandboxes exposed as SSH leases. |
+```sh
+cd my-project
+ciderbox init
+```
 
-### Delegated-run providers (sandbox/proof runners, no SSH lease)
+This creates `.ciderbox.yaml` with your project config.
 
-| Provider and aliases | Runs on | Notes |
-| --- | --- | --- |
-| [Cloudflare](docs/providers/cloudflare.md) — `cloudflare` (`cf`) | Linux | Cloudflare Containers via the Worker runtime. |
-| [Docker Sandbox](docs/providers/docker-sandbox.md) — `docker-sandbox` | Linux | Docker Sandboxes through the standalone `sbx` CLI. |
-| [E2B](docs/providers/e2b.md) — `e2b` | Linux | E2B Firecracker sandbox. |
-| [Islo](docs/providers/islo.md) — `islo` | Linux | Islo sandbox. |
-| [Modal](docs/providers/modal.md) — `modal` | Linux | Modal Sandbox through the local Python client. |
-| [Railway](docs/providers/railway.md) — `railway` (`rail`, `railwayapp`) | Linux | Redeploy and stream an existing Railway service. |
-| [Tensorlake](docs/providers/tensorlake.md) — `tensorlake` (`tl`, `tensorlake-sbx`) | Linux | Tensorlake Firecracker sandbox via the Tensorlake CLI. |
-| [Upstash Box](docs/providers/upstash-box.md) — `upstash-box` (`upstash`, `box`, `upstashbox`) | Linux | Upstash Box through the Box REST API. |
-| [Azure Dynamic Sessions](docs/providers/azure-dynamic-sessions.md) — `azure-dynamic-sessions` | Linux | Azure Container Apps dynamic sessions. |
-| [Blacksmith Testbox](docs/providers/blacksmith-testbox.md) — `blacksmith-testbox` (`blacksmith`) | Linux | Delegated Blacksmith CI Testbox lifecycle and execution. |
-| [W&B Sandboxes](docs/providers/wandb.md) — `wandb` (`weights-and-biases`) | Linux | Weights & Biases Sandboxes; reuses `wandb login` credentials. |
+### 2. Configure your test matrix
 
-See [Providers](docs/providers/README.md) for the full reference, capabilities,
-and authoring guide.
+Edit `.ciderbox.yaml`:
 
-## Highlights
+```yaml
+project: my-project
+compileTest:
+  distros:
+    - name: ubuntu
+      image: ubuntu:26.04
+    - name: debian
+      image: debian:bookworm
+  command: "make test"
+  parallel: true
+build:
+  image: ubuntu:26.04
+  command: "make build"
+  dependencies: [build-essential, git]
+run:
+  provider: apple-container
+  image: ubuntu:26.04
+```
 
-- **One-shot or warm workspaces.** `ciderbox run` for fire-and-forget;
-  `ciderbox warmup` + `--id` for raw reusable leases, or `ciderbox prewarm` when
-  the box should be hydrated before the first test command. See
-  [warmup](docs/commands/warmup.md), [prewarm](docs/commands/prewarm.md), and
-  [run](docs/commands/run.md).
-- **Named repo jobs.** `ciderbox job run <name>` lets repos define warmup,
-  optional Actions hydration, run command, and cleanup policy in `.ciderbox.yaml`.
-  See [Jobs](docs/features/jobs.md).
-- **Local-first workspace sync.** No clean-checkout requirement. Tracked and
-  nonignored files only, fingerprint skip on no-op runs, sanity checks against
-  suspicious mass deletions, optional shallow base-ref hydration for
-  changed-test workflows. See [Sync](docs/features/sync.md).
-- **Run observability.** Every coordinator-backed run gets an early `run_...`
-  handle. Use `ciderbox attach <run-id>` while it is active,
-  `ciderbox events <run-id>` for durable lifecycle/output events, and
-  `ciderbox logs <run-id>` for retained output after completion. See
-  [History and logs](docs/features/history-logs.md) and
-  [Observability](docs/observability.md).
-- **GitHub Actions hydration.** `ciderbox actions hydrate` runs supported setup
-  steps from the repo's workflow locally over SSH, so leased boxes get the same
-  runtimes and tooling without GitHub write access. Use `--github-runner` only
-  when setup needs full Actions semantics such as repository secrets, OIDC,
-  service containers, or unsupported `uses:` steps. See
-  [Actions hydration](docs/features/actions-hydration.md).
-- **Failure capsules.** `ciderbox capsule from-actions <run-url>` captures a
-  failing CI run into a portable, replayable bundle; `capsule replay` reruns it.
-  See [Capsules](docs/features/capsules.md).
-- **Checkpoints.** Save VM-or-workspace state and `restore`/`fork` from it, via
-  workspace archives or provider-native snapshots/images. See
-  [Checkpoints](docs/features/checkpoints.md).
-- **Pond peer groups.** Leases that share a `--pond <name>` label form an
-  emergent peer group with discovery (`pond peers`), an SSH-mesh of
-  `ssh -L` forwards to members' `--expose` ports (`pond connect`), and bulk
-  `pond release`. See [Pond](docs/features/pond.md).
-- **Brokered cloud with cost guardrails.** Maintainers and agents share infra
-  without sharing provider tokens. Hetzner, AWS, Azure, and Google Cloud are
-  the managed providers; per-lease and monthly spend caps reject over-budget
-  leases. Providers fall back across compatible instance families when capacity
-  or quota rejects a request. `ciderbox usage` summarizes spend by user, org,
-  provider, and type. See [Coordinator](docs/features/coordinator.md),
-  [Capacity fallback](docs/features/capacity-fallback.md), and
-  [Cost and usage](docs/features/cost-usage.md).
-- **Interactive desktop, browser, and code leases.** `--browser` provisions
-  Chrome/Chromium for headless automation, `--desktop` provisions a visible UI
-  with tunnel-only VNC takeover, and `--code` provisions code-server on managed
-  Linux. `ciderbox desktop click/paste/type/key` provide first-class input
-  helpers; `desktop proof` captures metadata, screenshot, diagnostics, MP4, and
-  a contact-sheet PNG in one publishable bundle. See
-  [Interactive desktop and VNC](docs/features/interactive-desktop-vnc.md).
-- **Authenticated web portal.** Browser login opens owner-scoped and shared
-  lease/run views with run logs/events, WebVNC, code-server, and telemetry
-  charts. `ciderbox webvnc`/`ciderbox code` bridge a lease into the portal;
-  `ciderbox share` grants a lease to a user or the owning org. See
-  [Portal](docs/features/portal.md).
-- **Agent workspace evidence.** History, logs, events, telemetry, JUnit
-  summaries, screenshots, recordings, artifacts, and PR publishing make
-  autonomous work reviewable instead of only ephemeral terminal output. See
-  [Artifacts](docs/features/artifacts.md) and
-  [Telemetry](docs/features/telemetry.md).
-- **Stable timing records.** `--timing-json` on `run`, `warmup`, `prewarm`, and
-  `actions hydrate` gives scripts one machine-readable sync/command/total
-  timing schema across providers.
-- **Hardened coordinator auth.** GitHub browser login, owner-scoped leases,
-  admin-only routes, optional GitHub team allowlists, Cloudflare Access JWT
-  verification, and service-token support keep normal use and operator
-  automation separate. See [Auth and admin](docs/features/auth-admin.md) and
-  [Security](docs/security.md).
-## Machine classes
+### 3. Run compile tests
 
-`beast` is the default for providers that expose class-based managed capacity.
-The providers below fall back across ordered instance-type lists unless `--type`
-pins a specific provider-native size.
+```sh
+ciderbox compile-test
+```
+
+Runs your test command in parallel across all configured distros. Results show as a pass/fail grid with timing.
+
+### 4. Clean up
+
+```sh
+ciderbox chop
+```
+
+Terminates all active ciderbox containers.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `ciderbox init` | Scaffold `.ciderbox.yaml` |
+| `ciderbox compile-test` | Run tests across configured distros |
+| `ciderbox build` | Single-distro build |
+| `ciderbox run -- <cmd>` | One-off command in fresh VM |
+| `ciderbox warmup` | Create a warm/persistent VM |
+| `ciderbox ssh --id <slug>` | SSH into a warm VM |
+| `ciderbox doctor` | Check environment |
+| `ciderbox chop` | Kill all ciderbox VMs |
+| `ciderbox list` | Show active leases |
+| `ciderbox stop <id>` | Stop a specific lease |
+
+## How It Works
 
 ```text
-Hetzner    standard  ccx33, cpx62, cx53
-           fast      ccx43, cpx62, cx53
-           large     ccx53, ccx43, cpx62, cx53
-           beast     ccx63, ccx53, ccx43, cpx62, cx53
-
-AWS Linux  standard  c7a/c7i/m7a/m7i.8xlarge family
-           fast      …16xlarge family
-           large     …24xlarge family
-           beast     …48xlarge family, falling back to 32x/24x/16x
-           arm64     c7g/m7g/r7g families with --arch arm64
-
-AWS Win    standard  m7i.large, m7a.large, t3.large
-           fast      m7i.xlarge, m7a.xlarge, t3.xlarge
-           large     m7i.2xlarge, m7a.2xlarge, t3.2xlarge
-           beast     m7i.4xlarge, m7a.4xlarge, m7i.2xlarge
-
-AWS WSL2   standard  m8i.large, m8i-flex.large, c8i.large, r8i.large
-           fast      m8i.xlarge, m8i-flex.xlarge, c8i.xlarge, r8i.xlarge
-           large     m8i.2xlarge, m8i-flex.2xlarge, c8i.2xlarge, r8i.2xlarge
-           beast     m8i.4xlarge, m8i-flex.4xlarge, c8i.4xlarge, r8i.4xlarge, m8i.2xlarge
-
-AWS macOS  all       mac2.metal, then mac1.metal unless --type is set
-
-Azure      standard  Standard_D32ads_v6, Standard_D32ds_v6, Standard_F32s_v2, then 16-vCPU fallbacks
-           fast      Standard_D64ads_v6, Standard_D64ds_v6, Standard_F64s_v2, then 48/32-vCPU fallbacks
-           large     Standard_D96ads_v6, Standard_D96ds_v6, then 64/48-vCPU fallbacks
-           beast     Standard_D192ds_v6, Standard_D128ds_v6, then 96/64-vCPU fallbacks
-           arm64     Standard_D*ps_v6 / D*pds_v6 Cobalt families with --arch arm64
-
-Azure Win/
-WSL2       standard  Standard_D2ads_v6, Standard_D2ds_v6, Standard_D2ads_v5, Standard_D2ds_v5, Standard_D2as_v6
-           fast      Standard_D4ads_v6, Standard_D4ds_v6, Standard_D4ads_v5, Standard_D4ds_v5, Standard_D4as_v6
-           large     Standard_D8ads_v6, Standard_D8ds_v6, Standard_D8ads_v5, Standard_D8ds_v5, Standard_D8as_v6
-           beast     Standard_D16ads_v6, Standard_D16ds_v6, Standard_D16ads_v5, Standard_D16ds_v5, Standard_D8ads_v6
-
-Namespace  standard  S
-           fast      M
-           large     L
-           beast     XL
-
-Cloudflare standard  standard-4
-           fast      standard-4
-           large     standard-4
-           beast     standard-4
+your Mac (Apple Silicon)
+    |
+    |  ciderbox CLI
+    v
+Apple container CLI  -->  Linux VM (ubuntu, debian, alpine...)
+    |                           |
+    |  SSH                      |  your code synced in
+    v                           v
+run tests, collect      /work/ciderbox/my-project
+results, teardown
 ```
 
-Override with `--type` or `CIDERBOX_SERVER_TYPE` for a specific instance. Use
-`--arch arm64` / `architecture: arm64` for Linux ARM capacity on Azure or AWS;
-explicit ARM provider types also select ARM images when no custom image is set.
-Cloudflare also accepts `lite`, `basic`, `standard-1`, `standard-2`, and
-`standard-3` as smaller explicit `--type` values; `standard-4` is the default.
-Providers without a row either use provider-native capacity settings or reject
-class/type selection.
+## Differences from crabbox
+
+| Feature | crabbox | ciderbox |
+|---------|---------|----------|
+| Runtime | Docker/OrbStack/Colima | Apple `container` CLI |
+| Networking | Port publishing | Direct container IPs |
+| Target | Cloud + local | Apple Silicon Macs only |
+| Compile test | Not built-in | First-class feature |
+| Repo pattern | Manual | `.ciderbox.yaml` config |
+| Cleanup | Per-lease | `chop` all at once |
+
+## Why Apple container?
+
+Apple's `container` CLI (from [apple/container](https://github.com/apple/container)) provides:
+
+- **Sub-second boots** after first image pull
+- **Dedicated IPs** per VM — no port collision
+- **Hypervisor isolation** per lease
+- **Persistent machines** via `container machine`
+- **Native home mount** — your Mac `$HOME` visible inside VMs
+
+No Docker Desktop, no daemon socket, no port mapping headaches.
 
 ## Configuration
 
-Config resolves in order: flags → env → repo `.ciderbox.yaml` → user
-`~/.config/ciderbox/config.yaml` → defaults.
+### `.ciderbox.yaml`
 
 ```yaml
-broker:
-  url: https://broker.example.com
-  provider: aws
-  token: ...
-class: beast
-capacity:
-  market: spot
-  strategy: most-available
-  fallback: on-demand-after-120s
-  hints: true
-aws:
-  region: eu-west-1
-  rootGB: 400
-lease:
-  idleTimeout: 30m
-  ttl: 90m
-ssh:
-  key: ~/.ssh/id_ed25519
-  user: ciderbox
-  port: "2222"
-  # Ordered fallback ports tried after ssh.port; use [] to disable fallback.
-  fallbackPorts:
-    - "22"
+project: my-project
+compileTest:
+  distros:
+    - name: ubuntu
+      image: ubuntu:26.04
+    - name: debian
+      image: debian:bookworm
+    - name: alpine
+      image: alpine:latest
+  command: "make test"
+  parallel: true
+build:
+  image: ubuntu:26.04
+  command: "make build"
+  dependencies: [build-essential, git, nodejs]
+  cachePaths:
+    - /root/.cache/go-build
+    - /root/.npm
+run:
+  provider: apple-container
+  image: ubuntu:26.04
 ```
 
-Forwarded environment is intentionally narrow: `NODE_OPTIONS` and `CI`. Do not
-pass secrets as command-line arguments. For live-secret smoke tests, use
-`ciderbox run --env-from-profile <file> --allow-env NAME` so Ciderbox forwards
-only selected names and prints redacted presence/length metadata. For stale warm
-boxes, `--full-resync` (alias `--fresh-sync`) resets the remote workdir before
-syncing. For larger commands, use `--script <file>` or `--script-stdin` so the
-remote runner executes an uploaded file instead of a giant quoted shell string.
+## Troubleshooting
 
-For binary or terminal-hostile output, use `ciderbox run --capture-stdout <path>`
-or `--capture-stderr <path>`. Add `--preflight` for a remote capability
-snapshot, `--keep-on-failure` to SSH into the exact failed one-shot lease, or
-`--download remote=local` to copy a successful-run artifact back. Failed
-SSH-backed and Blacksmith delegated runs save local `.ciderbox/captures/*.tar.gz`
-bundles by default. Captured files are not redacted by Ciderbox.
+### "apple-container provider not found"
 
-Optional Tailscale reachability for managed Linux leases:
-
-```yaml
-tailscale:
-  enabled: true
-  network: auto
-  tags:
-    - tag:ciderbox
-  hostnameTemplate: ciderbox-{slug}
-  authKeyEnv: CIDERBOX_TAILSCALE_AUTH_KEY
-  exitNode: mac-studio.example.ts.net
-  exitNodeAllowLanAccess: true
-```
-
-Tailscale is a network plane, not a provider. `--tailscale` joins new managed
-Linux leases to the tailnet; `--network auto|tailscale|public` chooses how SSH
-and VNC tunnel commands resolve the host. Brokered mode uses Worker OAuth
-secrets to mint one-off keys; direct-provider mode reads the auth key from the
-configured env var. See [Tailscale](docs/features/tailscale.md).
-
-A few provider-specific config snippets:
-
-```yaml
-# Static macOS or Windows target (existing machine, no provisioning)
-provider: ssh
-target: windows
-windows:
-  mode: normal # or wsl2
-static:
-  host: win-dev.local
-  user: alice
-  port: "22"
-  workRoot: C:\ciderbox
-```
-
-```yaml
-# Local container (alias: docker; detects docker or podman)
-provider: local-container
-localContainer:
-  runtime: docker
-  image: debian:bookworm
-  workRoot: /work/ciderbox
-```
-
-```yaml
-# Delegated Blacksmith CI Testbox
-provider: blacksmith-testbox
-blacksmith:
-  org: example-org
-  workflow: .github/workflows/ci-check-testbox.yml
-  job: test
-  ref: main
-  idleTimeout: 90m
-```
-
-Keep provider tokens in environment variables, not repo config (for example
-`CIDERBOX_SEMAPHORE_TOKEN`, `CIDERBOX_SPRITES_TOKEN`, `RUNPOD_API_KEY`,
-`ASCII_BOX_API_KEY`, `E2B_API_KEY`, `DAYTONA_API_KEY`). The full env-var
-reference, per-provider sections, and per-command flags are in
-[docs/cli.md](docs/cli.md), [Configuration](docs/features/configuration.md),
-and the [provider docs](docs/providers/README.md).
-
-## Development
-
+Install Apple container CLI:
 ```sh
-# Go CLI
-go build -trimpath -o bin/ciderbox ./cmd/ciderbox
-go vet ./...
-go test -race ./...
-
-# Cloudflare Worker (Node 22+ locally; CI runs Node 24)
-npm ci --prefix worker
-npm test --prefix worker
-npm run build --prefix worker
-
-# Repository scripts
-node --test scripts/*.test.js
-
-# Docs
-scripts/check-docs.sh
-
-# Optional live smoke, when broker/provider credentials are available
-CIDERBOX_LIVE=1 CIDERBOX_LIVE_REPO=/path/to/my-app scripts/live-smoke.sh
+# Download from https://github.com/apple/container/releases
+sudo installer -pkg container-*.pkg -target /
+container system start
 ```
 
-CI runs the full gate (gofmt, vet, race tests, all Go modules, coverage
-threshold, repository script tests, docs link/build check, GoReleaser snapshot, and Worker
-lint/typecheck/tests/build) on every push and PR. Tagged pushes matching `v*`
-publish Go archives via GoReleaser and bump the Homebrew formula at
-[openclaw/homebrew-tap](https://github.com/openclaw/homebrew-tap).
+### "container stopped before network address assigned"
 
-Worker deployment, required secrets, and DNS routing live in
-[docs/infrastructure.md](docs/infrastructure.md).
+Image lacks SSH server. Use Ubuntu/Debian base images, or install `openssh-server` in your Dockerfile.
 
-## Docs
+### SSH connection refused
 
-- **Get the model:** [How Ciderbox Works](docs/how-it-works.md), [Architecture](docs/architecture.md), [Concepts](docs/concepts.md), [Orchestrator](docs/orchestrator.md)
-- **Use the CLI:** [CLI](docs/cli.md), [Commands](docs/commands/README.md), [Features](docs/features/README.md), [Configuration](docs/features/configuration.md)
-- **Choose a provider:** [Providers](docs/providers/README.md), [AWS](docs/providers/aws.md), [Azure](docs/providers/azure.md), [GCP](docs/providers/gcp.md), [Hetzner](docs/providers/hetzner.md)
-- **Advanced features:** [Actions hydration](docs/features/actions-hydration.md), [Capsules](docs/features/capsules.md), [Checkpoints](docs/features/checkpoints.md), [Jobs](docs/features/jobs.md), [Pond](docs/features/pond.md)
-- **Interactive QA:** [Interactive Desktop and VNC](docs/features/interactive-desktop-vnc.md), [Artifacts](docs/features/artifacts.md), [Portal](docs/features/portal.md)
-- **Operate it:** [Operations](docs/operations.md), [Observability](docs/observability.md), [Troubleshooting](docs/troubleshooting.md), [Performance](docs/performance.md)
-- **Set it up or audit it:** [Infrastructure](docs/infrastructure.md), [Security](docs/security.md), [Getting Started](docs/getting-started.md), [Source Map](docs/source-map.md)
-- **Changes:** [CHANGELOG.md](CHANGELOG.md)
-
-The GitHub Pages site at <https://openclaw.github.io/ciderbox/> is generated from
-the `docs/` Markdown:
-
-```sh
-scripts/check-docs.sh
-open dist/docs-site/index.html
-```
+Container needs time to boot. The provider waits up to 20 minutes for SSH — but usually connects in 1-2 seconds with pre-pulled images.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — forked from [crabbox](https://github.com/openclaw/crabbox) by OpenClaw.
