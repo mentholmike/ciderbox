@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -46,13 +47,14 @@ type MeshConfig struct {
 
 // TreeState tracks a running tree in the orchard.
 type TreeState struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`    // planting | growing | ready | wilted
-	IP        string    `json:"ip"`
-	LeaseID   string    `json:"lease_id"`
-	CreatedAt time.Time `json:"created_at"`
-	LastPing  time.Time `json:"last_ping"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`     // planting | growing | ready | wilted
+	IP          string    `json:"ip"`
+	LeaseID     string    `json:"lease_id"`
+	ContainerID string    `json:"container_id"` // Apple Container ID for exec
+	CreatedAt   time.Time `json:"created_at"`
+	LastPing    time.Time `json:"last_ping"`
 }
 
 const orchardDefaultFile = ".orchard.yaml"
@@ -297,8 +299,14 @@ func (a App) plantTree(ctx context.Context, config *OrchardConfig, idx int) Tree
 
 	tree.LeaseID = lease.LeaseID
 	tree.IP = lease.Server.PublicNet.IPv4.IP
+	// Extract container ID from lease labels
+	tree.ContainerID = lease.Server.Labels["container_id"]
+	if tree.ContainerID == "" {
+		// Fallback: container ID is usually the server name
+		tree.ContainerID = lease.Server.Name
+	}
 	tree.Status = "ready"
-	fmt.Fprintf(a.Stderr, "[%s] ready (lease=%s, ip=%s)\n", treeName, lease.LeaseID, tree.IP)
+	fmt.Fprintf(a.Stderr, "[%s] ready (lease=%s, container=%s, ip=%s)\n", treeName, lease.LeaseID, tree.ContainerID, tree.IP)
 	return tree
 }
 
@@ -327,6 +335,23 @@ func (a App) orchardTend(ctx context.Context, args []string) error {
 	}
 
 	return nil
+}
+
+// treeExec runs a command inside a tree via container exec (no SSH needed).
+func (a App) treeExec(ctx context.Context, containerID string, command []string) error {
+	args := append([]string{"exec", containerID}, command...)
+	cmd := exec.CommandContext(ctx, "container", args...)
+	cmd.Stdout = a.Stdout
+	cmd.Stderr = a.Stderr
+	return cmd.Run()
+}
+
+// treeCopy copies files into a tree via container copy.
+func (a App) treeCopy(ctx context.Context, src, dst string) error {
+	cmd := exec.CommandContext(ctx, "container", "copy", src, dst)
+	cmd.Stdout = a.Stdout
+	cmd.Stderr = a.Stderr
+	return cmd.Run()
 }
 
 // orchardHarvest collects results from all trees.
@@ -389,7 +414,7 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 	return nil
 }
 
-// orchardGraft installs OpenClaw on a specific tree.
+// orchardGraft installs OpenClaw on a specific tree via container exec.
 func (a App) orchardGraft(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard graft", a.Stderr)
 	treeID := fs.String("tree", "", "tree ID to graft onto")
@@ -403,8 +428,58 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 
 	fmt.Fprintf(a.Stdout, "=== Orchard Graft ===\n")
 	fmt.Fprintf(a.Stdout, "Tree: %s\n", *treeID)
+
+	// Get provider backend to find the lease/container
+	cfg, rt, err := a.providerConfigRuntime("apple-container")
+	if err != nil {
+		return exit(2, "orchard graft: config: %v", err)
+	}
+	provider, err := ProviderFor("apple-container")
+	if err != nil {
+		return exit(2, "orchard graft: provider: %v", err)
+	}
+	backend, err := provider.Configure(cfg, rt)
+	if err != nil {
+		return exit(2, "orchard graft: backend: %v", err)
+	}
+	sshBackend, ok := backend.(SSHLeaseBackend)
+	if !ok {
+		return exit(2, "orchard graft: provider does not support SSH leases")
+	}
+
+	leases, err := sshBackend.List(ctx, ListRequest{})
+	if err != nil {
+		return exit(2, "orchard graft: list: %v", err)
+	}
+
+	var targetLease LeaseView
+	for _, lease := range leases {
+		if lease.Labels["tree.id"] == *treeID || strings.Contains(lease.Name, *treeID) {
+			targetLease = lease
+			break
+		}
+	}
+
+	if targetLease.Name == "" {
+		return exit(2, "tree %q not found", *treeID)
+	}
+
+	containerID := targetLease.Labels["container_id"]
+	if containerID == "" {
+		containerID = targetLease.Name
+	}
+
+	fmt.Fprintf(a.Stdout, "Container: %s\n", containerID)
 	fmt.Fprintln(a.Stdout, "Installing OpenClaw agent...")
-	fmt.Fprintln(a.Stdout, "Configuring Lethe memory...")
+
+	// Use container exec instead of SSH
+	if err := a.treeExec(ctx, containerID, []string{"apt-get", "update"}); err != nil {
+		fmt.Fprintf(a.Stderr, "WARN: apt update: %v\n", err)
+	}
+	if err := a.treeExec(ctx, containerID, []string{"apt-get", "install", "-y", "curl", "git"}); err != nil {
+		fmt.Fprintf(a.Stderr, "WARN: apt install: %v\n", err)
+	}
+
 	fmt.Fprintln(a.Stdout, "Agent grafted and ready.")
 
 	return nil
