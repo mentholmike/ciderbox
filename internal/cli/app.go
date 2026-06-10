@@ -70,6 +70,8 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 		return a.chopCommand(ctx, helpArgs), true
 	case "build":
 		return a.buildCommand(ctx, helpArgs), true
+	case "orchard":
+		return a.orchardCommand(ctx, helpArgs), true
 	case "run":
 		return a.runCommand(ctx, helpArgs), true
 	case "job":

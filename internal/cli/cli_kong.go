@@ -20,6 +20,7 @@ type crabboxKongCLI struct {
 	Warmup     warmupKongCmd     `cmd:"" passthrough:"" help:"Lease a box and wait until it is ready."`
 	Prewarm    prewarmKongCmd    `cmd:"" passthrough:"" help:"Lease and hydrate a reusable test-ready box."`
 	CompileTest compileTestKongCmd `cmd:"" name:"compile-test" passthrough:"" help:"Run compile tests across multiple distros."`
+	Orchard     orchardKongCmd     `cmd:"" passthrough:"" help:"Manage an AI agent swarm (orchard) on Apple container VMs."`
 	Build       buildKongCmd       `cmd:"" passthrough:"" help:"Build the project in a container."`
 	Chop        chopKongCmd        `cmd:"" passthrough:"" help:"Terminate all active ciderbox leases."`
 	Run        runKongCmd        `cmd:"" passthrough:"" help:"Sync the repo, run a remote command, stream output."`
@@ -153,6 +154,9 @@ type prewarmKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type compileTestKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type orchardKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type buildKongCmd struct {
@@ -553,6 +557,7 @@ func (c *doctorKongCmd) Run(ctx context.Context, app App) error    { return app.
 func (c *warmupKongCmd) Run(ctx context.Context, app App) error    { return app.warmup(ctx, c.Args) }
 func (c *prewarmKongCmd) Run(ctx context.Context, app App) error   { return app.prewarm(ctx, c.Args) }
 func (c *compileTestKongCmd) Run(ctx context.Context, app App) error { return app.compileTest(ctx, c.Args) }
+func (c *orchardKongCmd) Run(ctx context.Context, app App) error     { return app.orchardCommand(ctx, c.Args) }
 func (c *buildKongCmd) Run(ctx context.Context, app App) error     { return app.buildCommand(ctx, c.Args) }
 func (c *chopKongCmd) Run(ctx context.Context, app App) error      { return app.chopCommand(ctx, c.Args) }
 func (c *runKongCmd) Run(ctx context.Context, app App) error       { return app.runCommand(ctx, c.Args) }
