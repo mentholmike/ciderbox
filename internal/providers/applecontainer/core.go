@@ -1,7 +1,7 @@
 package applecontainer
 
 import (
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 // Type aliases keep the provider body terse while leaning on the shared core

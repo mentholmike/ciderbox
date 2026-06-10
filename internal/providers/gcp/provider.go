@@ -3,7 +3,7 @@ package gcp
 import (
 	"flag"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 func init() {

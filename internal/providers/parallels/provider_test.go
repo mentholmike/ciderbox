@@ -4,7 +4,7 @@ import (
 	"flag"
 	"testing"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 func TestApplyFlagsNameOverridesClearIDOverrides(t *testing.T) {

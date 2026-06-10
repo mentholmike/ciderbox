@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 type statusView = core.StatusView

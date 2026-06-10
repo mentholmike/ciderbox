@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/lxc/incus/v7/shared/cliconfig"
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"golang.org/x/oauth2"
 )

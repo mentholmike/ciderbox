@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 func osExec(name string, args ...string) *osexec.Cmd { return osexec.Command(name, args...) }

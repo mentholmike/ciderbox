@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	sandboxv1 "github.com/openclaw/crabbox/internal/providers/wandb/gen/coreweave/sandbox/v1beta2"
+	sandboxv1 "github.com/mentholmike/ciderbox/internal/providers/wandb/gen/coreweave/sandbox/v1beta2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

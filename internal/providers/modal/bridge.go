@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 // Modal sandboxes do not carry a per-sandbox HTTPS ingress URL on the lease

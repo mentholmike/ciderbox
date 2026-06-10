@@ -1,21 +1,21 @@
-# 🦀 📦 Crabbox
+# 🦀 📦 Ciderbox
 
-![Crabbox banner](docs/assets/readme-banner.jpg)
+![Ciderbox banner](docs/assets/readme-banner.jpg)
 
-[![CI](https://github.com/openclaw/crabbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/openclaw/crabbox/actions/workflows/ci.yml)
-[![Release](https://github.com/openclaw/crabbox/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/openclaw/crabbox/actions/workflows/release.yml)
-[![Latest release](https://badgen.net/github/release/openclaw/crabbox/stable)](https://github.com/openclaw/crabbox/releases/latest)
+[![CI](https://github.com/openclaw/ciderbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/openclaw/ciderbox/actions/workflows/ci.yml)
+[![Release](https://github.com/openclaw/ciderbox/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/openclaw/ciderbox/actions/workflows/release.yml)
+[![Latest release](https://badgen.net/github/release/openclaw/ciderbox/stable)](https://github.com/openclaw/ciderbox/releases/latest)
 
 **Warm a box, sync the diff, run the suite.**
 
-Crabbox is a remote software testing and execution control plane for maintainers
+Ciderbox is a remote software testing and execution control plane for maintainers
 and AI agents. Lease fast managed cloud capacity, point at an existing SSH host,
 or use an agent sandbox provider — then sync your dirty checkout, run commands
 remotely, stream output, collect evidence, and release. Local edit-save-run
 loop, cloud-grade compute, agent-ready observability.
 
 ```sh
-crabbox run -- pnpm test
+ciderbox run -- pnpm test
 ```
 
 Behind that one command: a Go CLI on your laptop, a Cloudflare Worker broker
@@ -27,7 +27,7 @@ runner.
 ```text
 your laptop                Cloudflare Worker            cloud provider
 -------------              ------------------           --------------
-crabbox CLI    -- HTTPS --> Fleet Durable Object  -->   Hetzner / AWS / Azure / GCP
+ciderbox CLI    -- HTTPS --> Fleet Durable Object  -->   Hetzner / AWS / Azure / GCP
    |                         lease + cost state              |
    |                                                         |
    +------------ SSH + rsync to leased runner <--------------+
@@ -42,12 +42,12 @@ crabbox CLI    -- HTTPS --> Fleet Durable Object  -->   Hetzner / AWS / Azure / 
   monthly spend caps, and expires stale leases by alarm. Auth is GitHub browser
   login or a shared bearer token.
 - **Runner** — a throwaway machine reachable over SSH on the primary port
-  (default `2222`) plus configured fallback ports, prepared with Crabbox's
-  sync/run prerequisites. Linux uses Ubuntu with cloud-init and `/work/crabbox`;
-  native Windows uses OpenSSH, Git for Windows, and `C:\crabbox`. No broker
+  (default `2222`) plus configured fallback ports, prepared with Ciderbox's
+  sync/run prerequisites. Linux uses Ubuntu with cloud-init and `/work/ciderbox`;
+  native Windows uses OpenSSH, Git for Windows, and `C:\ciderbox`. No broker
   credentials live on the box. Project runtimes (Go, Node, Docker, services,
   secrets) come from your repo's GitHub Actions hydration, devcontainer, Nix,
-  mise/asdf, or setup scripts — not from Crabbox.
+  mise/asdf, or setup scripts — not from Ciderbox.
 
 The data plane — SSH, rsync, command execution — always runs directly from the
 CLI to the runner. The broker only manages leases, cost, and observability.
@@ -58,17 +58,17 @@ other provider always runs direct. A direct-provider mode
 (`--provider hetzner|aws|azure|gcp|proxmox` with local credentials) exists for
 debugging the broker itself or using private infrastructure.
 
-For the full mental model, see [How Crabbox Works](docs/how-it-works.md). For
+For the full mental model, see [How Ciderbox Works](docs/how-it-works.md). For
 the doc-to-code map, see [Source Map](docs/source-map.md).
 
 ## Install
 
 ```sh
-brew install openclaw/tap/crabbox
-crabbox --version
+brew install openclaw/tap/ciderbox
+ciderbox --version
 ```
 
-No Homebrew? Grab a [GoReleaser archive](https://github.com/openclaw/crabbox/releases)
+No Homebrew? Grab a [GoReleaser archive](https://github.com/openclaw/ciderbox/releases)
 for macOS, Linux, or Windows.
 
 Laptop prerequisites: `git`, `ssh`, `ssh-keygen`, `rsync`, `curl`.
@@ -84,23 +84,23 @@ setup paths.
 
 ```sh
 # log in once per machine (stores a broker token in user config)
-crabbox login --url https://broker.example.com
+ciderbox login --url https://broker.example.com
 
 # verify local prerequisites and broker reachability
-crabbox doctor
+ciderbox doctor
 
 # one-shot: lease, sync, run, release
-crabbox run -- pnpm test
+ciderbox run -- pnpm test
 
-# named repo workflow from .crabbox.yaml
-crabbox job run full-ci
+# named repo workflow from .ciderbox.yaml
+ciderbox job run full-ci
 
 # or warm a box once, then reuse it
-crabbox warmup                                       # prints cbx_... + a slug
-crabbox prewarm                                      # lease + Actions hydration
-crabbox run --id blue-lobster -- pnpm test:changed
-crabbox ssh --id blue-lobster
-crabbox stop blue-lobster
+ciderbox warmup                                       # prints cbx_... + a slug
+ciderbox prewarm                                      # lease + Actions hydration
+ciderbox run --id blue-lobster -- pnpm test:changed
+ciderbox ssh --id blue-lobster
+ciderbox stop blue-lobster
 ```
 
 Every lease has a stable `cbx_...` ID and a friendly crustacean slug
@@ -130,7 +130,7 @@ configured); every other provider always runs direct from the CLI.
 | [Apple Container](docs/providers/apple-container.md) — `apple-container` (`apple`, `applecontainer`) | Linux · direct | Apple's native `container` runtime on Apple silicon macOS. |
 | [exe.dev](docs/providers/exe-dev.md) — `exe-dev` (`exe`, `exedev`) | Linux · direct | exe.dev VMs exposed as public SSH leases. |
 | [KubeVirt](docs/providers/kubevirt.md) — `kubevirt` (`kubernetes-vm`) | Linux · direct | Generic KubeVirt VMs through `kubectl`, `virtctl`, and control-plane SSH forwarding. |
-| [External](docs/providers/external.md) — `external` (`exec-provider`) | Linux · direct | Configured executable implementing the Crabbox provider protocol. |
+| [External](docs/providers/external.md) — `external` (`exec-provider`) | Linux · direct | Configured executable implementing the Ciderbox provider protocol. |
 | [Namespace Devbox](docs/providers/namespace-devbox.md) — `namespace-devbox` (`namespace`, `namespace-devboxes`) | Linux · direct | Namespace.so Devboxes over SSH. |
 | [Semaphore](docs/providers/semaphore.md) — `semaphore` (`sem`) | Linux · direct | A Semaphore CI job leased as a testbox. |
 | [Sprites](docs/providers/sprites.md) — `sprites` | Linux · direct | Sprites microVMs through `sprite proxy`. |
@@ -160,31 +160,31 @@ and authoring guide.
 
 ## Highlights
 
-- **One-shot or warm workspaces.** `crabbox run` for fire-and-forget;
-  `crabbox warmup` + `--id` for raw reusable leases, or `crabbox prewarm` when
+- **One-shot or warm workspaces.** `ciderbox run` for fire-and-forget;
+  `ciderbox warmup` + `--id` for raw reusable leases, or `ciderbox prewarm` when
   the box should be hydrated before the first test command. See
   [warmup](docs/commands/warmup.md), [prewarm](docs/commands/prewarm.md), and
   [run](docs/commands/run.md).
-- **Named repo jobs.** `crabbox job run <name>` lets repos define warmup,
-  optional Actions hydration, run command, and cleanup policy in `.crabbox.yaml`.
+- **Named repo jobs.** `ciderbox job run <name>` lets repos define warmup,
+  optional Actions hydration, run command, and cleanup policy in `.ciderbox.yaml`.
   See [Jobs](docs/features/jobs.md).
 - **Local-first workspace sync.** No clean-checkout requirement. Tracked and
   nonignored files only, fingerprint skip on no-op runs, sanity checks against
   suspicious mass deletions, optional shallow base-ref hydration for
   changed-test workflows. See [Sync](docs/features/sync.md).
 - **Run observability.** Every coordinator-backed run gets an early `run_...`
-  handle. Use `crabbox attach <run-id>` while it is active,
-  `crabbox events <run-id>` for durable lifecycle/output events, and
-  `crabbox logs <run-id>` for retained output after completion. See
+  handle. Use `ciderbox attach <run-id>` while it is active,
+  `ciderbox events <run-id>` for durable lifecycle/output events, and
+  `ciderbox logs <run-id>` for retained output after completion. See
   [History and logs](docs/features/history-logs.md) and
   [Observability](docs/observability.md).
-- **GitHub Actions hydration.** `crabbox actions hydrate` runs supported setup
+- **GitHub Actions hydration.** `ciderbox actions hydrate` runs supported setup
   steps from the repo's workflow locally over SSH, so leased boxes get the same
   runtimes and tooling without GitHub write access. Use `--github-runner` only
   when setup needs full Actions semantics such as repository secrets, OIDC,
   service containers, or unsupported `uses:` steps. See
   [Actions hydration](docs/features/actions-hydration.md).
-- **Failure capsules.** `crabbox capsule from-actions <run-url>` captures a
+- **Failure capsules.** `ciderbox capsule from-actions <run-url>` captures a
   failing CI run into a portable, replayable bundle; `capsule replay` reruns it.
   See [Capsules](docs/features/capsules.md).
 - **Checkpoints.** Save VM-or-workspace state and `restore`/`fork` from it, via
@@ -198,21 +198,21 @@ and authoring guide.
   without sharing provider tokens. Hetzner, AWS, Azure, and Google Cloud are
   the managed providers; per-lease and monthly spend caps reject over-budget
   leases. Providers fall back across compatible instance families when capacity
-  or quota rejects a request. `crabbox usage` summarizes spend by user, org,
+  or quota rejects a request. `ciderbox usage` summarizes spend by user, org,
   provider, and type. See [Coordinator](docs/features/coordinator.md),
   [Capacity fallback](docs/features/capacity-fallback.md), and
   [Cost and usage](docs/features/cost-usage.md).
 - **Interactive desktop, browser, and code leases.** `--browser` provisions
   Chrome/Chromium for headless automation, `--desktop` provisions a visible UI
   with tunnel-only VNC takeover, and `--code` provisions code-server on managed
-  Linux. `crabbox desktop click/paste/type/key` provide first-class input
+  Linux. `ciderbox desktop click/paste/type/key` provide first-class input
   helpers; `desktop proof` captures metadata, screenshot, diagnostics, MP4, and
   a contact-sheet PNG in one publishable bundle. See
   [Interactive desktop and VNC](docs/features/interactive-desktop-vnc.md).
 - **Authenticated web portal.** Browser login opens owner-scoped and shared
   lease/run views with run logs/events, WebVNC, code-server, and telemetry
-  charts. `crabbox webvnc`/`crabbox code` bridge a lease into the portal;
-  `crabbox share` grants a lease to a user or the owning org. See
+  charts. `ciderbox webvnc`/`ciderbox code` bridge a lease into the portal;
+  `ciderbox share` grants a lease to a user or the owning org. See
   [Portal](docs/features/portal.md).
 - **Agent workspace evidence.** History, logs, events, telemetry, JUnit
   summaries, screenshots, recordings, artifacts, and PR publishing make
@@ -280,7 +280,7 @@ Cloudflare standard  standard-4
            beast     standard-4
 ```
 
-Override with `--type` or `CRABBOX_SERVER_TYPE` for a specific instance. Use
+Override with `--type` or `CIDERBOX_SERVER_TYPE` for a specific instance. Use
 `--arch arm64` / `architecture: arm64` for Linux ARM capacity on Azure or AWS;
 explicit ARM provider types also select ARM images when no custom image is set.
 Cloudflare also accepts `lite`, `basic`, `standard-1`, `standard-2`, and
@@ -290,8 +290,8 @@ class/type selection.
 
 ## Configuration
 
-Config resolves in order: flags → env → repo `.crabbox.yaml` → user
-`~/.config/crabbox/config.yaml` → defaults.
+Config resolves in order: flags → env → repo `.ciderbox.yaml` → user
+`~/.config/ciderbox/config.yaml` → defaults.
 
 ```yaml
 broker:
@@ -312,7 +312,7 @@ lease:
   ttl: 90m
 ssh:
   key: ~/.ssh/id_ed25519
-  user: crabbox
+  user: ciderbox
   port: "2222"
   # Ordered fallback ports tried after ssh.port; use [] to disable fallback.
   fallbackPorts:
@@ -321,18 +321,18 @@ ssh:
 
 Forwarded environment is intentionally narrow: `NODE_OPTIONS` and `CI`. Do not
 pass secrets as command-line arguments. For live-secret smoke tests, use
-`crabbox run --env-from-profile <file> --allow-env NAME` so Crabbox forwards
+`ciderbox run --env-from-profile <file> --allow-env NAME` so Ciderbox forwards
 only selected names and prints redacted presence/length metadata. For stale warm
 boxes, `--full-resync` (alias `--fresh-sync`) resets the remote workdir before
 syncing. For larger commands, use `--script <file>` or `--script-stdin` so the
 remote runner executes an uploaded file instead of a giant quoted shell string.
 
-For binary or terminal-hostile output, use `crabbox run --capture-stdout <path>`
+For binary or terminal-hostile output, use `ciderbox run --capture-stdout <path>`
 or `--capture-stderr <path>`. Add `--preflight` for a remote capability
 snapshot, `--keep-on-failure` to SSH into the exact failed one-shot lease, or
 `--download remote=local` to copy a successful-run artifact back. Failed
-SSH-backed and Blacksmith delegated runs save local `.crabbox/captures/*.tar.gz`
-bundles by default. Captured files are not redacted by Crabbox.
+SSH-backed and Blacksmith delegated runs save local `.ciderbox/captures/*.tar.gz`
+bundles by default. Captured files are not redacted by Ciderbox.
 
 Optional Tailscale reachability for managed Linux leases:
 
@@ -341,9 +341,9 @@ tailscale:
   enabled: true
   network: auto
   tags:
-    - tag:crabbox
-  hostnameTemplate: crabbox-{slug}
-  authKeyEnv: CRABBOX_TAILSCALE_AUTH_KEY
+    - tag:ciderbox
+  hostnameTemplate: ciderbox-{slug}
+  authKeyEnv: CIDERBOX_TAILSCALE_AUTH_KEY
   exitNode: mac-studio.example.ts.net
   exitNodeAllowLanAccess: true
 ```
@@ -366,7 +366,7 @@ static:
   host: win-dev.local
   user: alice
   port: "22"
-  workRoot: C:\crabbox
+  workRoot: C:\ciderbox
 ```
 
 ```yaml
@@ -375,7 +375,7 @@ provider: local-container
 localContainer:
   runtime: docker
   image: debian:bookworm
-  workRoot: /work/crabbox
+  workRoot: /work/ciderbox
 ```
 
 ```yaml
@@ -390,7 +390,7 @@ blacksmith:
 ```
 
 Keep provider tokens in environment variables, not repo config (for example
-`CRABBOX_SEMAPHORE_TOKEN`, `CRABBOX_SPRITES_TOKEN`, `RUNPOD_API_KEY`,
+`CIDERBOX_SEMAPHORE_TOKEN`, `CIDERBOX_SPRITES_TOKEN`, `RUNPOD_API_KEY`,
 `ASCII_BOX_API_KEY`, `E2B_API_KEY`, `DAYTONA_API_KEY`). The full env-var
 reference, per-provider sections, and per-command flags are in
 [docs/cli.md](docs/cli.md), [Configuration](docs/features/configuration.md),
@@ -400,7 +400,7 @@ and the [provider docs](docs/providers/README.md).
 
 ```sh
 # Go CLI
-go build -trimpath -o bin/crabbox ./cmd/crabbox
+go build -trimpath -o bin/ciderbox ./cmd/ciderbox
 go vet ./...
 go test -race ./...
 
@@ -416,7 +416,7 @@ node --test scripts/*.test.js
 scripts/check-docs.sh
 
 # Optional live smoke, when broker/provider credentials are available
-CRABBOX_LIVE=1 CRABBOX_LIVE_REPO=/path/to/my-app scripts/live-smoke.sh
+CIDERBOX_LIVE=1 CIDERBOX_LIVE_REPO=/path/to/my-app scripts/live-smoke.sh
 ```
 
 CI runs the full gate (gofmt, vet, race tests, all Go modules, coverage
@@ -430,7 +430,7 @@ Worker deployment, required secrets, and DNS routing live in
 
 ## Docs
 
-- **Get the model:** [How Crabbox Works](docs/how-it-works.md), [Architecture](docs/architecture.md), [Concepts](docs/concepts.md), [Orchestrator](docs/orchestrator.md)
+- **Get the model:** [How Ciderbox Works](docs/how-it-works.md), [Architecture](docs/architecture.md), [Concepts](docs/concepts.md), [Orchestrator](docs/orchestrator.md)
 - **Use the CLI:** [CLI](docs/cli.md), [Commands](docs/commands/README.md), [Features](docs/features/README.md), [Configuration](docs/features/configuration.md)
 - **Choose a provider:** [Providers](docs/providers/README.md), [AWS](docs/providers/aws.md), [Azure](docs/providers/azure.md), [GCP](docs/providers/gcp.md), [Hetzner](docs/providers/hetzner.md)
 - **Advanced features:** [Actions hydration](docs/features/actions-hydration.md), [Capsules](docs/features/capsules.md), [Checkpoints](docs/features/checkpoints.md), [Jobs](docs/features/jobs.md), [Pond](docs/features/pond.md)
@@ -439,7 +439,7 @@ Worker deployment, required secrets, and DNS routing live in
 - **Set it up or audit it:** [Infrastructure](docs/infrastructure.md), [Security](docs/security.md), [Getting Started](docs/getting-started.md), [Source Map](docs/source-map.md)
 - **Changes:** [CHANGELOG.md](CHANGELOG.md)
 
-The GitHub Pages site at <https://openclaw.github.io/crabbox/> is generated from
+The GitHub Pages site at <https://openclaw.github.io/ciderbox/> is generated from
 the `docs/` Markdown:
 
 ```sh

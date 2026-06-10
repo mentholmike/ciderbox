@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/openclaw/crabbox/internal/cli"
-	"github.com/openclaw/crabbox/internal/providers/shared"
+	core "github.com/mentholmike/ciderbox/internal/cli"
+	"github.com/mentholmike/ciderbox/internal/providers/shared"
 )
 
 type Config = core.Config

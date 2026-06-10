@@ -26,8 +26,8 @@ func TestNamespaceSSHTargetParsesPrepareResult(t *testing.T) {
 
 func TestParseNamespaceListAcceptsArrayAndWrappedObjects(t *testing.T) {
 	for name, input := range map[string]string{
-		"array":   `[{"name":"crabbox-blue-lobster-deadbeef","status":"running","size":"L","repository":"github.com/openclaw/crabbox","created_at":"2026-05-09T12:00:00Z"}]`,
-		"wrapped": `{"devboxes":[{"display_name":"crabbox-blue-lobster-deadbeef","state":"stopped","machine_size":"M","repo":"github.com/openclaw/crabbox","createdAt":"2026-05-09T12:00:00Z"}]}`,
+		"array":   `[{"name":"crabbox-blue-lobster-deadbeef","status":"running","size":"L","repository":"github.com/mentholmike/ciderbox","created_at":"2026-05-09T12:00:00Z"}]`,
+		"wrapped": `{"devboxes":[{"display_name":"crabbox-blue-lobster-deadbeef","state":"stopped","machine_size":"M","repo":"github.com/mentholmike/ciderbox","createdAt":"2026-05-09T12:00:00Z"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			items, err := parseNamespaceList(input)
@@ -37,7 +37,7 @@ func TestParseNamespaceListAcceptsArrayAndWrappedObjects(t *testing.T) {
 			if len(items) != 1 {
 				t.Fatalf("items=%#v", items)
 			}
-			if items[0].Name != "crabbox-blue-lobster-deadbeef" || items[0].Repository != "github.com/openclaw/crabbox" {
+			if items[0].Name != "crabbox-blue-lobster-deadbeef" || items[0].Repository != "github.com/mentholmike/ciderbox" {
 				t.Fatalf("item=%#v", items[0])
 			}
 		})

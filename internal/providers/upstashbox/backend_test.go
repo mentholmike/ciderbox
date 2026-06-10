@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 func TestProviderSpecAndAliases(t *testing.T) {

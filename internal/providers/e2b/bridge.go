@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/openclaw/crabbox/internal/cli"
+	core "github.com/mentholmike/ciderbox/internal/cli"
 )
 
 // E2B's bridge plane is built around the native per-sandbox preview URL

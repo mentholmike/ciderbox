@@ -1,4 +1,4 @@
-module github.com/openclaw/crabbox
+module github.com/mentholmike/ciderbox
 
 go 1.26
 
