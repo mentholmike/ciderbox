@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -369,4 +371,93 @@ func (a App) runInContainer(ctx context.Context, args []string) error {
 	runArgs = append(runArgs, args...)
 
 	return a.runCommand(ctx, runArgs)
+}
+
+// chopCommand terminates all active ciderbox leases.
+// Named after the cider-making process of chopping down apple trees.
+func (a App) chopCommand(ctx context.Context, args []string) error {
+	fs := newFlagSet("chop", a.Stderr)
+	provider := fs.String("provider", "apple-container", "provider to chop")
+	yes := fs.Bool("yes", false, "skip confirmation prompt")
+
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	// For apple-container provider, use the container CLI directly
+	if *provider == "apple-container" || *provider == "apple" {
+		return a.chopAppleContainers(ctx, *yes)
+	}
+
+	return exit(2, "chop not yet supported for provider %q", *provider)
+}
+
+func (a App) chopAppleContainers(ctx context.Context, yes bool) error {
+	// List containers with crabbox prefix
+	cmd := exec.CommandContext(ctx, "container", "ls", "--format", "json")
+	out, err := cmd.Output()
+	if err != nil {
+		return exit(2, "list containers: %v", err)
+	}
+
+	var containers []map[string]interface{}
+	if err := json.Unmarshal(out, &containers); err != nil {
+		return exit(2, "parse container list: %v", err)
+	}
+
+	// Filter ciderbox containers
+	var ciderboxContainers []string
+	for _, c := range containers {
+		name, _ := c["id"].(string)
+		if strings.Contains(name, "crabbox-") {
+			ciderboxContainers = append(ciderboxContainers, name)
+		}
+	}
+
+	if len(ciderboxContainers) == 0 {
+		fmt.Fprintf(a.Stdout, "No active ciderbox containers found.\n")
+		return nil
+	}
+
+	fmt.Fprintf(a.Stdout, "=== Ciderbox Chop ===\n")
+	fmt.Fprintf(a.Stdout, "Found %d active container(s):\n", len(ciderboxContainers))
+	for _, name := range ciderboxContainers {
+		fmt.Fprintf(a.Stdout, "  - %s\n", name)
+	}
+
+	if !yes {
+		fmt.Fprintf(a.Stdout, "\nChop all containers? [y/N] ")
+		var response string
+		fmt.Fscanln(a.Stdin, &response)
+		if response != "y" && response != "Y" {
+			fmt.Fprintf(a.Stdout, "Aborted.\n")
+			return nil
+		}
+	}
+
+	fmt.Fprintf(a.Stdout, "\nChopping...\n")
+	chopped := 0
+	failed := 0
+	for _, name := range ciderboxContainers {
+		cmd := exec.CommandContext(ctx, "container", "stop", name)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(a.Stderr, "  ✗ %s (stop): %v\n", name, err)
+			failed++
+			continue
+		}
+		cmd = exec.CommandContext(ctx, "container", "rm", name)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(a.Stderr, "  ✗ %s (rm): %v\n", name, err)
+			failed++
+		} else {
+			fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", name)
+			chopped++
+		}
+	}
+
+	fmt.Fprintf(a.Stdout, "\nChopped %d/%d containers.\n", chopped, len(ciderboxContainers))
+	if failed > 0 {
+		return exit(1, "%d container(s) failed to chop", failed)
+	}
+	return nil
 }
