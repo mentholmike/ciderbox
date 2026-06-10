@@ -135,9 +135,12 @@ func (a App) orchardInit(ctx context.Context, args []string) error {
 		Agent: AgentConfig{
 			Identity: "tree-agent",
 			Skills:   []string{"github", "web-search"},
-			// Placeholder — set to a model your provider actually serves,
-			// e.g. "anthropic/claude-sonnet-4-5" or "openai/gpt-4.1-mini".
+			// Set model to a real provider string, e.g.
+			// "openrouter/anthropic/claude-sonnet-4.6"
+			// "openai/gpt-4.1-mini"
 			Model: "CHANGE_ME",
+			// MemoryProvider is intentionally unset; configure separately
+			// if trees have access to a Lethe or other memory endpoint.
 		},
 	}
 

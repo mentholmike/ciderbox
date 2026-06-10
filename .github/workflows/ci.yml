@@ -64,7 +64,7 @@ jobs:
         run: scripts/check-go-coverage.sh 90.0
 
       - name: Build
-        run: go build -trimpath -o /tmp/crabbox ./cmd/crabbox
+        run: go build -trimpath -o /tmp/ciderbox ./cmd/ciderbox
 
   worker:
     name: Worker

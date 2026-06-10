@@ -134,180 +134,72 @@ func isHelpArg(arg string) bool {
 }
 
 func (a App) printHelp() {
-	fmt.Fprintln(a.Stdout, `Ciderbox leases remote test boxes, syncs your dirty checkout, runs commands, and cleans up.
+	fmt.Fprintln(a.Stdout, `Ciderbox — Apple-container dev/test runner and local OpenClaw swarm launcher.
 
 Usage:
   ciderbox <command> [flags]
   ciderbox run [flags] -- <command...>
 
 Start Here:
-  ciderbox login --url https://broker.example.com
-      Open GitHub login for your broker and store credentials.
-  ciderbox doctor
-      Check local tools, config, broker, and provider access.
   ciderbox init
-      Add repo-local Ciderbox config, GitHub workflow, and agent skill.
-  ciderbox warmup --class beast
-      Lease a reusable box and print a cbx_... id plus friendly slug.
-  ciderbox prewarm
-      Lease a reusable box and hydrate it from configured GitHub Actions.
-  ciderbox run --id blue-lobster -- pnpm test:changed
-      Sync this checkout to the box and run a command.
-  ciderbox warmup --desktop --browser --code
-      Lease a UI-capable box with a browser and web code editor.
+      Scaffold .ciderbox.yaml in the current repo.
+  ciderbox compile-test
+      Run your test command across multiple Apple-container distros.
+  ciderbox build
+      Build the project inside an Apple-container VM.
+  ciderbox chop
+      Terminate all active ciderbox leases.
+  ciderbox orchard plant
+      Spin up an AI-agent swarm on local Apple-container VMs.
 
 Commands:
-  init        Onboard the current repo for Ciderbox
-  compile-test Run the configured test command across multiple distros
-  build       Build the project in a container
-  chop        Terminate active ciderbox leases
-  orchard     Manage an AI agent swarm on Apple container VMs
-  login       Open GitHub login, store broker credentials, verify access
-  logout      Remove the stored broker token
-  whoami      Show broker identity
-  doctor      Check local and broker/provider readiness
-  warmup      Lease a box and wait until it is ready
-  prewarm     Lease and hydrate a reusable test-ready box
-  run         Sync the repo, run a remote command, stream output
-  job         Run named repo-local Ciderbox jobs
-  desktop     Launch apps into a visible desktop session
-  media       Create preview artifacts from recorded desktop videos
-  artifacts   Collect, transform, and publish QA artifacts
-  sync-plan   Show local sync manifest size hotspots
-  providers   Show provider capabilities
-  history     List recorded remote runs
-  logs        Print recorded run logs
-  events      Print recorded run events
-  attach      Follow recorded events for an active run
-  results     Show recorded test result summaries
-  cache       Inspect, purge, warm, or list remote cache volumes
-  status      Show lease state; add --wait to block until ready
-  list        List Ciderbox machines
-  share       Share a lease with users or the owning org
-  unshare     Remove lease sharing
-  image       Create provider images and promote brokered AWS runner images
-  usage       Show cost and usage estimates by user, org, or fleet
-  admin       Lease admin controls for trusted operators
-  actions     Hydrate boxes from repo workflows or GitHub runners
-  capsule     Capture and replay lightweight failure capsules
-  checkpoint  Create, restore, and fork workspace checkpoints
-  ssh         Print the SSH command for a lease
-  ports       Publish, list, or unpublish provider-native ports
-  cp          Copy files between host and a delegated sandbox
-  vnc         Print or open VNC connection details for a desktop lease
-  webvnc      Bridge a desktop lease into the authenticated web portal
-  code        Bridge a code lease into the authenticated web portal
-  egress      Bridge lease browser/app traffic through this machine
-  screenshot  Capture a PNG from a desktop lease
-  inspect     Print lease/provider details; add --json for scripts
-  stop        Release a lease or delete a direct-provider machine
-  cleanup     Sweep expired direct-provider machines or local provider state
-  pool        Manage ready-pool leases and list machine inventory aliases
-  pond        Bridge plane peer discovery for delegated providers
-  azure       Azure provider setup and login
-  config      Show or update user config
+  init          Scaffold repo .ciderbox.yaml config
+  compile-test  Run tests across multiple distros in parallel
+  build         Build project in an Apple-container VM
+  chop          Terminate active leases (respects ciderbox-protected)
+  run           Sync repo and run a command in a container
+  warmup        Lease a box and wait until ready
+  ssh           Print SSH command for a lease
+  cp            Copy files to/from a lease
+  status        Show lease state; --wait blocks until ready
+  list          List active ciderbox machines
+  stop          Release a lease
+  cleanup       Sweep expired direct-provider machines
+  inspect       Print lease/provider details (--json for scripts)
+  doctor        Check local tools and provider readiness
+  config        Show or update user config
+  orchard       Manage an AI-agent swarm on Apple-container VMs
 
 Common Flows:
-  ciderbox run --class beast -- pnpm check
-  ciderbox job run openclaw-wsl2
+  ciderbox init
+  ciderbox compile-test
+  ciderbox chop
+
+  ciderbox run -- go test ./...
   ciderbox warmup
-  ciderbox status --id blue-lobster --wait
-  ciderbox run --id blue-lobster --shell 'pnpm install --frozen-lockfile && pnpm test'
   ciderbox ssh --id blue-lobster
-  ciderbox ports --id blue-lobster --publish 8080
-  ciderbox cp --id blue-lobster ./coverage.xml SANDBOX:/tmp/coverage.xml
-  ciderbox vnc --id blue-lobster --open
-  ciderbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open
-  ciderbox desktop proof --id blue-lobster --output artifacts/blue-lobster-proof -- ./scripts/visual-smoke.sh
-  ciderbox media preview --input desktop.mp4 --output desktop-preview.gif --trimmed-video-output desktop-change.mp4
-  ciderbox artifacts collect --id blue-lobster --all --output artifacts/blue-lobster
-  ciderbox artifacts publish --pr 123 --dir artifacts/blue-lobster --storage s3 --bucket qa-artifacts
-  ciderbox artifacts list artifacts/blue-lobster
-  ciderbox artifacts pull artifacts/blue-lobster --output /tmp/blue-lobster-proof
-  ciderbox providers
-  ciderbox providers --json
-  ciderbox webvnc --id blue-lobster --open
-  ciderbox code --id blue-lobster --open
-  ciderbox egress start --id blue-lobster --profile discord --daemon
-  ciderbox share --id blue-lobster --user friend@example.com
-  ciderbox share --id blue-lobster --org
-  ciderbox screenshot --id blue-lobster --output desktop.png
-  ciderbox inspect --id blue-lobster --json
-  ciderbox history --lease cbx_abcdef123456
-  ciderbox logs run_123
-  ciderbox events run_123
-  ciderbox attach run_123
-  ciderbox results run_123
-  ciderbox cache stats --id blue-lobster
-  ciderbox cache volumes
-  ciderbox pool ready
-  ciderbox usage --scope org
-  ciderbox admin leases --state active
-  ciderbox admin lease-audit --state expired --provider aws
-  ciderbox admin providers identity --provider aws --region eu-west-1
-  ciderbox admin providers policy --provider aws --target macos
-  ciderbox admin hosts policy --provider aws --target macos
-  ciderbox admin hosts offerings --provider aws --target macos --region eu-west-1
-  ciderbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
-  ciderbox admin hosts list --provider aws --target macos --region eu-west-1
-  ciderbox admin hosts allocate --provider aws --target macos --region eu-west-1 --dry-run
-  ciderbox warmup --actions-runner
-  ciderbox actions hydrate --id blue-lobster
-  ciderbox actions dispatch -f testbox_id=cbx_abcdef123456
-  ciderbox capsule from-actions https://github.com/example-org/my-app/actions/runs/123 --replay 'go test ./...'
-  ciderbox capsule replay capsules/example-org-my-app-actions-123/capsule.yaml --keep
-  ciderbox checkpoint create --id blue-lobster --name after-install --mode native
-  ciderbox checkpoint fork chk_abcdef1234567890 --class beast
-  ciderbox run --provider ssh --target macos --static-host mac.local -- echo ok
-  ciderbox run --provider ssh --target windows --windows-mode normal --static-host win.local -- pwsh -NoProfile -Command '$PSVersionTable'
+  ciderbox cp --id blue-lobster ./out SANDBOX:/tmp/out
+  ciderbox status --id blue-lobster --wait
   ciderbox stop blue-lobster
+
+  ciderbox orchard init
+  ciderbox orchard plant
+  ciderbox orchard tend
+  ciderbox orchard graft --tree tree-0
+  ciderbox orchard harvest --output results.json
+  ciderbox orchard chop
+
+Environment:
+  CIDERBOX_CONFIG              Config file path override
+  CRABBOX_CONFIG               Legacy config file path override
+  CRABBOX_PROVIDER             Provider override (apple-container, ssh, ...)
+  CRABBOX_IDLE_TIMEOUT         Default idle expiry, e.g. 30m
+  CRABBOX_TTL                  Maximum lease lifetime, e.g. 90m
+  CRABBOX_SSH_FALLBACK_PORTS   Comma-separated SSH fallback ports, or none
 
 Global:
   -h, --help     Show help
   --version      Print version
-
-Config:
-  ciderbox login --url <url> [--provider aws|azure|hetzner] [--no-browser]
-  ciderbox login --url <url> --token-stdin [--provider aws|azure|hetzner]
-  ciderbox azure login [--subscription <id>] [--location <loc>] [--json]
-  ciderbox config path
-  ciderbox config show [--json]
-  ciderbox config set-broker --url <url> --token-stdin [--provider aws|azure|hetzner]
-
-Environment:
-  CRABBOX_COORDINATOR          Broker URL
-  CRABBOX_COORDINATOR_TOKEN    Broker bearer token
-  CRABBOX_COORDINATOR_ADMIN_TOKEN
-                               Broker admin bearer token
-  CRABBOX_ACCESS_CLIENT_ID     Cloudflare Access service token client ID
-  CRABBOX_ACCESS_CLIENT_SECRET Cloudflare Access service token client secret
-  CRABBOX_ACCESS_TOKEN         Cloudflare Access JWT for protected routes
-  CRABBOX_PROVIDER             hetzner, aws, azure, azure-dynamic-sessions, gcp, proxmox, parallels, ssh, exe-dev, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, e2b, modal, sprites, runpod, or cloudflare
-  CRABBOX_TARGET               linux, macos, or windows
-  CRABBOX_WINDOWS_MODE         normal or wsl2
-  CRABBOX_DESKTOP              Provision or require desktop/VNC capability
-  CRABBOX_BROWSER              Provision or require browser capability
-  CRABBOX_CODE                 Provision or require web code capability
-  CRABBOX_STATIC_HOST          Static SSH host for provider=ssh
-  CRABBOX_OWNER                Usage owner override
-  CRABBOX_ORG                  Usage org override
-  CRABBOX_CONFIG               Optional config path
-  CRABBOX_IDLE_TIMEOUT         Default idle expiry, e.g. 30m
-  CRABBOX_TTL                  Maximum lease lifetime, e.g. 90m
-  CRABBOX_AWS_REGION           Default eu-west-1
-  CRABBOX_AWS_SSH_CIDRS        Comma-separated AWS SSH source CIDRs
-  CRABBOX_SSH_FALLBACK_PORTS   Comma-separated SSH fallback ports, or none
-  CRABBOX_CAPACITY_MARKET      spot or on-demand
-  CRABBOX_CAPACITY_REGIONS     Comma-separated AWS region fallback candidates
-  HCLOUD_TOKEN/HETZNER_TOKEN   Direct Hetzner mode
-  CRABBOX_PROXMOX_API_URL      Proxmox VE API URL, e.g. https://pve.local:8006
-  CRABBOX_PARALLELS_SOURCE     Parallels source VM name for provider=parallels
-  CRABBOX_PARALLELS_TEMPLATE   Parallels named template alias
-
-Aliases:
-  ciderbox release <id-or-slug> Alias for stop
-  ciderbox pool list            Alias for list
-  ciderbox machine cleanup      Alias for cleanup
 
 Docs:
   docs/commands/README.md`)

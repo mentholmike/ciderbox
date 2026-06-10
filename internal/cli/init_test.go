@@ -255,8 +255,7 @@ func TestTopLevelHelpIsWorkflowFirst(t *testing.T) {
 		"Start Here:",
 		"Commands:",
 		"Common Flows:",
-		"ciderbox run --id blue-lobster -- pnpm test:changed",
-		"Aliases:",
+		"ciderbox init",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
