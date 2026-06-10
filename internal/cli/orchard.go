@@ -220,7 +220,7 @@ func (a App) orchardPlant(ctx context.Context, args []string) error {
 	return nil
 }
 
-// plantTree provisions a single tree.
+// plantTree provisions a single tree via the apple-container provider.
 func (a App) plantTree(ctx context.Context, config *OrchardConfig, idx int) TreeState {
 	treeName := fmt.Sprintf("%s-tree-%d", config.Name, idx)
 	tree := TreeState{
@@ -232,29 +232,73 @@ func (a App) plantTree(ctx context.Context, config *OrchardConfig, idx int) Tree
 
 	fmt.Fprintf(a.Stderr, "[%s] planting...\n", treeName)
 
-	// Build run args — use apple-container provider
-	args := []string{
-		"run",
-		"--provider", "apple-container",
-		"--apple-container-image", config.Template.Image,
-		"--apple-container-cpus", fmt.Sprintf("%d", config.Template.CPUs),
-		"--apple-container-memory", config.Template.Memory,
+	// Configure provider
+	cfg, rt, err := a.providerConfigRuntime("apple-container")
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "[%s] config error: %v\n", treeName, err)
+		tree.Status = "wilted"
+		return tree
+	}
+
+	// Override with template specs
+	cfg.AppleContainer.Image = config.Template.Image
+	if config.Template.CPUs > 0 {
+		cfg.AppleContainer.CPUs = config.Template.CPUs
+	}
+	if config.Template.Memory != "" {
+		cfg.AppleContainer.Memory = config.Template.Memory
+	}
+
+	// Add orchard labels
+	if cfg.AppleContainer.ExtraRunArgs == nil {
+		cfg.AppleContainer.ExtraRunArgs = []string{}
+	}
+	cfg.AppleContainer.ExtraRunArgs = append(cfg.AppleContainer.ExtraRunArgs,
 		"--label", "orchard=true",
 		"--label", fmt.Sprintf("orchard.name=%s", config.Name),
 		"--label", fmt.Sprintf("tree.id=%s", tree.ID),
-		"--keep",
-		"--",
-		"/bin/sh", "-lc", "echo 'tree planted'; sleep infinity",
+		"--label", fmt.Sprintf("tree.name=%s", treeName),
+	)
+
+	// Get provider and acquire lease
+	provider, err := ProviderFor("apple-container")
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "[%s] provider error: %v\n", treeName, err)
+		tree.Status = "wilted"
+		return tree
 	}
 
-	// For now, just simulate. In real implementation, this would call the provider.
-	fmt.Fprintf(a.Stderr, "[%s] would run: ciderbox %s\n", treeName, strings.Join(args, " "))
+	backend, err := provider.Configure(cfg, rt)
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "[%s] backend error: %v\n", treeName, err)
+		tree.Status = "wilted"
+		return tree
+	}
 
-	// TODO: actually provision via apple-container provider
-	// TODO: graft OpenClaw agent onto tree
+	sshBackend, ok := backend.(SSHLeaseBackend)
+	if !ok {
+		fmt.Fprintf(a.Stderr, "[%s] provider does not support SSH leases\n", treeName)
+		tree.Status = "wilted"
+		return tree
+	}
 
+	// Acquire lease
+	slug := fmt.Sprintf("%s-%d", config.Name, idx)
+	lease, err := sshBackend.Acquire(ctx, AcquireRequest{
+		Options:       LeaseOptions{TargetOS: cfg.TargetOS},
+		Keep:          true,
+		RequestedSlug: slug,
+	})
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "[%s] acquire failed: %v\n", treeName, err)
+		tree.Status = "wilted"
+		return tree
+	}
+
+	tree.LeaseID = lease.LeaseID
+	tree.IP = lease.Server.PublicNet.IPv4.IP
 	tree.Status = "ready"
-	fmt.Fprintf(a.Stderr, "[%s] ready\n", treeName)
+	fmt.Fprintf(a.Stderr, "[%s] ready (lease=%s, ip=%s)\n", treeName, lease.LeaseID, tree.IP)
 	return tree
 }
 
@@ -381,7 +425,7 @@ func (a App) orchardChop(ctx context.Context, args []string) error {
 	}
 
 	fmt.Fprintf(a.Stdout, "=== Orchard Chop ===\n")
-	fmt.Fprintf(a.Stdout, "This will destroy all %d trees in orchard %q.\n", config.Trees, config.Name)
+	fmt.Fprintf(a.Stdout, "This will destroy all trees in orchard %q.\n", config.Name)
 
 	if !*yes {
 		fmt.Fprint(a.Stdout, "\nChop entire orchard? [y/N] ")
@@ -393,12 +437,54 @@ func (a App) orchardChop(ctx context.Context, args []string) error {
 		}
 	}
 
-	fmt.Fprintln(a.Stdout, "\nChopping...")
-	for i := 0; i < config.Trees; i++ {
-		treeName := fmt.Sprintf("%s-tree-%d", config.Name, i)
-		fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", treeName)
+	// Get provider backend
+	cfg, rt, err := a.providerConfigRuntime("apple-container")
+	if err != nil {
+		return exit(2, "orchard chop: config: %v", err)
 	}
-	fmt.Fprintln(a.Stdout, "Orchard cleared.")
+	provider, err := ProviderFor("apple-container")
+	if err != nil {
+		return exit(2, "orchard chop: provider: %v", err)
+	}
+	backend, err := provider.Configure(cfg, rt)
+	if err != nil {
+		return exit(2, "orchard chop: backend: %v", err)
+	}
+	sshBackend, ok := backend.(SSHLeaseBackend)
+	if !ok {
+		return exit(2, "orchard chop: provider does not support SSH leases")
+	}
+
+	// List all leases and find orchard trees
+	leases, err := sshBackend.List(ctx, ListRequest{})
+	if err != nil {
+		return exit(2, "orchard chop: list: %v", err)
+	}
+
+	fmt.Fprintln(a.Stdout, "\nChopping...")
+	chopped := 0
+	failed := 0
+	for _, lease := range leases {
+		if lease.Labels["orchard.name"] != config.Name {
+			continue
+		}
+		treeName := lease.Labels["tree.name"]
+		if treeName == "" {
+			treeName = lease.Labels["tree.id"]
+		}
+		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: LeaseTarget{Server: lease, LeaseID: lease.Labels["lease"]}}); err != nil {
+			fmt.Fprintf(a.Stderr, "  ✗ %s: %v\n", treeName, err)
+			failed++
+		} else {
+			fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", treeName)
+			chopped++
+		}
+	}
+	fmt.Fprintf(a.Stdout, "Chopped %d/%d trees.", chopped, chopped+failed)
+	if failed > 0 {
+		fmt.Fprintf(a.Stdout, " %d failed.", failed)
+	}
+	fmt.Fprintln(a.Stdout)
 
 	return nil
 }

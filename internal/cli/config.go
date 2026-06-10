@@ -1064,7 +1064,7 @@ func baseConfig() Config {
 	}
 
 	class := "beast"
-	provider := "hetzner"
+	provider := "apple-container"
 	osImage := defaultOSImage
 	hetznerImage, azureImage, gcpImage, isloImage, containerImage, _ := osImageDefaultProviderImages(osImage)
 	multipassImage, _ := osImageDefaultMultipassImage(osImage)
