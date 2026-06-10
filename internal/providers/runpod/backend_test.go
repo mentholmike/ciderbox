@@ -217,6 +217,27 @@ func TestRunpodSSHTargetUsesPublicPortAndUser(t *testing.T) {
 	}
 }
 
+func TestRunpodDefaultsUseRootInsteadOfLocalUser(t *testing.T) {
+	t.Setenv("USER", "alice")
+	cfg := Config{}
+	applyRunpodDefaults(&cfg)
+	if cfg.SSHUser != "root" {
+		t.Fatalf("ssh user=%q, want root", cfg.SSHUser)
+	}
+
+	cfg = Config{Runpod: RunpodConfig{User: "ubuntu"}}
+	applyRunpodDefaults(&cfg)
+	if cfg.SSHUser != "ubuntu" {
+		t.Fatalf("explicit runpod user=%q, want ubuntu", cfg.SSHUser)
+	}
+
+	cfg = Config{SSHUser: "custom"}
+	applyRunpodDefaults(&cfg)
+	if cfg.SSHUser != "custom" {
+		t.Fatalf("explicit generic user=%q, want custom", cfg.SSHUser)
+	}
+}
+
 func TestRunpodLeaseIdentityHandlesNamedAndManualPods(t *testing.T) {
 	leaseID, slug := runpodLeaseIdentity("crabbox-blue-12345678")
 	if leaseID != "rpod_12345678" || slug != "blue" {

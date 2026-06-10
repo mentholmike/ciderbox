@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -257,12 +256,9 @@ func applyRunpodDefaults(cfg *Config) {
 	if cfg.Runpod.User != "" {
 		cfg.SSHUser = cfg.Runpod.User
 	} else if cfg.SSHUser == "" || cfg.SSHUser == "crabbox" {
-		cfg.SSHUser = blank(os.Getenv("USER"), "root")
-		// runpod pods always boot with root as the SSH user; if a generic env
-		// override hasn't kicked in, fall through to root.
-		if cfg.SSHUser == "" {
-			cfg.SSHUser = "root"
-		}
+		// RunPod pods always boot with root as the SSH user. The local USER
+		// environment variable is unrelated to the remote account.
+		cfg.SSHUser = "root"
 	}
 	if cfg.Runpod.WorkRoot != "" {
 		cfg.WorkRoot = cfg.Runpod.WorkRoot
