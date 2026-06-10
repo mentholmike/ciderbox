@@ -1,0 +1,8 @@
+compileTest:
+  distros:
+    - name: ubuntu
+      image: ubuntu:26.04
+    - name: debian
+      image: debian:bookworm
+  command: "uname -a"
+  parallel: true
