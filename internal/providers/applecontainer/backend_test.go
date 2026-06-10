@@ -73,7 +73,7 @@ func testBackend(runner *recordingRunner) *backend {
 
 func sampleInspectJSON(id, slug, lease string) string {
 	return `[{
-		"status":"running",
+		"status":{"state":"running"},
 		"configuration":{
 			"id":"` + id + `",
 			"image":{"reference":"debian:bookworm"},
@@ -317,7 +317,7 @@ func TestAppleContainerCacheVolumeNameIsStableAndFilesystemSafe(t *testing.T) {
 func TestListContainersFiltersByLabel(t *testing.T) {
 	lsJSON := `[
 		` + strings.TrimPrefix(strings.TrimSuffix(sampleInspectJSON("crabbox-blue", "blue-lobster", "cbx_123"), "]"), "[") + `,
-		{"status":"running","configuration":{"id":"someone-elses","image":{"reference":"alpine"},"labels":{"app":"web"}},"networks":[{"address":"192.168.64.9/24"}]}
+		{"status":{"state":"running"},"configuration":{"id":"someone-elses","image":{"reference":"alpine"},"labels":{"app":"web"}},"networks":[{"address":"192.168.64.9/24"}]}
 	]`
 	runner := &recordingRunner{
 		responses: map[string]core.LocalCommandResult{
@@ -393,7 +393,7 @@ func TestPrepareLeaseRequiresNetworkAddress(t *testing.T) {
 	b := testBackend(&recordingRunner{responses: map[string]core.LocalCommandResult{}})
 	cfg := b.configForRun()
 	c := inspectContainer{
-		Status:        "running",
+		Status:        inspectStatus{State: "running"},
 		Configuration: inspectConfiguration{ID: "crabbox-noip", Labels: map[string]string{"crabbox": "true", "provider": providerName, "ssh_user": "runner", "work_root": "/work/crabbox"}},
 	}
 	if _, err := b.prepareLease(context.Background(), cfg, c, "cbx_x", "x", false); err == nil {
@@ -405,14 +405,14 @@ func TestWaitForNetworkAddressPollsInspect(t *testing.T) {
 	runner := &recordingRunner{
 		sequences: map[string][]core.LocalCommandResult{
 			commandKey([]string{"inspect", "crabbox-wait"}): {
-				{Stdout: `[{"status":"running","configuration":{"id":"crabbox-wait","labels":{"crabbox":"true","provider":"apple-container"}}}]`},
+				{Stdout: `[{"status":{"state":"running"},"configuration":{"id":"crabbox-wait","labels":{"crabbox":"true","provider":"apple-container"}}}]`},
 				{Stdout: sampleInspectJSON("crabbox-wait", "wait", "cbx_wait")},
 			},
 		},
 	}
 	b := testBackend(runner)
 	start := inspectContainer{
-		Status:        "running",
+		Status:        inspectStatus{State: "running"},
 		Configuration: inspectConfiguration{ID: "crabbox-wait", Labels: map[string]string{"crabbox": "true", "provider": providerName}},
 	}
 	c, err := b.waitForNetworkAddress(context.Background(), "crabbox-wait", start, 2*time.Second)
@@ -431,7 +431,7 @@ func TestWaitForNetworkAddressPollsInspect(t *testing.T) {
 func TestWaitForNetworkAddressStopsOnExitedContainer(t *testing.T) {
 	b := testBackend(&recordingRunner{responses: map[string]core.LocalCommandResult{}})
 	start := inspectContainer{
-		Status:        "stopped",
+		Status:        inspectStatus{State: "stopped"},
 		Configuration: inspectConfiguration{ID: "crabbox-exited", Labels: map[string]string{"crabbox": "true", "provider": providerName}},
 	}
 	if _, err := b.waitForNetworkAddress(context.Background(), "crabbox-exited", start, time.Minute); err == nil || !strings.Contains(err.Error(), "stopped before a network address") {
@@ -604,12 +604,37 @@ func TestInspectIPStripsCIDR(t *testing.T) {
 }
 
 func TestDecodeInspectToleratesStringImage(t *testing.T) {
-	containers, err := decodeInspect([]byte(`[{"status":"running","configuration":{"id":"x","image":"alpine:3"},"networks":[]}]`))
+	containers, err := decodeInspect([]byte(`[{"status":{"state":"running"},"configuration":{"id":"x","image":"alpine:3"},"networks":[]}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(containers) != 1 || containers[0].image() != "alpine:3" {
 		t.Fatalf("decoded=%#v", containers)
+	}
+}
+
+func TestShouldCleanupProtectedCeiling(t *testing.T) {
+	now := time.Now().UTC()
+
+	// Fresh protected lease — should NOT cleanup
+	server := core.Server{
+		Status: "running",
+		Labels: map[string]string{"ciderbox-protected": "true", "created_at": now.Format(time.RFC3339)},
+	}
+	should, reason := shouldCleanup(server, core.LeaseClaim{}, false, now)
+	if should {
+		t.Fatalf("fresh protected lease should not cleanup, got reason=%q", reason)
+	}
+
+	// Old protected lease (>48h) — SHOULD cleanup
+	old := now.Add(-49 * time.Hour)
+	server.Labels["created_at"] = old.Format(time.RFC3339)
+	should, reason = shouldCleanup(server, core.LeaseClaim{}, false, now)
+	if !should {
+		t.Fatalf("old protected lease should cleanup, got reason=%q", reason)
+	}
+	if reason != "ciderbox-protected ceiling exceeded (48h)" {
+		t.Fatalf("unexpected reason: %q", reason)
 	}
 }
 

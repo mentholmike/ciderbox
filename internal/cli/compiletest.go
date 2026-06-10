@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -59,6 +57,11 @@ type CompileTestResult struct {
 	ExitCode int
 	Error    string
 }
+
+// ciderboxProtectedLabel is the container label that prevents chop from
+// removing a lease unless --force is passed. Think of it as the "spiced"
+// cider — too precious to waste.
+const ciderboxProtectedLabel = "ciderbox-protected"
 
 func (a App) compileTest(ctx context.Context, args []string) error {
 	fs := newFlagSet("compile-test", a.Stderr)
@@ -132,13 +135,10 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 	args := []string{
 		"--provider", provider,
 		"--apple-container-image", distro.Image,
-		"--keep",
+		"--label", ciderboxProtectedLabel + "=true",
 		"--",
+		"/bin/sh", "-lc", command,
 	}
-
-	// Split command by shell
-	cmdParts := strings.Fields(command)
-	args = append(args, cmdParts...)
 
 	fmt.Fprintf(a.Stderr, "[%s] starting...\n", distro.Name)
 
@@ -159,9 +159,52 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 		result.Success = true
 		result.ExitCode = 0
 		fmt.Fprintf(a.Stderr, "[%s] PASSED (%s)\n", distro.Name, result.Duration)
+		// Release the lease on success — don't accumulate VMs
+		if releaseErr := a.releaseLeaseForCompileTest(ctx, provider, distro.Name); releaseErr != nil {
+			fmt.Fprintf(a.Stderr, "[%s] WARN: failed to release lease: %v\n", distro.Name, releaseErr)
+		}
 	}
 
 	return result
+}
+
+// releaseLeaseForCompileTest finds and releases the lease for a completed
+// compile-test distro. This prevents the VM leak described in issue #2.
+func (a App) releaseLeaseForCompileTest(ctx context.Context, provider, distroName string) error {
+	cfg, rt, err := a.providerConfigRuntime(provider)
+	if err != nil {
+		return err
+	}
+	p, err := ProviderFor(provider)
+	if err != nil {
+		return err
+	}
+	backend, err := p.Configure(cfg, rt)
+	if err != nil {
+		return err
+	}
+	sshBackend, ok := backend.(SSHLeaseBackend)
+	if !ok {
+		return fmt.Errorf("provider %q does not support SSH leases", provider)
+	}
+	// List leases and find matching ones for this distro
+	leases, err := sshBackend.List(ctx, ListRequest{})
+	if err != nil {
+		return err
+	}
+	for _, lease := range leases {
+		if strings.Contains(lease.Name, "crabbox-") && lease.Labels[ciderboxProtectedLabel] == "true" {
+			target := LeaseTarget{
+				Server:  lease,
+				LeaseID: lease.Labels["lease"],
+			}
+			if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: target}); err != nil {
+				return fmt.Errorf("release lease %s: %w", target.LeaseID, err)
+			}
+			fmt.Fprintf(a.Stderr, "[%s] released lease %s\n", distroName, target.LeaseID)
+		}
+	}
+	return nil
 }
 
 func (a App) displayCompileTestResults(results []CompileTestResult) {
@@ -186,6 +229,19 @@ func (a App) displayCompileTestResults(results []CompileTestResult) {
 
 	fmt.Fprintf(a.Stdout, "%s\n", strings.Repeat("-", 80))
 	fmt.Fprintf(a.Stdout, "Total: %d | Passed: %d | Failed: %d\n", len(results), passed, failed)
+}
+
+// providerConfigRuntime returns a Config and Runtime for a given provider name.
+// Uses the same loading logic as `run` command.
+func (a App) providerConfigRuntime(provider string) (Config, Runtime, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return Config{}, Runtime{}, err
+	}
+	cfg.Provider = provider
+	canonicalizeConfigProvider(&cfg)
+	rt := runtimeForApp(a)
+	return cfg, rt, nil
 }
 
 // readCiderboxConfig reads the full .ciderbox.yaml config file.
@@ -290,6 +346,7 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 	configFile := fs.String("config", ".ciderbox.yaml", "path to ciderbox config")
 	provider := fs.String("provider", "", "provider override")
 	image := fs.String("image", "", "image override")
+	keep := fs.Bool("keep", false, "keep the build container after completion")
 
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -330,14 +387,17 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 	fmt.Fprintf(a.Stdout, "Command: %s\n\n", cfg.Build.Command)
 
 	// Build run args
-	runArgs := []string{
-		"--provider", p,
-		"--apple-container-image", img,
-		"--keep",
-		"--",
+	var runArgs []string
+	runArgs = append(runArgs, "--provider", p)
+	runArgs = append(runArgs, "--apple-container-image", img)
+	if !*keep {
+		// Default: don't keep build containers unless explicitly requested
+		runArgs = append(runArgs, "--label", ciderboxProtectedLabel+"=true")
+	} else {
+		runArgs = append(runArgs, "--keep")
 	}
-	cmdParts := strings.Fields(cfg.Build.Command)
-	runArgs = append(runArgs, cmdParts...)
+	runArgs = append(runArgs, "--")
+	runArgs = append(runArgs, "/bin/sh", "-lc", cfg.Build.Command)
 
 	return a.runCommand(ctx, runArgs)
 }
@@ -373,60 +433,76 @@ func (a App) runInContainer(ctx context.Context, args []string) error {
 	return a.runCommand(ctx, runArgs)
 }
 
-// chopCommand terminates all active ciderbox leases.
-// Named after the cider-making process of chopping down apple trees.
+// chopCommand terminates active ciderbox leases.
+// By default, protected leases (ciderbox-protected=true) are preserved
+// unless --force is passed. Named after the cider-making process.
 func (a App) chopCommand(ctx context.Context, args []string) error {
 	fs := newFlagSet("chop", a.Stderr)
 	provider := fs.String("provider", "apple-container", "provider to chop")
 	yes := fs.Bool("yes", false, "skip confirmation prompt")
-
+	force := fs.Bool("force", false, "chop protected leases too (ciderbox-protected)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-
-	// For apple-container provider, use the container CLI directly
-	if *provider == "apple-container" || *provider == "apple" {
-		return a.chopAppleContainers(ctx, *yes)
-	}
-
-	return exit(2, "chop not yet supported for provider %q", *provider)
+	return a.chopViaBackend(ctx, *provider, *yes, *force)
 }
 
-func (a App) chopAppleContainers(ctx context.Context, yes bool) error {
-	// List containers with crabbox prefix
-	cmd := exec.CommandContext(ctx, "container", "ls", "--format", "json")
-	out, err := cmd.Output()
+// chopViaBackend uses the provider's CleanupBackend to properly release leases.
+// Respects the ciderboxProtectedLabel unless --force is passed.
+func (a App) chopViaBackend(ctx context.Context, providerName string, yes, force bool) error {
+	cfg, rt, err := a.providerConfigRuntime(providerName)
 	if err != nil {
-		return exit(2, "list containers: %v", err)
+		return exit(2, "chop: %v", err)
 	}
-
-	var containers []map[string]interface{}
-	if err := json.Unmarshal(out, &containers); err != nil {
-		return exit(2, "parse container list: %v", err)
+	p, err := ProviderFor(providerName)
+	if err != nil {
+		return exit(2, "chop: provider %q not found", providerName)
 	}
-
-	// Filter ciderbox containers
-	var ciderboxContainers []string
-	for _, c := range containers {
-		name, _ := c["id"].(string)
-		if strings.Contains(name, "crabbox-") {
-			ciderboxContainers = append(ciderboxContainers, name)
+	backend, err := p.Configure(cfg, rt)
+	if err != nil {
+		return exit(2, "chop: configure provider: %v", err)
+	}
+	sshBackend, ok := backend.(SSHLeaseBackend)
+	if !ok {
+		return exit(2, "chop: provider %q does not support SSH leases", providerName)
+	}
+	leases, err := sshBackend.List(ctx, ListRequest{})
+	if err != nil {
+		return exit(2, "chop: list leases: %v", err)
+	}
+	var toChop []LeaseView
+	var protected []LeaseView
+	for _, lease := range leases {
+		if lease.Labels["crabbox"] != "true" {
+			continue
 		}
+		if lease.Labels[ciderboxProtectedLabel] == "true" && !force {
+			protected = append(protected, lease)
+			continue
+		}
+		toChop = append(toChop, lease)
 	}
-
-	if len(ciderboxContainers) == 0 {
+	if len(toChop) == 0 && len(protected) == 0 {
 		fmt.Fprintf(a.Stdout, "No active ciderbox containers found.\n")
 		return nil
 	}
-
 	fmt.Fprintf(a.Stdout, "=== Ciderbox Chop ===\n")
-	fmt.Fprintf(a.Stdout, "Found %d active container(s):\n", len(ciderboxContainers))
-	for _, name := range ciderboxContainers {
-		fmt.Fprintf(a.Stdout, "  - %s\n", name)
+	if len(protected) > 0 {
+		fmt.Fprintf(a.Stdout, "Protected %d container(s) (use --force to chop):\n", len(protected))
+		for _, lease := range protected {
+			fmt.Fprintf(a.Stdout, "  🍎 %s (protected)\n", lease.Name)
+		}
 	}
-
+	if len(toChop) == 0 {
+		fmt.Fprintf(a.Stdout, "\nNothing to chop. Protected leases remain.\n")
+		return nil
+	}
+	fmt.Fprintf(a.Stdout, "\nChopping %d container(s):\n", len(toChop))
+	for _, lease := range toChop {
+		fmt.Fprintf(a.Stdout, "  - %s\n", lease.Name)
+	}
 	if !yes {
-		fmt.Fprintf(a.Stdout, "\nChop all containers? [y/N] ")
+		fmt.Fprintf(a.Stdout, "\nChop all listed containers? [y/N] ")
 		var response string
 		fmt.Fscanln(a.Stdin, &response)
 		if response != "y" && response != "Y" {
@@ -434,28 +510,27 @@ func (a App) chopAppleContainers(ctx context.Context, yes bool) error {
 			return nil
 		}
 	}
-
 	fmt.Fprintf(a.Stdout, "\nChopping...\n")
 	chopped := 0
 	failed := 0
-	for _, name := range ciderboxContainers {
-		cmd := exec.CommandContext(ctx, "container", "stop", name)
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(a.Stderr, "  ✗ %s (stop): %v\n", name, err)
-			failed++
-			continue
+	for _, lease := range toChop {
+		target := LeaseTarget{
+			Server:  lease,
+			LeaseID: lease.Labels["lease"],
 		}
-		cmd = exec.CommandContext(ctx, "container", "rm", name)
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(a.Stderr, "  ✗ %s (rm): %v\n", name, err)
+		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: target}); err != nil {
+			fmt.Fprintf(a.Stderr, "  ✗ %s: %v\n", lease.Name, err)
 			failed++
 		} else {
-			fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", name)
+			fmt.Fprintf(a.Stdout, "  ✓ %s chopped\n", lease.Name)
 			chopped++
 		}
 	}
-
-	fmt.Fprintf(a.Stdout, "\nChopped %d/%d containers.\n", chopped, len(ciderboxContainers))
+	fmt.Fprintf(a.Stdout, "\nChopped %d/%d containers.", chopped, len(toChop))
+	if len(protected) > 0 {
+		fmt.Fprintf(a.Stdout, " %d protected.", len(protected))
+	}
+	fmt.Fprintln(a.Stdout)
 	if failed > 0 {
 		return exit(1, "%d container(s) failed to chop", failed)
 	}
