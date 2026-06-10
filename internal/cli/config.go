@@ -2016,14 +2016,20 @@ type fileJobActionsConfig struct {
 }
 
 func configPaths() []string {
+	if explicit := os.Getenv("CIDERBOX_CONFIG"); explicit != "" {
+		return []string{explicit}
+	}
 	if explicit := os.Getenv("CRABBOX_CONFIG"); explicit != "" {
 		return []string{explicit}
 	}
-	paths := make([]string, 0, 3)
+	paths := make([]string, 0, 5)
 	if userPath := userConfigPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	for _, path := range []string{"crabbox.yaml", ".crabbox.yaml"} {
+	// Prefer the ciderbox-named lease config; keep crabbox names for
+	// compatibility. Note: .ciderbox.yaml is the project compile-test
+	// config and intentionally not part of this list.
+	for _, path := range []string{"ciderbox.yaml", "crabbox.yaml", ".crabbox.yaml"} {
 		if _, err := os.Stat(path); err == nil {
 			paths = append(paths, path)
 		}
@@ -2036,7 +2042,17 @@ func userConfigPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "crabbox", "config.yaml")
+	// Prefer the ciderbox config dir; fall back to a pre-rename crabbox
+	// config if it already exists so upgrades keep working.
+	ciderPath := filepath.Join(dir, "ciderbox", "config.yaml")
+	if _, err := os.Stat(ciderPath); err == nil {
+		return ciderPath
+	}
+	legacyPath := filepath.Join(dir, "crabbox", "config.yaml")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return ciderPath
 }
 
 func readFileConfig(path string) (fileConfig, error) {

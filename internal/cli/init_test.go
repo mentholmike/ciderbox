@@ -255,7 +255,7 @@ func TestTopLevelHelpIsWorkflowFirst(t *testing.T) {
 		"Start Here:",
 		"Commands:",
 		"Common Flows:",
-		"crabbox run --id blue-lobster -- pnpm test:changed",
+		"ciderbox run --id blue-lobster -- pnpm test:changed",
 		"Aliases:",
 	} {
 		if !strings.Contains(stdout.String(), want) {

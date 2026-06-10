@@ -10,10 +10,10 @@ import (
 // and `container ls --format json`. In Apple's container CLI v1.0.0, status is an
 // object with state, pid, startedAt, and networks — not a flat string.
 type inspectStatus struct {
-	State     string             `json:"state"`
-	PID       int                `json:"pid,omitempty"`
-	StartedAt string             `json:"startedAt,omitempty"`
-	Networks  []inspectNetwork   `json:"networks,omitempty"`
+	State     string           `json:"state"`
+	PID       int              `json:"pid,omitempty"`
+	StartedAt string           `json:"startedAt,omitempty"`
+	Networks  []inspectNetwork `json:"networks,omitempty"`
 }
 
 // inspectContainer mirrors the JSON returned by `container inspect <id>` and

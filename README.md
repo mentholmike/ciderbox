@@ -18,7 +18,7 @@ ciderbox chop
 - Apple Silicon Mac (M1+)
 - macOS 26+ (for container IP reachability)
 - Apple `container` CLI installed
-- Go 1.22+ (for building from source)
+- Go 1.26+ (for building from source)
 
 ## Install
 

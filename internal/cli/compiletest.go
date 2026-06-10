@@ -55,9 +55,9 @@ func (w *bufferedWriter) String() string {
 // CiderboxConfig is the full repo-level config for ciderbox projects.
 // Lives at .ciderbox.yaml in the project root.
 type CiderboxConfig struct {
-	Project     string            `yaml:"project"`
-	CompileTest CompileTestConfig `yaml:"compileTest"`
-	Build       BuildConfig       `yaml:"build"`
+	Project     string              `yaml:"project"`
+	CompileTest CompileTestConfig   `yaml:"compileTest"`
+	Build       BuildConfig         `yaml:"build"`
 	Run         CiderboxRunSettings `yaml:"run"`
 }
 
@@ -180,18 +180,20 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 	start := time.Now()
 	// Build ciderbox run args (don't include "run" — runCommand handles that)
 	cmdStr := command
-	
-	// If dependencies are configured for this distro, prepend apt-get install
-	// This allows users to specify packages needed at runtime
+
+	// If dependencies are configured, prepend a package-manager-aware install
+	// step so non-Debian distros (Alpine, Fedora, Arch) work too.
 	if len(dependencies) > 0 {
-		deps := strings.Join(dependencies, " ")
-		cmdStr = fmt.Sprintf("apt-get update && apt-get install -y --no-install-recommends %s && %s", deps, command)
+		cmdStr = depInstallSnippet(dependencies) + " && " + command
 	}
 
+	// No --keep and no protection label: `run`'s normal lifecycle acquires a
+	// fresh lease and releases it when the command finishes (success or
+	// failure), so compile-test never leaks VMs and never has to discover
+	// and delete leases after the fact.
 	args := []string{
 		"--provider", provider,
 		"--apple-container-image", distro.Image,
-		"--label", ciderboxProtectedLabel + "=true",
 		"--",
 		"/bin/sh", "-lc", cmdStr,
 	}
@@ -218,51 +220,22 @@ func (a App) runCompileTest(ctx context.Context, provider string, distro DistroC
 		result.Success = true
 		result.ExitCode = 0
 		fmt.Fprintf(outWriter, "[%s] PASSED (%s)\n", distro.Name, result.Duration)
-		// Release the lease on success — don't accumulate VMs
-		if releaseErr := a.releaseLeaseForCompileTest(ctx, provider, distro.Name); releaseErr != nil {
-			fmt.Fprintf(outWriter, "[%s] WARN: failed to release lease: %v\n", distro.Name, releaseErr)
-		}
 	}
 	return result
 }
 
-// releaseLeaseForCompileTest finds and releases the lease for a completed
-// compile-test distro. This prevents the VM leak described in issue #2.
-func (a App) releaseLeaseForCompileTest(ctx context.Context, provider, distroName string) error {
-	cfg, rt, err := a.providerConfigRuntime(provider)
-	if err != nil {
-		return err
-	}
-	p, err := ProviderFor(provider)
-	if err != nil {
-		return err
-	}
-	backend, err := p.Configure(cfg, rt)
-	if err != nil {
-		return err
-	}
-	sshBackend, ok := backend.(SSHLeaseBackend)
-	if !ok {
-		return fmt.Errorf("provider %q does not support SSH leases", provider)
-	}
-	// List leases and find matching ones for this distro
-	leases, err := sshBackend.List(ctx, ListRequest{})
-	if err != nil {
-		return err
-	}
-	for _, lease := range leases {
-		if strings.Contains(lease.Name, "crabbox-") && lease.Labels[ciderboxProtectedLabel] == "true" {
-			target := LeaseTarget{
-				Server:  lease,
-				LeaseID: lease.Labels["lease"],
-			}
-			if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{Lease: target}); err != nil {
-				return fmt.Errorf("release lease %s: %w", target.LeaseID, err)
-			}
-			fmt.Fprintf(a.Stderr, "[%s] released lease %s\n", distroName, target.LeaseID)
-		}
-	}
-	return nil
+// depInstallSnippet returns a shell snippet that installs the given packages
+// using whichever package manager the distro provides. Falls back to a clear
+// error when none is found instead of failing on a missing apt-get.
+func depInstallSnippet(deps []string) string {
+	pkgs := strings.Join(deps, " ")
+	return fmt.Sprintf(
+		`if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends %[1]s; `+
+			`elif command -v apk >/dev/null 2>&1; then apk add --no-cache %[1]s; `+
+			`elif command -v dnf >/dev/null 2>&1; then dnf install -y %[1]s; `+
+			`elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm %[1]s; `+
+			`else echo "ciderbox: no supported package manager (apt-get/apk/dnf/pacman) found" >&2; exit 1; fi`,
+		pkgs)
 }
 
 func (a App) displayCompileTestResults(results []CompileTestResult) {
@@ -452,19 +425,21 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 	// Build run args
 	cmdStr := cfg.Build.Command
 	if len(cfg.Build.Dependencies) > 0 {
-		deps := strings.Join(cfg.Build.Dependencies, " ")
-		cmdStr = fmt.Sprintf("apt-get update && apt-get install -y --no-install-recommends %s && %s", deps, cfg.Build.Command)
+		cmdStr = depInstallSnippet(cfg.Build.Dependencies) + " && " + cfg.Build.Command
 	}
 
 	var runArgs []string
 	runArgs = append(runArgs, "--provider", p)
 	runArgs = append(runArgs, "--apple-container-image", img)
-	if !*keep {
-		// Default: don't keep build containers unless explicitly requested
-		runArgs = append(runArgs, "--label", ciderboxProtectedLabel+"=true")
-	} else {
+	if *keep {
+		// Keep the build container and mark it protected so `chop` skips it
+		// unless --force is passed. The protection label must be a real
+		// container label, so it goes through the provider's extra run args.
 		runArgs = append(runArgs, "--keep")
+		runArgs = append(runArgs, "--apple-container-extra-run-args", "--label "+ciderboxProtectedLabel+"=true")
 	}
+	// Default (no --keep): run's normal lifecycle releases the lease when the
+	// command finishes, so ephemeral build containers never accumulate.
 	runArgs = append(runArgs, "--")
 	runArgs = append(runArgs, "/bin/sh", "-lc", cmdStr)
 

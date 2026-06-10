@@ -134,30 +134,34 @@ func isHelpArg(arg string) bool {
 }
 
 func (a App) printHelp() {
-	fmt.Fprintln(a.Stdout, `Crabbox leases remote test boxes, syncs your dirty checkout, runs commands, and cleans up.
+	fmt.Fprintln(a.Stdout, `Ciderbox leases remote test boxes, syncs your dirty checkout, runs commands, and cleans up.
 
 Usage:
-  crabbox <command> [flags]
-  crabbox run [flags] -- <command...>
+  ciderbox <command> [flags]
+  ciderbox run [flags] -- <command...>
 
 Start Here:
-  crabbox login --url https://broker.example.com
+  ciderbox login --url https://broker.example.com
       Open GitHub login for your broker and store credentials.
-  crabbox doctor
+  ciderbox doctor
       Check local tools, config, broker, and provider access.
-  crabbox init
-      Add repo-local Crabbox config, GitHub workflow, and agent skill.
-  crabbox warmup --class beast
+  ciderbox init
+      Add repo-local Ciderbox config, GitHub workflow, and agent skill.
+  ciderbox warmup --class beast
       Lease a reusable box and print a cbx_... id plus friendly slug.
-  crabbox prewarm
+  ciderbox prewarm
       Lease a reusable box and hydrate it from configured GitHub Actions.
-  crabbox run --id blue-lobster -- pnpm test:changed
+  ciderbox run --id blue-lobster -- pnpm test:changed
       Sync this checkout to the box and run a command.
-  crabbox warmup --desktop --browser --code
+  ciderbox warmup --desktop --browser --code
       Lease a UI-capable box with a browser and web code editor.
 
 Commands:
-  init        Onboard the current repo for Crabbox
+  init        Onboard the current repo for Ciderbox
+  compile-test Run the configured test command across multiple distros
+  build       Build the project in a container
+  chop        Terminate active ciderbox leases
+  orchard     Manage an AI agent swarm on Apple container VMs
   login       Open GitHub login, store broker credentials, verify access
   logout      Remove the stored broker token
   whoami      Show broker identity
@@ -165,7 +169,7 @@ Commands:
   warmup      Lease a box and wait until it is ready
   prewarm     Lease and hydrate a reusable test-ready box
   run         Sync the repo, run a remote command, stream output
-  job         Run named repo-local Crabbox jobs
+  job         Run named repo-local Ciderbox jobs
   desktop     Launch apps into a visible desktop session
   media       Create preview artifacts from recorded desktop videos
   artifacts   Collect, transform, and publish QA artifacts
@@ -178,7 +182,7 @@ Commands:
   results     Show recorded test result summaries
   cache       Inspect, purge, warm, or list remote cache volumes
   status      Show lease state; add --wait to block until ready
-  list        List Crabbox machines
+  list        List Ciderbox machines
   share       Share a lease with users or the owning org
   unshare     Remove lease sharing
   image       Create provider images and promote brokered AWS runner images
@@ -204,71 +208,71 @@ Commands:
   config      Show or update user config
 
 Common Flows:
-  crabbox run --class beast -- pnpm check
-  crabbox job run openclaw-wsl2
-  crabbox warmup
-  crabbox status --id blue-lobster --wait
-  crabbox run --id blue-lobster --shell 'pnpm install --frozen-lockfile && pnpm test'
-  crabbox ssh --id blue-lobster
-  crabbox ports --id blue-lobster --publish 8080
-  crabbox cp --id blue-lobster ./coverage.xml SANDBOX:/tmp/coverage.xml
-  crabbox vnc --id blue-lobster --open
-  crabbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open
-  crabbox desktop proof --id blue-lobster --output artifacts/blue-lobster-proof -- ./scripts/visual-smoke.sh
-  crabbox media preview --input desktop.mp4 --output desktop-preview.gif --trimmed-video-output desktop-change.mp4
-  crabbox artifacts collect --id blue-lobster --all --output artifacts/blue-lobster
-  crabbox artifacts publish --pr 123 --dir artifacts/blue-lobster --storage s3 --bucket qa-artifacts
-  crabbox artifacts list artifacts/blue-lobster
-  crabbox artifacts pull artifacts/blue-lobster --output /tmp/blue-lobster-proof
-  crabbox providers
-  crabbox providers --json
-  crabbox webvnc --id blue-lobster --open
-  crabbox code --id blue-lobster --open
-  crabbox egress start --id blue-lobster --profile discord --daemon
-  crabbox share --id blue-lobster --user friend@example.com
-  crabbox share --id blue-lobster --org
-  crabbox screenshot --id blue-lobster --output desktop.png
-  crabbox inspect --id blue-lobster --json
-  crabbox history --lease cbx_abcdef123456
-  crabbox logs run_123
-  crabbox events run_123
-  crabbox attach run_123
-  crabbox results run_123
-  crabbox cache stats --id blue-lobster
-  crabbox cache volumes
-  crabbox pool ready
-  crabbox usage --scope org
-  crabbox admin leases --state active
-  crabbox admin lease-audit --state expired --provider aws
-  crabbox admin providers identity --provider aws --region eu-west-1
-  crabbox admin providers policy --provider aws --target macos
-  crabbox admin hosts policy --provider aws --target macos
-  crabbox admin hosts offerings --provider aws --target macos --region eu-west-1
-  crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
-  crabbox admin hosts list --provider aws --target macos --region eu-west-1
-  crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --dry-run
-  crabbox warmup --actions-runner
-  crabbox actions hydrate --id blue-lobster
-  crabbox actions dispatch -f testbox_id=cbx_abcdef123456
-  crabbox capsule from-actions https://github.com/example-org/my-app/actions/runs/123 --replay 'go test ./...'
-  crabbox capsule replay capsules/example-org-my-app-actions-123/capsule.yaml --keep
-  crabbox checkpoint create --id blue-lobster --name after-install --mode native
-  crabbox checkpoint fork chk_abcdef1234567890 --class beast
-  crabbox run --provider ssh --target macos --static-host mac.local -- echo ok
-  crabbox run --provider ssh --target windows --windows-mode normal --static-host win.local -- pwsh -NoProfile -Command '$PSVersionTable'
-  crabbox stop blue-lobster
+  ciderbox run --class beast -- pnpm check
+  ciderbox job run openclaw-wsl2
+  ciderbox warmup
+  ciderbox status --id blue-lobster --wait
+  ciderbox run --id blue-lobster --shell 'pnpm install --frozen-lockfile && pnpm test'
+  ciderbox ssh --id blue-lobster
+  ciderbox ports --id blue-lobster --publish 8080
+  ciderbox cp --id blue-lobster ./coverage.xml SANDBOX:/tmp/coverage.xml
+  ciderbox vnc --id blue-lobster --open
+  ciderbox desktop launch --id blue-lobster --browser --url https://example.com --webvnc --open
+  ciderbox desktop proof --id blue-lobster --output artifacts/blue-lobster-proof -- ./scripts/visual-smoke.sh
+  ciderbox media preview --input desktop.mp4 --output desktop-preview.gif --trimmed-video-output desktop-change.mp4
+  ciderbox artifacts collect --id blue-lobster --all --output artifacts/blue-lobster
+  ciderbox artifacts publish --pr 123 --dir artifacts/blue-lobster --storage s3 --bucket qa-artifacts
+  ciderbox artifacts list artifacts/blue-lobster
+  ciderbox artifacts pull artifacts/blue-lobster --output /tmp/blue-lobster-proof
+  ciderbox providers
+  ciderbox providers --json
+  ciderbox webvnc --id blue-lobster --open
+  ciderbox code --id blue-lobster --open
+  ciderbox egress start --id blue-lobster --profile discord --daemon
+  ciderbox share --id blue-lobster --user friend@example.com
+  ciderbox share --id blue-lobster --org
+  ciderbox screenshot --id blue-lobster --output desktop.png
+  ciderbox inspect --id blue-lobster --json
+  ciderbox history --lease cbx_abcdef123456
+  ciderbox logs run_123
+  ciderbox events run_123
+  ciderbox attach run_123
+  ciderbox results run_123
+  ciderbox cache stats --id blue-lobster
+  ciderbox cache volumes
+  ciderbox pool ready
+  ciderbox usage --scope org
+  ciderbox admin leases --state active
+  ciderbox admin lease-audit --state expired --provider aws
+  ciderbox admin providers identity --provider aws --region eu-west-1
+  ciderbox admin providers policy --provider aws --target macos
+  ciderbox admin hosts policy --provider aws --target macos
+  ciderbox admin hosts offerings --provider aws --target macos --region eu-west-1
+  ciderbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
+  ciderbox admin hosts list --provider aws --target macos --region eu-west-1
+  ciderbox admin hosts allocate --provider aws --target macos --region eu-west-1 --dry-run
+  ciderbox warmup --actions-runner
+  ciderbox actions hydrate --id blue-lobster
+  ciderbox actions dispatch -f testbox_id=cbx_abcdef123456
+  ciderbox capsule from-actions https://github.com/example-org/my-app/actions/runs/123 --replay 'go test ./...'
+  ciderbox capsule replay capsules/example-org-my-app-actions-123/capsule.yaml --keep
+  ciderbox checkpoint create --id blue-lobster --name after-install --mode native
+  ciderbox checkpoint fork chk_abcdef1234567890 --class beast
+  ciderbox run --provider ssh --target macos --static-host mac.local -- echo ok
+  ciderbox run --provider ssh --target windows --windows-mode normal --static-host win.local -- pwsh -NoProfile -Command '$PSVersionTable'
+  ciderbox stop blue-lobster
 
 Global:
   -h, --help     Show help
   --version      Print version
 
 Config:
-  crabbox login --url <url> [--provider aws|azure|hetzner] [--no-browser]
-  crabbox login --url <url> --token-stdin [--provider aws|azure|hetzner]
-  crabbox azure login [--subscription <id>] [--location <loc>] [--json]
-  crabbox config path
-  crabbox config show [--json]
-  crabbox config set-broker --url <url> --token-stdin [--provider aws|azure|hetzner]
+  ciderbox login --url <url> [--provider aws|azure|hetzner] [--no-browser]
+  ciderbox login --url <url> --token-stdin [--provider aws|azure|hetzner]
+  ciderbox azure login [--subscription <id>] [--location <loc>] [--json]
+  ciderbox config path
+  ciderbox config show [--json]
+  ciderbox config set-broker --url <url> --token-stdin [--provider aws|azure|hetzner]
 
 Environment:
   CRABBOX_COORDINATOR          Broker URL
@@ -301,9 +305,9 @@ Environment:
   CRABBOX_PARALLELS_TEMPLATE   Parallels named template alias
 
 Aliases:
-  crabbox release <id-or-slug> Alias for stop
-  crabbox pool list            Alias for list
-  crabbox machine cleanup      Alias for cleanup
+  ciderbox release <id-or-slug> Alias for stop
+  ciderbox pool list            Alias for list
+  ciderbox machine cleanup      Alias for cleanup
 
 Docs:
   docs/commands/README.md`)
