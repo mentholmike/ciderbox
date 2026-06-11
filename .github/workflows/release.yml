@@ -77,6 +77,7 @@ jobs:
           args: release --clean --config /tmp/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Publish GitHub release notes
         env:
@@ -102,7 +103,7 @@ jobs:
 
       - name: Verify Homebrew formula
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           sleep 5
