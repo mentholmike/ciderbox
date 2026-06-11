@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var version = "0.15.0"
+var version = "1.0.0"
 
 func currentVersion() string {
 	buildInfoVersion := ""

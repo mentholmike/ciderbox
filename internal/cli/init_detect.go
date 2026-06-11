@@ -102,13 +102,13 @@ func detectPackageCommand(root, rel string) (string, []string, []string) {
 		return "", nil, nil
 	}
 	pm := detectPackageManager(root, rel, pkg.PackageManager)
-	tools := []string{"node", pm.Name}
+	tools := []string{"node", "npm"}
 	excludes := []string{"node_modules", ".npm", ".yarn/cache"}
-	if pm.Name == "pnpm" || pm.Name == "yarn" {
-		tools = append([]string{"corepack"}, tools...)
-	}
 	if pm.Name == "pnpm" {
 		excludes = append(excludes, ".pnpm-store")
+	}
+	if pm.Name == "bun" {
+		tools = append(tools, "curl", "bash")
 	}
 	return packageManagerCommand(rel, pm, script), tools, excludes
 }
@@ -205,21 +205,32 @@ func packageManagerCommand(rel string, pm detectedPackageManager, script string)
 			install += " --frozen-lockfile"
 		}
 		run := "pnpm " + runScript
-		command = "corepack enable && " + install + " && " + run
+		if pm.Version != "" {
+			command = "npm install -g corepack && corepack enable && corepack prepare " + shellQuote("pnpm@"+pm.Version) + " --activate && " + install + " && " + run
+		} else {
+			command = "npm install -g pnpm && " + install + " && " + run
+		}
 	case "yarn":
 		install := "yarn install"
 		if pm.HasLockfile {
 			install += yarnFrozenInstallFlag(pm.Version)
 		}
 		run := "yarn " + packageDirectScriptName(script)
-		command = "corepack enable && " + install + " && " + run
+		if pm.Version != "" {
+			major, _, _ := strings.Cut(pm.Version, ".")
+			if majorVersion, err := strconv.Atoi(major); err == nil && majorVersion >= 2 {
+				command = "npm install -g corepack && corepack enable && corepack prepare " + shellQuote("yarn@"+pm.Version) + " --activate && " + install + " && " + run
+				break
+			}
+		}
+		command = "npm install -g yarn && " + install + " && " + run
 	case "bun":
 		install := "bun install"
 		if pm.HasLockfile {
 			install += " --frozen-lockfile"
 		}
 		run := "bun " + runScript
-		command = install + " && " + run
+		command = "curl -fsSL https://bun.sh/install | bash && export PATH=$HOME/.bun/bin:$PATH && " + install + " && " + run
 	default:
 		install := "npm install"
 		if pm.HasLockfile {

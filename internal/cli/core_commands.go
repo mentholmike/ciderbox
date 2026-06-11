@@ -658,6 +658,39 @@ func mapPackageName(manager, pkg string) string {
 		case "apk", "pacman", "zypper":
 			return "go"
 		}
+	case "go":
+		switch manager {
+		case "apt":
+			return "golang-go"
+		case "dnf", "microdnf", "yum":
+			return "golang"
+		}
+	case "node":
+		switch manager {
+		case "apt":
+			return "nodejs"
+		case "apk":
+			return "nodejs"
+		case "dnf", "microdnf", "yum":
+			return "nodejs"
+		}
+	case "npm":
+		switch manager {
+		case "apt":
+			return "npm"
+		}
+	case "cargo":
+		switch manager {
+		case "apt":
+			return "cargo"
+		case "dnf", "microdnf", "yum":
+			return "rust-cargo"
+		}
+	case "make":
+		switch manager {
+		case "apt":
+			return "build-essential"
+		}
 	case "python3":
 		if manager == "pacman" {
 			return "python"
