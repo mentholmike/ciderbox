@@ -49,7 +49,7 @@ brews:
       name: mentholmike-bot
       email: bot@michaelsmacmini.local
     commit_msg_template: "brew: update ciderbox to {{ .Tag }}"
-    homepage: https://github.com/mentholmike/ciderbox
+    homepage: https://ciderbox.dev
     description: Apple-native throwaway dev environments using container CLI
     license: MIT
     install: |

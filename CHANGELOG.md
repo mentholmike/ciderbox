@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.0 - 2026-06-11
+
+### Added
+
+- **Ciderbox is born.** Forked from crabbox to focus exclusively on Apple Silicon native containers. No Docker, no cloud brokers, no SSH bootstrap — just `container run` and go.
+- Apple `container` CLI provider for sub-second Linux VM boots on Apple Silicon.
+- Direct container IP networking — no port collision, no port publishing.
+- `compile-test` command for first-class multi-distro testing (Ubuntu, Debian, Alpine, Fedora, Rocky, openSUSE).
+- `orchard` command suite for spinning up AI agent swarms inside containers.
+- `.ciderbox.yaml` project configuration format.
+- `ciderbox doctor` for environment validation.
+- `ciderbox init` for scaffolding project configs.
+- `ciderbox chop` for one-shot cleanup of all ciderbox containers.
+
+### Changed
+
+- Simplified CLI surface — removed cloud broker commands, lease/claim coordination, and SSH bootstrapping.
+- Replaced Docker runtime with Apple `container` CLI.
+- Hypervisor isolation via `container` instead of Docker Desktop/OrbStack/Colima.
+
+### Removed
+
+- Cloud providers (AWS, Azure, GCP, Hetzner, Blacksmith, Tenki, etc.).
+- Docker/OrbStack/Colima runtime support.
+- Lease/claim coordination and slug allocation.
+- SSH bootstrap and warm/persistent VM management.
+- Broker authentication and token management.
+- All cloud-specific configuration and environment variables.
+
 ## Unreleased
 
 ### Added
