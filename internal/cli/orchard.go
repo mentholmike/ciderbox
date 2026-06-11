@@ -611,12 +611,11 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 func (a App) orchardGraft(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard graft", a.Stderr)
 	treeID := fs.String("tree", "", "tree ID to graft onto")
+	graftAll := fs.Bool("all", false, "graft OpenClaw onto all trees")
+	upgrade := fs.Bool("upgrade", false, "force reinstall even if already grafted")
 	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
 	if err := parseFlags(fs, args); err != nil {
 		return err
-	}
-	if *treeID == "" {
-		return exit(2, "--tree required")
 	}
 
 	config, err := readOrchardConfig(*configFile)
@@ -624,18 +623,78 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 		return exit(2, "orchard graft: config: %v", err)
 	}
 
-	target, containerRuntime, err := a.findOrchardTree(ctx, config.Name, *treeID)
+	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
 	if err != nil {
 		return exit(2, "orchard graft: %v", err)
 	}
 
-	fmt.Fprintf(a.Stdout, "=== Orchard Graft ===\n")
-	fmt.Fprintf(a.Stdout, "Tree: %s\n", *treeID)
-	fmt.Fprintf(a.Stdout, "Container: %s\n", target.ID)
-	fmt.Fprintln(a.Stdout, "Installing Node.js 22 + OpenClaw...")
+	targetTrees := make([]ContainerInfo, 0)
+	if *graftAll {
+		targetTrees = trees
+	} else if *treeID != "" {
+		target, err := a.findTreeInSlice(trees, *treeID)
+		if err != nil {
+			return exit(2, "orchard graft: %v", err)
+		}
+		targetTrees = append(targetTrees, target)
+	} else {
+		return exit(2, "orchard graft: specify --tree <id> or --all")
+	}
 
-	identity := blank(config.Agent.Identity, *treeID)
-	identityDoc := fmt.Sprintf("# IDENTITY\n\nTree: %s\nIdentity: %s\nModel: %s\n", *treeID, identity, config.Agent.Model)
+	if len(targetTrees) == 0 {
+		return exit(2, "orchard graft: no matching trees found")
+	}
+
+	fmt.Fprintf(a.Stdout, "=== Orchard Graft ===\n")
+	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
+	fmt.Fprintf(a.Stdout, "Trees: %d\n", len(targetTrees))
+	if *upgrade {
+		fmt.Fprintln(a.Stdout, "Mode: upgrade (force reinstall)")
+	}
+	fmt.Fprintln(a.Stdout)
+
+	grafted, skipped, failed := 0, 0, 0
+	for _, tree := range targetTrees {
+		name := blank(tree.Labels["tree.id"], tree.Name)
+		fmt.Fprintf(a.Stdout, "[%s] checking...\n", name)
+
+		// Check if already grafted (skip unless --upgrade)
+		if !*upgrade {
+			if out, err := a.treeExecCapture(ctx, containerRuntime, tree.ID, []string{"openclaw", "--version"}); err == nil && out != "" {
+				fmt.Fprintf(a.Stdout, "[%s] already grafted (openclaw %s); use --upgrade to reinstall\n", name, strings.TrimSpace(out))
+				skipped++
+				continue
+			}
+		}
+
+		fmt.Fprintf(a.Stdout, "[%s] grafting...\n", name)
+		if err := a.graftTree(ctx, containerRuntime, config, tree, name, *upgrade); err != nil {
+			fmt.Fprintf(a.Stderr, "[%s] graft failed: %v\n", name, err)
+			failed++
+			continue
+		}
+		grafted++
+	}
+
+	fmt.Fprintf(a.Stdout, "\ngrafted=%d skipped=%d failed=%d\n", grafted, skipped, failed)
+	if failed > 0 {
+		return exit(1, "%d tree(s) failed to graft", failed)
+	}
+	return nil
+}
+
+func (a App) findTreeInSlice(trees []ContainerInfo, treeID string) (ContainerInfo, error) {
+	for _, tree := range trees {
+		if tree.Labels["tree.id"] == treeID || tree.Name == treeID || strings.Contains(tree.Name, treeID) {
+			return tree, nil
+		}
+	}
+	return ContainerInfo{}, fmt.Errorf("tree %q not found", treeID)
+}
+
+func (a App) graftTree(ctx context.Context, containerRuntime ContainerRuntime, config *OrchardConfig, tree ContainerInfo, name string, upgrade bool) error {
+	identity := blank(config.Agent.Identity, name)
+	identityDoc := fmt.Sprintf("# IDENTITY\n\nTree: %s\nIdentity: %s\nModel: %s\n", name, identity, config.Agent.Model)
 	encodedIdentity := base64.StdEncoding.EncodeToString([]byte(identityDoc))
 
 	installScript := strings.Join([]string{
@@ -645,116 +704,28 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 		"apt-get update -qq",
 		"apt-get install -y -qq --no-install-recommends curl ca-certificates git gnupg",
 		"if ! command -v node >/dev/null 2>&1 || [ \"$(node -e 'process.stdout.write(String(process.versions.node.split(\".\")[0]))')\" -lt 22 ]; then curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs; fi",
-		"npm install -g openclaw",
+		"npm install -g openclaw" + boolFlag(upgrade, " --upgrade", ""),
 		"mkdir -p /root/.openclaw/workspace",
 		fmt.Sprintf("printf %%s %q | base64 -d > /root/.openclaw/workspace/IDENTITY.md", encodedIdentity),
 		"openclaw --version",
 	}, " && ")
 
-	if err := a.treeExec(ctx, containerRuntime, target.ID, []string{"/bin/sh", "-lc", installScript}); err != nil {
-		return exit(1, "graft failed: %v", err)
-	}
-
-	fmt.Fprintln(a.Stdout, "\nAgent grafted: Node 22 + openclaw installed, identity written.")
-	fmt.Fprintln(a.Stdout, "Note: model/provider credentials are NOT configured yet.")
-	return nil
-}
-
-// orchardRun executes one task on one tree or all trees.
-// The task is exposed as ORCHARD_TASK and stdout is captured in orchardResultPath.
-func (a App) orchardRun(ctx context.Context, args []string) error {
-	fs := newFlagSet("orchard run", a.Stderr)
-	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
-	treeID := fs.String("tree", "", "tree ID to run on; defaults to all trees")
-	task := fs.String("task", "", "task prompt/instruction to execute")
-	if err := parseFlags(fs, args); err != nil {
+	if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"/bin/sh", "-lc", installScript}); err != nil {
 		return err
 	}
-	if *task == "" {
-		return exit(2, "--task required")
-	}
 
-	config, err := readOrchardConfig(*configFile)
-	if err != nil {
-		return exit(2, "orchard config: %v", err)
-	}
-
-	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
-	if err != nil {
-		return exit(2, "orchard run: %v", err)
-	}
-
-	if *treeID != "" {
-		filtered := trees[:0]
-		for _, tree := range trees {
-			if tree.Labels["tree.id"] == *treeID || tree.Name == *treeID || strings.Contains(tree.Name, *treeID) {
-				filtered = append(filtered, tree)
-			}
-		}
-		trees = filtered
-	}
-
-	if len(trees) == 0 {
-		if *treeID != "" {
-			return exit(2, "tree %q not found", *treeID)
-		}
-		return exit(2, "no trees running")
-	}
-
-	command := strings.TrimSpace(config.Agent.Command)
-	if command == "" {
-		command = `openclaw run "$ORCHARD_TASK"`
-	}
-
-	encodedTask := base64.StdEncoding.EncodeToString([]byte(*task))
-	encodedCommand := base64.StdEncoding.EncodeToString([]byte(command))
-
-	fmt.Fprintf(a.Stdout, "=== Orchard Run ===\n")
-	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
-	fmt.Fprintf(a.Stdout, "Trees: %d\n", len(trees))
-	fmt.Fprintf(a.Stdout, "Result path: %s\n\n", orchardResultPath)
-
-	failures := 0
-	for _, tree := range trees {
-		name := blank(tree.Labels["tree.id"], tree.Name)
-		fmt.Fprintf(a.Stdout, "[%s] running task...\n", name)
-
-		script := fmt.Sprintf(`set -e
-export ORCHARD_TASK="$(printf %%s %q | base64 -d)"
-ORCHARD_AGENT_COMMAND="$(printf %%s %q | base64 -d)"
-mkdir -p "$(dirname %q)"
-set +e
-/bin/sh -lc "$ORCHARD_AGENT_COMMAND" > %q 2>&1
-status=$?
-if [ $status -ne 0 ]; then
-  python3 - <<'PY' 2>/dev/null || true
-import json
-p = %q
-try:
-    raw = open(p, "r", encoding="utf-8", errors="replace").read()
-except Exception as exc:
-    raw = str(exc)
-open(p, "w").write(json.dumps({"status":"error","output":raw}))
-PY
-  exit $status
-fi
-`, encodedTask, encodedCommand, orchardResultPath, orchardResultPath, orchardResultPath)
-
-		if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"/bin/sh", "-lc", script}); err != nil {
-			fmt.Fprintf(a.Stderr, "[%s] task failed: %v\n", name, err)
-			failures++
-			continue
-		}
-
-		fmt.Fprintf(a.Stdout, "[%s] complete\n", name)
-	}
-
-	if failures > 0 {
-		return exit(1, "%d tree task(s) failed", failures)
-	}
-
+	fmt.Fprintf(a.Stdout, "[%s] grafted: Node 22 + openclaw installed, identity written\n", name)
 	return nil
 }
+
+func boolFlag(v bool, ifTrue, ifFalse string) string {
+	if v {
+		return ifTrue
+	}
+	return ifFalse
+}
+
+// orchardRun moved to orchard_run.go (supports --sync, task IDs, structured results)
 
 // orchardDoctor checks host/runtime/tree readiness.
 func (a App) orchardDoctor(ctx context.Context, args []string) error {
