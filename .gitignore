@@ -1,19 +1,36 @@
-bin/
-dist/
-dist-cloudflare/
-artifacts/
-.crabbox/
-node_modules/
-.wrangler/
-*.test
-coverage.out
-crabbox
+# Build artifacts
 ciderbox
 bin/
-# Generated plan docs
+dist/
+
+# Generated per-project configs (ciderbox init)
+.orchard.yaml
+
+# Ciderbox runtime state
+.ciderbox/
+
+# Legacy crabbox artifacts
+.crabbox/
+.crabbox.yaml
+crabbox
+
+# Test coverage
+coverage.out
+*.test
+
+# Node (docs site only)
+node_modules/
+
+# IDE / OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Misc temp
+*.restored
+artifacts/
+
+# Planning docs (not runtime)
 ciderbox-plan.md
 orchid.md
-# Per-user config
-.orchard.yaml
-# Restored backup files
-*.restored
