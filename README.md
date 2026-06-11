@@ -67,19 +67,17 @@ Edit `.ciderbox.yaml`:
 project: my-project
 compileTest:
   distros:
-    - name: ubuntu
-      image: ubuntu:26.04
     - name: debian
       image: debian:bookworm
   command: "make test"
   parallel: true
 build:
-  image: ubuntu:26.04
+  image: debian:bookworm
   command: "make build"
   dependencies: [build-essential, git]
 run:
   provider: apple-container
-  image: ubuntu:26.04
+  image: debian:bookworm
 ```
 
 ### 3. Run compile tests
@@ -188,16 +186,12 @@ No Docker Desktop, no daemon socket, no port mapping headaches.
 project: my-project
 compileTest:
   distros:
-    - name: ubuntu
-      image: ubuntu:26.04
     - name: debian
       image: debian:bookworm
-    - name: alpine
-      image: alpine:latest
   command: "make test"
   parallel: true
 build:
-  image: ubuntu:26.04
+  image: debian:bookworm
   command: "make build"
   dependencies: [build-essential, git, nodejs]
   cachePaths:
@@ -212,13 +206,13 @@ Both `compile-test` and `build` support installing packages at runtime:
 ```yaml
 compileTest:
   distros:
-    - name: ubuntu
-      image: ubuntu:26.04
+    - name: debian
+      image: debian:bookworm
   command: "make test"
   dependencies: [build-essential, libssl-dev, python3]
 
 build:
-  image: ubuntu:26.04
+  image: debian:bookworm
   command: "make build"
   dependencies: [build-essential, git]
 ```

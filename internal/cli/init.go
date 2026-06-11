@@ -71,18 +71,18 @@ func projectConfigTemplate(detected initProjectDetection) string {
 	var b strings.Builder
 	b.WriteString(`compileTest:
   distros:
-    - name: ubuntu
-      image: ubuntu:26.04
     - name: debian
       image: debian:bookworm
-    - name: alpine
-      image: alpine:latest
-    - name: fedora
-      image: fedora:latest
-    - name: rocky
-      image: rockylinux:9
+    # - name: ubuntu
+    #   image: ubuntu:26.04
+    # - name: alpine
+    #   image: alpine:latest
+    # - name: fedora
+    #   image: fedora:latest
+    # - name: rocky
+    #   image: rockylinux:9
   parallel: false
-  deps:
+  dependencies:
 `)
 	writeYAMLList(&b, deps, 4)
 	if len(detected.Commands) > 0 {
@@ -131,8 +131,10 @@ Workflow:
 - Clean up all containers: ciderbox chop
 
 Ciderbox tests that your code compiles and basic commands run on:
+- Debian Bookworm (default)
+
+Additional distros can be uncommented in .ciderbox.yaml:
 - Ubuntu 26.04
-- Debian Bookworm
 - Alpine Latest
 - Fedora Latest
 - Rocky Linux 9

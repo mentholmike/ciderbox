@@ -66,10 +66,11 @@ type DistroConfig struct {
 
 // CompileTestConfig maps to the compileTest section in .ciderbox.yaml.
 type CompileTestConfig struct {
-	Distros  []DistroConfig `yaml:"distros,omitempty"`
-	Command  string         `yaml:"command,omitempty"`
-	Parallel bool           `yaml:"parallel,omitempty"`
-	Deps     []string       `yaml:"deps,omitempty"`
+	Distros      []DistroConfig `yaml:"distros,omitempty"`
+	Command      string         `yaml:"command,omitempty"`
+	Parallel     bool           `yaml:"parallel,omitempty"`
+	Deps         []string       `yaml:"deps,omitempty"`
+	Dependencies []string       `yaml:"dependencies,omitempty"`
 }
 
 type AppleContainerConfig struct {

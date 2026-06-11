@@ -288,7 +288,11 @@ func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) erro
 		if command == "" {
 			command = "go test ./..."
 		}
-		for _, dep := range cfg.CompileTest.Deps {
+		// Merge deps and dependencies (backward compat)
+		allDeps := make([]string, 0, len(cfg.CompileTest.Deps)+len(cfg.CompileTest.Dependencies))
+		allDeps = append(allDeps, cfg.CompileTest.Deps...)
+		allDeps = append(allDeps, cfg.CompileTest.Dependencies...)
+		for _, dep := range allDeps {
 			depFlags = append(depFlags, "--dep", dep)
 		}
 		depFlags = append(depFlags, "--")
