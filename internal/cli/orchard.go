@@ -18,10 +18,23 @@ import (
 
 // OrchardConfig defines a swarm of AI agent trees.
 type OrchardConfig struct {
-	Name     string       `yaml:"name"`
-	Trees    int          `yaml:"trees"`
-	Template TreeTemplate `yaml:"template"`
-	Agent    AgentConfig  `yaml:"agent"`
+	Name      string          `yaml:"name"`
+	Trees     int             `yaml:"trees"`
+	Template  TreeTemplate    `yaml:"template"`
+	Agent     AgentConfig     `yaml:"agent"`
+	Secrets   SecretsConfig   `yaml:"secrets,omitempty"`
+	Workspace WorkspaceConfig `yaml:"workspace,omitempty"`
+}
+
+type SecretsConfig struct {
+	EnvFile     string   `yaml:"envFile,omitempty"`
+	PassThrough []string `yaml:"passThrough,omitempty"`
+	Required    []string `yaml:"required,omitempty"`
+}
+
+type WorkspaceConfig struct {
+	Sync bool   `yaml:"sync,omitempty"`
+	Path string `yaml:"path,omitempty"`
 }
 
 // TreeTemplate defines the container spec for each tree.
@@ -95,6 +108,10 @@ func (a App) orchardCommand(ctx context.Context, args []string) error {
 		return a.orchardGraft(ctx, args[1:])
 	case "run":
 		return a.orchardRun(ctx, args[1:])
+	case "secrets":
+		return a.orchardSecretsCommand(ctx, args[1:])
+	case "login":
+		return a.orchardLogin(ctx, args[1:])
 	case "doctor":
 		return a.orchardDoctor(ctx, args[1:])
 	case "logs":
@@ -115,8 +132,10 @@ Subcommands:
   init       Scaffold .orchard.yaml
   plant      Spin up N trees from manifest
   tend       Show swarm status / health from live container state
-  graft      Install the OpenClaw agent runtime on a tree
-  run        Execute a task across one tree or the whole orchard
+  graft      Install the OpenClaw agent runtime on a tree (--all, --upgrade)
+  run        Execute a task across one tree or the whole orchard (--sync)
+  secrets    Manage secrets (.orchid.env): init, check, push
+  login      Configure provider authentication
   harvest    Collect `+orchardResultPath+` from every tree
   press      Aggregate harvested outputs into one report
   doctor     Check host/runtime/tree readiness
@@ -608,80 +627,6 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 }
 
 // orchardGraft installs the OpenClaw agent runtime on a specific tree.
-func (a App) orchardGraft(ctx context.Context, args []string) error {
-	fs := newFlagSet("orchard graft", a.Stderr)
-	treeID := fs.String("tree", "", "tree ID to graft onto")
-	graftAll := fs.Bool("all", false, "graft OpenClaw onto all trees")
-	upgrade := fs.Bool("upgrade", false, "force reinstall even if already grafted")
-	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
-	if err := parseFlags(fs, args); err != nil {
-		return err
-	}
-
-	config, err := readOrchardConfig(*configFile)
-	if err != nil {
-		return exit(2, "orchard graft: config: %v", err)
-	}
-
-	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
-	if err != nil {
-		return exit(2, "orchard graft: %v", err)
-	}
-
-	targetTrees := make([]ContainerInfo, 0)
-	if *graftAll {
-		targetTrees = trees
-	} else if *treeID != "" {
-		target, err := a.findTreeInSlice(trees, *treeID)
-		if err != nil {
-			return exit(2, "orchard graft: %v", err)
-		}
-		targetTrees = append(targetTrees, target)
-	} else {
-		return exit(2, "orchard graft: specify --tree <id> or --all")
-	}
-
-	if len(targetTrees) == 0 {
-		return exit(2, "orchard graft: no matching trees found")
-	}
-
-	fmt.Fprintf(a.Stdout, "=== Orchard Graft ===\n")
-	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
-	fmt.Fprintf(a.Stdout, "Trees: %d\n", len(targetTrees))
-	if *upgrade {
-		fmt.Fprintln(a.Stdout, "Mode: upgrade (force reinstall)")
-	}
-	fmt.Fprintln(a.Stdout)
-
-	grafted, skipped, failed := 0, 0, 0
-	for _, tree := range targetTrees {
-		name := blank(tree.Labels["tree.id"], tree.Name)
-		fmt.Fprintf(a.Stdout, "[%s] checking...\n", name)
-
-		// Check if already grafted (skip unless --upgrade)
-		if !*upgrade {
-			if out, err := a.treeExecCapture(ctx, containerRuntime, tree.ID, []string{"openclaw", "--version"}); err == nil && out != "" {
-				fmt.Fprintf(a.Stdout, "[%s] already grafted (openclaw %s); use --upgrade to reinstall\n", name, strings.TrimSpace(out))
-				skipped++
-				continue
-			}
-		}
-
-		fmt.Fprintf(a.Stdout, "[%s] grafting...\n", name)
-		if err := a.graftTree(ctx, containerRuntime, config, tree, name, *upgrade); err != nil {
-			fmt.Fprintf(a.Stderr, "[%s] graft failed: %v\n", name, err)
-			failed++
-			continue
-		}
-		grafted++
-	}
-
-	fmt.Fprintf(a.Stdout, "\ngrafted=%d skipped=%d failed=%d\n", grafted, skipped, failed)
-	if failed > 0 {
-		return exit(1, "%d tree(s) failed to graft", failed)
-	}
-	return nil
-}
 
 func (a App) findTreeInSlice(trees []ContainerInfo, treeID string) (ContainerInfo, error) {
 	for _, tree := range trees {
