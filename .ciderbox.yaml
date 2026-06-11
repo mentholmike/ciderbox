@@ -6,3 +6,7 @@ compileTest:
       image: debian:bookworm
   command: "uname -a"
   parallel: true
+  deps:
+    - golang
+    - git
+    - rsync

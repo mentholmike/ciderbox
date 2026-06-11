@@ -3,7 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,7 +87,6 @@ func (a App) list(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	// Filter to ciderbox-managed containers only
 	var ours []ContainerInfo
 	for _, c := range containers {
 		if isCiderboxContainer(c) {
@@ -125,7 +127,7 @@ func isCiderboxContainer(c ContainerInfo) bool {
 	if v, ok := labels["ciderbox"]; ok && v == "true" {
 		return true
 	}
-	return strings.HasPrefix(labels["lease_id"], "cbx_") || strings.HasPrefix(c.ID, "cbx_")
+	return strings.HasPrefix(labels["lease_id"], "cbx_") || strings.HasPrefix(c.ID, "cbx_") || strings.HasPrefix(c.Name, "cbx_")
 }
 
 func shortCiderboxID(id string) string {
@@ -137,83 +139,201 @@ func shortCiderboxID(id string) string {
 
 // ---- run ----
 
-type runFlags struct {
-	provider string
-	keep     bool
-	image    string
-	memory   string
-	cpus     int
-	user     string
-	workRoot string
-	noSync   bool
-	env      map[string]string
-}
-
 func (a App) runCommand(ctx context.Context, args []string) error {
-	fs := newFlagSet("run", a.Stderr)
-	provider := fs.String("provider", "apple-container", "provider name")
-	keep := fs.Bool("keep", false, "keep container after command")
-	image := fs.String("apple-container-image", "", "container image override")
-	memory := fs.String("apple-container-memory", "", "memory limit, e.g. 4G")
-	cpus := fs.Int("apple-container-cpus", 0, "CPU limit; 0 leaves runtime default")
-	user := fs.String("apple-container-user", "", "container user")
-	if err := parseFlags(fs, args); err != nil {
+	opts, command, err := parseRunFlags(args)
+	if err != nil {
 		return err
 	}
-
-	command := fs.Args()
 	if len(command) == 0 {
 		return exit(2, "usage: ciderbox run [flags] -- <command...>")
 	}
 
 	// Resolve image
-	runImage := *image
-	if runImage == "" {
-		cfg, _, err := a.providerConfigRuntime(*provider)
+	if opts.image == "" {
+		cfg, _, err := a.providerConfigRuntime(opts.provider)
 		if err == nil && cfg.AppleContainer.Image != "" {
-			runImage = cfg.AppleContainer.Image
+			opts.image = cfg.AppleContainer.Image
 		}
 	}
-	if runImage == "" {
-		runImage = "debian:bookworm"
+	if opts.image == "" {
+		opts.image = "debian:bookworm"
 	}
 
-	// Build the container run args.
-	// Use foreground mode (no -d) so output streams directly to the user.
-	// --rm removes the container automatically after the command exits (unless --keep).
-	runArgs := []string{"run"}
-	if !*keep {
-		runArgs = append(runArgs, "--rm")
+	// Resolve work root
+	if opts.workRoot == "" {
+		opts.workRoot = "/work/ciderbox"
 	}
-	runArgs = append(runArgs, buildContainerRunFlags(*memory, *cpus, *user)...)
-	runArgs = append(runArgs, runImage)
-	runArgs = append(runArgs, command...)
 
-	fmt.Fprintf(a.Stderr, "running image=%s command=%s\n", runImage, strings.Join(command, " "))
+	// Get project name from cwd
+	cwd, err := os.Getwd()
+	if err != nil {
+		return exit(2, "run: getwd: %v", err)
+	}
+	projectName := filepath.Base(cwd)
+	if projectName == "." || projectName == "" {
+		projectName = "project"
+	}
+	workDir := filepath.Join(opts.workRoot, projectName)
 
-	cmd := exec.CommandContext(ctx, "container", runArgs...)
-	cmd.Stdout = a.Stdout
-	cmd.Stderr = a.Stderr
+	// 1. Start container in detached mode with a long-lived process
+	keepContainer := opts.keep || opts.noSync
+	containerID, err := a.startContainer(ctx, opts, keepContainer)
+	if err != nil {
+		return exit(2, "run: start container: %v", err)
+	}
+	cleanupID := containerID // track for cleanup
 
-	if err := cmd.Run(); err != nil {
-		return exit(1, "run: command failed: %v", err)
+	defer func() {
+		if !keepContainer && cleanupID != "" {
+			_ = a.removeContainer(ctx, cleanupID)
+		}
+	}()
+
+	// 2. Create work root inside container
+	if !opts.noSync {
+		if err := a.containerExec(ctx, containerID, nil, a.Stderr,
+			"mkdir", "-p", opts.workRoot); err != nil {
+			return exit(2, "run: create workdir: %v", err)
+		}
+	}
+
+	// 3. Sync workspace into container via tar pipe
+	// container cp on macOS fails on root-owned files (e.g. /usr/bin/sudo),
+	// so we tar the project dir (excluding large/binary artifacts) and pipe
+	// it into the container via container exec -i.
+	if !opts.noSync {
+		fmt.Fprintf(a.Stderr, "syncing %s -> %s...\n", cwd, workDir)
+		if err := a.syncWorkspace(ctx, containerID, cwd, workDir); err != nil {
+			return exit(2, "run: sync workspace: %v", err)
+		}
+	}
+
+	// 4. Install dependencies
+	if len(opts.dependencies) > 0 {
+		depsDir := "/tmp/ciderbox-deps"
+		if err := a.containerExec(ctx, containerID, nil, a.Stderr,
+			"mkdir", "-p", depsDir); err != nil {
+			return exit(2, "run: create deps dir: %v", err)
+		}
+		// Install deps via apt-get
+		depCmd := "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(opts.dependencies, " ")
+		fmt.Fprintf(a.Stderr, "installing dependencies: %s\n", strings.Join(opts.dependencies, " "))
+		if err := a.containerExec(ctx, containerID, nil, a.Stderr,
+			"sh", "-c", depCmd); err != nil {
+			// Non-fatal: dep install might fail on some images
+			fmt.Fprintf(a.Stderr, "warning: dep install failed (continuing): %v\n", err)
+		}
+	}
+
+	// 5. Build and exec the command in the workdir
+	var runCmd []string
+	if !opts.noSync {
+		// Wrap command to cd into workdir first
+		runCmd = []string{"sh", "-c", fmt.Sprintf("cd %s && exec %s",
+			shQuote(workDir), strings.Join(shQuoteAll(command), " "))}
+	} else {
+		runCmd = command
+	}
+
+	fmt.Fprintf(a.Stderr, "running in %s @ %s\n", workDir, containerID)
+	if err := a.containerExec(ctx, containerID, a.Stdout, a.Stderr, runCmd...); err != nil {
+		return exit(1, "run: command exited with error: %v", err)
+	}
+
+	return nil
+}
+
+// ---- compile-test ----
+
+func (a App) compileTest(ctx context.Context, args []string) error {
+	// Read .ciderbox.yaml for compile-test config
+	cfg, err := loadConfig()
+	if err == nil && len(cfg.CompileTest.Distros) > 0 {
+		return a.runMultiDistro(ctx, args, cfg)
+	}
+
+	// Fallback: single run with default test command
+	command := "go test ./..."
+	if err == nil && cfg.Commands.Test != "" {
+		command = cfg.Commands.Test
+	}
+
+	fmt.Fprintf(a.Stderr, "compile-test: running %s\n", command)
+
+	// Auto-install Go if the command starts with 'go'
+	flags := []string{"--provider", "apple-container"}
+	if command == "go test ./..." || strings.HasPrefix(command, "go ") {
+		flags = append(flags, "--dep", "golang")
+	}
+
+	return a.runCommand(ctx, append(flags, strings.Fields(command)...))
+}
+
+func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) error {
+	// Build dep flags from config
+	depFlags := []string{"--provider", "apple-container"}
+	if len(args) > 0 {
+		// User provided a command override
+		depFlags = append(depFlags, "--")
+		depFlags = append(depFlags, args...)
+	} else {
+		command := cfg.CompileTest.Command
+		if command == "" {
+			command = cfg.Commands.Test
+		}
+		if command == "" {
+			command = "go test ./..."
+		}
+		for _, dep := range cfg.CompileTest.Deps {
+			depFlags = append(depFlags, "--dep", dep)
+		}
+		depFlags = append(depFlags, "--")
+		depFlags = append(depFlags, strings.Fields(command)...)
+	}
+
+	if cfg.CompileTest.Parallel {
+		fmt.Fprintf(a.Stderr, "compile-test: running across %d distros (parallel)\n", len(cfg.CompileTest.Distros))
+		return a.runCommand(ctx, depFlags)
+	}
+
+	// Sequential across distros
+	fmt.Fprintf(a.Stderr, "compile-test: running across %d distros (sequential)\n", len(cfg.CompileTest.Distros))
+	for _, distro := range cfg.CompileTest.Distros {
+		fmt.Fprintf(a.Stderr, "\n--- %s (%s) ---\n", distro.Name, distro.Image)
+		distroFlags := make([]string, len(depFlags))
+		copy(distroFlags, depFlags)
+		distroFlags = append([]string{"--apple-container-image", distro.Image}, distroFlags...)
+		if err := a.runCommand(ctx, distroFlags); err != nil {
+			return fmt.Errorf("distro %s failed: %w", distro.Name, err)
+		}
 	}
 	return nil
 }
 
-func buildContainerRunFlags(memory string, cpus int, user string) []string {
-	var flags []string
-	if memory != "" {
-		flags = append(flags, "--memory", memory)
+// ---- build ----
+
+func (a App) buildCommand(ctx context.Context, args []string) error {
+	cfg, err := loadConfig()
+	command := "go build ./..."
+	if err == nil && cfg.Commands.Build != "" {
+		command = cfg.Commands.Build
 	}
-	if cpus > 0 {
-		flags = append(flags, "--cpus", strconv.Itoa(cpus))
+
+	fmt.Fprintf(a.Stderr, "build: running %s\n", command)
+
+	// Auto-install Go if the command starts with 'go'
+	flags := []string{"--provider", "apple-container"}
+	if command == "go build ./..." || strings.HasPrefix(command, "go ") {
+		flags = append(flags, "--dep", "golang")
 	}
-	if user != "" {
-		flags = append(flags, "--user", user)
-	}
-	flags = append(flags, "--label", "ciderbox=true")
-	return flags
+
+	return a.runCommand(ctx, append(flags, strings.Fields(command)...))
+}
+
+// ---- chop ----
+
+func (a App) chopCommand(ctx context.Context, args []string) error {
+	return a.cleanup(ctx, append(args, "--provider", "apple-container"))
 }
 
 // ---- cleanup ----
@@ -259,29 +379,233 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 	return nil
 }
 
-// ---- compile-test ----
-
-func (a App) compileTest(ctx context.Context, args []string) error {
-	return exit(2, "compile-test: not implemented yet; use `ciderbox run` with your test command")
-}
-
-// ---- build ----
-
-func (a App) buildCommand(ctx context.Context, args []string) error {
-	return exit(2, "build: not implemented yet; use `ciderbox run` with your build command")
-}
-
-// ---- chop ----
-
-func (a App) chopCommand(ctx context.Context, args []string) error {
-	return a.cleanup(ctx, append(args, "--provider", "apple-container"))
-}
-
 // ---- helpers ----
 
+type runOptions struct {
+	provider     string
+	image        string
+	memory       string
+	cpus         int
+	user         string
+	workRoot     string
+	keep         bool
+	noSync       bool
+	dependencies []string
+}
+
+func parseRunFlags(args []string) (runOptions, []string, error) {
+	var opts runOptions
+	opts.provider = "apple-container"
+
+	// Simple manual flag parsing since flag.FlagSet can't handle
+	// the `-- <command>` pattern cleanly
+	var command []string
+	afterSep := false
+	for i := 0; i < len(args); i++ {
+		if afterSep {
+			command = append(command, args[i])
+			continue
+		}
+		if args[i] == "--" {
+			afterSep = true
+			continue
+		}
+		switch {
+		case args[i] == "--provider" || args[i] == "-p":
+			if i+1 < len(args) {
+				i++
+				opts.provider = args[i]
+			}
+		case args[i] == "--apple-container-image" || strings.HasPrefix(args[i], "--apple-container-image="):
+			if v, ok := splitFlag(args[i]); ok {
+				opts.image = v
+			} else if i+1 < len(args) {
+				i++
+				opts.image = args[i]
+			}
+		case args[i] == "--apple-container-memory" || strings.HasPrefix(args[i], "--apple-container-memory="):
+			if v, ok := splitFlag(args[i]); ok {
+				opts.memory = v
+			} else if i+1 < len(args) {
+				i++
+				opts.memory = args[i]
+			}
+		case args[i] == "--apple-container-cpus" || strings.HasPrefix(args[i], "--apple-container-cpus="):
+			if v, ok := splitFlag(args[i]); ok {
+				opts.cpus, _ = strconv.Atoi(v)
+			} else if i+1 < len(args) {
+				i++
+				opts.cpus, _ = strconv.Atoi(args[i])
+			}
+		case args[i] == "--apple-container-user" || strings.HasPrefix(args[i], "--apple-container-user="):
+			if v, ok := splitFlag(args[i]); ok {
+				opts.user = v
+			} else if i+1 < len(args) {
+				i++
+				opts.user = args[i]
+			}
+		case args[i] == "--apple-container-work-root" || strings.HasPrefix(args[i], "--apple-container-work-root="):
+			if v, ok := splitFlag(args[i]); ok {
+				opts.workRoot = v
+			} else if i+1 < len(args) {
+				i++
+				opts.workRoot = args[i]
+			}
+		case args[i] == "--keep":
+			opts.keep = true
+		case args[i] == "--no-sync":
+			opts.noSync = true
+		case args[i] == "--dependency" || args[i] == "-d" || args[i] == "--dep":
+			if i+1 < len(args) {
+				i++
+				opts.dependencies = append(opts.dependencies, args[i])
+			}
+		case args[i] == "--env" || args[i] == "-e":
+			i++ // skip, not implemented for run yet
+		case args[i] == "-h" || args[i] == "--help":
+			printRunHelp()
+			return opts, nil, ExitError{Code: 0}
+		default:
+			// Assume remaining args are the command
+			command = append(command, args[i:]...)
+			return opts, command, nil
+		}
+	}
+	return opts, command, nil
+}
+
+func splitFlag(flag string) (string, bool) {
+	idx := strings.Index(flag, "=")
+	if idx > 0 && idx < len(flag)-1 {
+		return flag[idx+1:], true
+	}
+	return "", false
+}
+
+func printRunHelp() {
+	fmt.Fprintln(os.Stderr, `Usage of run:
+  -provider string                provider name (default "apple-container")
+  --apple-container-image string  container image override
+  --apple-container-memory string memory limit, e.g. 4G
+  --apple-container-cpus int      CPU limit; 0 leaves runtime default
+  --apple-container-user string   container user
+  --apple-container-work-root string
+                                  container workspace root (default "/work/ciderbox")
+  --keep                          keep container after command exits
+  --no-sync                       do not copy current directory into container
+  --dep, --dependency string      system package to install (repeatable)
+  -h, --help                      show this help`)
+}
+
+// startContainer runs a detached container with a long-lived process.
+func (a App) startContainer(ctx context.Context, opts runOptions, keepContainer bool) (string, error) {
+	runArgs := []string{"run", "-d"}
+	if !keepContainer {
+		runArgs = append(runArgs, "--rm")
+	}
+	if opts.memory != "" {
+		runArgs = append(runArgs, "--memory", opts.memory)
+	}
+	if opts.cpus > 0 {
+		runArgs = append(runArgs, "--cpus", strconv.Itoa(opts.cpus))
+	}
+	if opts.user != "" {
+		runArgs = append(runArgs, "--user", opts.user)
+	}
+	runArgs = append(runArgs, "--label", "ciderbox=true")
+	runArgs = append(runArgs, opts.image)
+	runArgs = append(runArgs, "sleep", "infinity")
+
+	fmt.Fprintf(a.Stderr, "starting container image=%s\n", opts.image)
+	cmd := exec.CommandContext(ctx, "container", runArgs...)
+	cmd.Stderr = a.Stderr
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("container run: %w", err)
+	}
+	id := strings.TrimSpace(string(output))
+	if id == "" {
+		return "", fmt.Errorf("container run succeeded but no container ID returned")
+	}
+	fmt.Fprintf(a.Stderr, "started container=%s\n", id)
+	return id, nil
+}
+
+// removeContainer removes a container by ID.
+func (a App) removeContainer(ctx context.Context, id string) error {
+	rmArgs := []string{"rm", "-f", id}
+	cmd := exec.CommandContext(ctx, "container", rmArgs...)
+	cmd.Stderr = a.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container rm %s: %w", id, err)
+	}
+	fmt.Fprintf(a.Stderr, "removed container=%s\n", id)
+	return nil
+}
+
+// containerCopy copies a local path into a container.
+// syncWorkspace tars the project directory (excluding .git, ciderbox binary,
+// .crabbox, and other large artifacts) and pipes it into the container.
+// Uses tar | container exec -i tar to avoid macOS file permission issues
+// with the native container cp command.
+func (a App) syncWorkspace(ctx context.Context, containerID, srcDir, dstDir string) error {
+	// Create destination
+	if err := a.containerExec(ctx, containerID, nil, a.Stderr,
+		"mkdir", "-p", dstDir); err != nil {
+		return fmt.Errorf("create dest %s: %w", dstDir, err)
+	}
+
+	// Build the tar command: archive srcDir contents to stdout, excluding big stuff
+	// --no-xattrs suppresses macOS extended attribute noise
+	tarArgs := []string{
+		"czf", "-",
+		"--no-xattrs",
+		"--exclude", ".git",
+		"--exclude", ".crabbox",
+		"--exclude", ".agents",
+		"--exclude", "node_modules",
+		"--exclude", "vendor",
+		"--exclude", "target",
+		"--exclude", "ciderbox",
+		"--exclude", "*.tar.gz",
+		"--exclude", "*.tar",
+		"--exclude", ".DS_Store",
+		"-C", srcDir, ".",
+	}
+	tarCmd := exec.CommandContext(ctx, "tar", tarArgs...)
+
+	// Pipe into container exec -i tar
+	untarArgs := []string{"exec", "-i", containerID,
+		"tar", "xzf", "-", "-C", dstDir}
+	untarCmd := exec.CommandContext(ctx, "container", untarArgs...)
+
+	// Wire: tar stdout -> container exec stdin
+	untarCmd.Stdin, _ = tarCmd.StdoutPipe()
+	untarCmd.Stderr = a.Stderr
+
+	if err := untarCmd.Start(); err != nil {
+		return fmt.Errorf("start untar: %w", err)
+	}
+	if err := tarCmd.Run(); err != nil {
+		return fmt.Errorf("tar %s: %w", srcDir, err)
+	}
+	if err := untarCmd.Wait(); err != nil {
+		return fmt.Errorf("untar to %s: %w", dstDir, err)
+	}
+
+	return nil
+}
+
+// containerExec runs a command inside a running container.
+func (a App) containerExec(ctx context.Context, containerID string, stdout, stderr io.Writer, command ...string) error {
+	execArgs := append([]string{"exec", containerID}, command...)
+	cmd := exec.CommandContext(ctx, "container", execArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
+}
+
 // loadContainerRuntime loads the provider and returns its native ContainerRuntime.
-// This is the primary execution path for local Apple containers, where SSH
-// is unavailable due to Virtualization.framework network isolation.
 func (a App) loadContainerRuntime(ctx context.Context, providerName string) (ContainerRuntime, error) {
 	cfg, rt, err := a.providerConfigRuntime(providerName)
 	if err != nil {
@@ -300,4 +624,21 @@ func (a App) loadContainerRuntime(ctx context.Context, providerName string) (Con
 		return nil, fmt.Errorf("provider %q does not expose native ContainerRuntime", providerName)
 	}
 	return crBackend.ContainerRuntime()
+}
+
+// ---- shell quoting helpers ----
+
+func shQuote(s string) string {
+	if strings.ContainsAny(s, " \t\n'\"!$`\\|&;<>(){}[]*?~") || s == "" {
+		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	}
+	return s
+}
+
+func shQuoteAll(parts []string) []string {
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = shQuote(p)
+	}
+	return out
 }

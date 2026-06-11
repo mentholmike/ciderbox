@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config is the ciderbox user configuration.
@@ -35,6 +38,8 @@ type Config struct {
 	ExposedPorts     []string        `yaml:"expose,omitempty"`
 
 	AppleContainer AppleContainerConfig `yaml:"appleContainer,omitempty"`
+	CompileTest    CompileTestConfig    `yaml:"compileTest,omitempty"`
+	Commands       CommandsConfig       `yaml:"commands,omitempty"`
 
 	Cache CacheConfig `yaml:"cache,omitempty"`
 
@@ -45,6 +50,26 @@ type Config struct {
 
 type CacheConfig struct {
 	Volumes []CacheVolumeConfig `yaml:"volumes,omitempty"`
+}
+
+// CommandsConfig specifies the default commands for compile-test and build.
+type CommandsConfig struct {
+	Test  string `yaml:"test,omitempty"`
+	Build string `yaml:"build,omitempty"`
+}
+
+// DistroConfig describes a compile-test distribution.
+type DistroConfig struct {
+	Name  string `yaml:"name,omitempty"`
+	Image string `yaml:"image,omitempty"`
+}
+
+// CompileTestConfig maps to the compileTest section in .ciderbox.yaml.
+type CompileTestConfig struct {
+	Distros  []DistroConfig `yaml:"distros,omitempty"`
+	Command  string         `yaml:"command,omitempty"`
+	Parallel bool           `yaml:"parallel,omitempty"`
+	Deps     []string       `yaml:"deps,omitempty"`
 }
 
 type AppleContainerConfig struct {
@@ -80,6 +105,35 @@ func loadConfig() (Config, error) {
 	cfg.WorkRoot = "/work/crabbox"
 	cfg.IdleTimeout = 30 * time.Minute
 	cfg.TTL = 90 * time.Minute
+
+	// Read .ciderbox.yaml or $CRABBOX_CONFIG from cwd
+	cfgPath := os.Getenv("CIDERBOX_CONFIG")
+	if cfgPath == "" {
+		cfgPath = os.Getenv("CRABBOX_CONFIG")
+	}
+	if cfgPath == "" {
+		if _, err := os.Stat(".ciderbox.yaml"); err == nil {
+			cfgPath = ".ciderbox.yaml"
+		}
+	}
+	if cfgPath == "" {
+		if _, err := os.Stat(".crabbox.yaml"); err == nil {
+			cfgPath = ".crabbox.yaml"
+		}
+	}
+
+	if cfgPath != "" {
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return cfg, fmt.Errorf("read config %s: %w", cfgPath, err)
+		}
+		fileCfg := cfg // copy defaults
+		if err := yaml.Unmarshal(data, &fileCfg); err != nil {
+			return cfg, fmt.Errorf("parse config %s: %w", cfgPath, err)
+		}
+		cfg = fileCfg
+	}
+
 	return cfg, nil
 }
 
