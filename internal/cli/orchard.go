@@ -513,11 +513,14 @@ type HarvestResult struct {
 	Result json.RawMessage `json:"result,omitempty"`
 }
 
-// orchardHarvest collects /tmp/orchard-result.json from every live tree.
+// orc// orchardHarvest collects results from live trees.
+// With --task: reads from /tmp/orchid/tasks/<task-id>/ inside trees (new structured path).
+// Without --task: reads from /tmp/orchard-result.json (legacy path).
 func (a App) orchardHarvest(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard harvest", a.Stderr)
 	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
 	outputFile := fs.String("output", "", "write JSON results to file")
+	taskID := fs.String("task", "", "task ID to harvest (reads from /tmp/orchid/tasks/<task-id>/; omit for legacy path)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -532,12 +535,20 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 		return exit(2, "orchard harvest: %v", err)
 	}
 
+	sourcePath := orchardResultPath
+	sourceLabel := "legacy " + orchardResultPath
+	if *taskID != "" {
+		sourcePath = fmt.Sprintf("/tmp/orchid/tasks/%s/result.json", *taskID)
+		sourceLabel = fmt.Sprintf("task %s", *taskID)
+	}
+
 	fmt.Fprintf(a.Stdout, "=== Orchard Harvest ===\n")
 	fmt.Fprintf(a.Stdout, "Orchard: %s\n", config.Name)
-	fmt.Fprintf(a.Stdout, "Collecting %s from %d tree(s)...\n\n", orchardResultPath, len(trees))
+	fmt.Fprintf(a.Stdout, "Source: %s\n", sourceLabel)
+	fmt.Fprintf(a.Stdout, "Trees: %d\n\n", len(trees))
 
 	if len(trees) == 0 {
-		fmt.Fprintln(a.Stdout, "No trees running — nothing to harvest.")
+		fmt.Fprintln(a.Stdout, "No trees running.")
 		return nil
 	}
 
@@ -545,14 +556,14 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 	for _, tree := range trees {
 		name := blank(tree.Labels["tree.id"], tree.Name)
 		containerID := tree.ID
-		out, execErr := a.treeExecCapture(ctx, containerRuntime, containerID, []string{"cat", orchardResultPath})
+		out, execErr := a.treeExecCapture(ctx, containerRuntime, containerID, []string{"cat", sourcePath})
 
 		hr := HarvestResult{Tree: name}
 		switch {
 		case execErr != nil:
 			hr.Status = "missing"
 			hr.Error = execErr.Error()
-			fmt.Fprintf(a.Stdout, "[%s] no result (%s not readable)\n", name, orchardResultPath)
+			fmt.Fprintf(a.Stdout, "[%s] no result\n", name)
 		case json.Valid([]byte(out)):
 			hr.Status = "ok"
 			hr.Result = json.RawMessage(out)
@@ -561,7 +572,7 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 			quoted, _ := json.Marshal(out)
 			hr.Status = "ok"
 			hr.Result = quoted
-			fmt.Fprintf(a.Stdout, "[%s] harvested %d bytes (non-JSON, stored as string)\n", name, len(out))
+			fmt.Fprintf(a.Stdout, "[%s] harvested %d bytes\n", name, len(out))
 		}
 		results = append(results, hr)
 	}
@@ -569,7 +580,7 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 	if *outputFile != "" {
 		data, err := json.MarshalIndent(results, "", "  ")
 		if err != nil {
-			return exit(2, "marshal harvest results: %v", err)
+			return exit(2, "marshal results: %v", err)
 		}
 		if err := os.WriteFile(*outputFile, data, 0644); err != nil {
 			return exit(2, "write %s: %v", *outputFile, err)
@@ -580,33 +591,86 @@ func (a App) orchardHarvest(ctx context.Context, args []string) error {
 	return nil
 }
 
-// orchardPress aggregates harvested tree outputs into a summary.
+// orchardPress aggregates harvested outputs or task results into a summary.
+// With --task: reads from ~/.ciderbox/orchards/<name>/tasks/<task-id>/ locally.
+// With --input: reads from a harvest JSON file (legacy).
 func (a App) orchardPress(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard press", a.Stderr)
-	inputFile := fs.String("input", "", "harvest JSON file to aggregate (from `orchard harvest --output`)")
+	inputFile := fs.String("input", "", "harvest JSON file to aggregate")
+	taskID := fs.String("task", "", "task ID to press (reads local task results)")
+	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if *inputFile == "" {
-		return exit(2, "press requires --input ; run `orchard harvest --output harvest.json` first")
-	}
-
-	data, err := os.ReadFile(*inputFile)
-	if err != nil {
-		return exit(2, "read %s: %v", *inputFile, err)
-	}
 
 	var results []HarvestResult
-	if err := json.Unmarshal(data, &results); err != nil {
-		return exit(2, "parse %s: %v", *inputFile, err)
+
+	if *taskID != "" {
+		config, err := readOrchardConfig(*configFile)
+		if err != nil {
+			return exit(2, "orchard config: %v", err)
+		}
+		home, _ := os.UserHomeDir()
+		taskDir := filepath.Join(home, ".ciderbox", "orchards", config.Name, "tasks", *taskID)
+		entries, err := os.ReadDir(taskDir)
+		if err != nil {
+			return exit(2, "task dir %s: %v", taskDir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(taskDir, entry.Name())
+			d, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var result HarvestResult
+			if err := json.Unmarshal(d, &result); err != nil || result.Tree == "" {
+				// Try as tree result format from orchard run
+				var tr struct {
+					TaskID string `json:"task_id"`
+					Tree   string `json:"tree"`
+					Status string `json:"status"`
+					Output string `json:"output"`
+				}
+				if json.Unmarshal(d, &tr) == nil && tr.Tree != "" {
+					result = HarvestResult{Tree: tr.Tree, Status: tr.Status}
+					if tr.Output != "" {
+						q, _ := json.Marshal(tr.Output)
+						result.Result = q
+					}
+				}
+			}
+			if result.Tree != "" {
+				results = append(results, result)
+			}
+		}
+		if len(results) == 0 {
+			fmt.Fprintf(a.Stdout, "No results in %s\n", taskDir)
+			return nil
+		}
+	} else if *inputFile != "" {
+		data, err := os.ReadFile(*inputFile)
+		if err != nil {
+			return exit(2, "read %s: %v", *inputFile, err)
+		}
+		if err := json.Unmarshal(data, &results); err != nil {
+			return exit(2, "parse %s: %v", *inputFile, err)
+		}
+	} else {
+		return exit(2, "press requires --input <file> or --task <id>")
 	}
 
 	fmt.Fprintf(a.Stdout, "=== Orchard Press ===\n")
-	fmt.Fprintf(a.Stdout, "Input: %s (%d tree result(s))\n\n", *inputFile, len(results))
+	if *taskID != "" {
+		fmt.Fprintf(a.Stdout, "Task: %s\n", *taskID)
+	}
+	fmt.Fprintf(a.Stdout, "Results: %d tree(s)\n\n", len(results))
 
 	ok, missing := 0, 0
 	for _, r := range results {
-		if r.Status == "ok" {
+		if r.Status == "ok" || r.Status == "complete" {
 			ok++
 		} else {
 			missing++
@@ -617,7 +681,16 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 	for _, r := range results {
 		fmt.Fprintf(a.Stdout, "--- %s (%s) ---\n", r.Tree, r.Status)
 		if len(r.Result) > 0 {
-			fmt.Fprintln(a.Stdout, strings.TrimSpace(string(r.Result)))
+			var parsed map[string]interface{}
+			if json.Unmarshal([]byte(r.Result), &parsed) == nil {
+				if out, ok := parsed["output"]; ok {
+					fmt.Fprintln(a.Stdout, strings.TrimSpace(fmt.Sprintf("%v", out)))
+				} else {
+					fmt.Fprintln(a.Stdout, strings.TrimSpace(string(r.Result)))
+				}
+			} else {
+				fmt.Fprintln(a.Stdout, strings.TrimSpace(string(r.Result)))
+			}
 		} else if r.Error != "" {
 			fmt.Fprintln(a.Stdout, r.Error)
 		}
@@ -625,8 +698,6 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 
 	return nil
 }
-
-// orchardGraft installs the OpenClaw agent runtime on a specific tree.
 
 func (a App) findTreeInSlice(trees []ContainerInfo, treeID string) (ContainerInfo, error) {
 	for _, tree := range trees {
