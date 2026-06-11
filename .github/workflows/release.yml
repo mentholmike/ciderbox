@@ -53,21 +53,20 @@ jobs:
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           echo "version=${tag#v}" >>"$GITHUB_OUTPUT"
 
-      - name: Verify Homebrew tap token
+      - name: Verify Homebrew tap access
         env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
-            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN is missing; cannot publish Homebrew formula"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/mentholmike/homebrew-ciderbox || true)"
+          if [ "$code" != "200" ] && [ "$code" != "404" ]; then
+            echo "::error::GITHUB_TOKEN cannot access mentholmike/homebrew-ciderbox (HTTP $code)"
             exit 1
           fi
-          code="$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $HOMEBREW_TAP_GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/openclaw/homebrew-tap || true)"
-          if [ "$code" != "200" ]; then
-            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN cannot access openclaw/homebrew-tap (HTTP $code)"
-            exit 1
+          if [ "$code" == "404" ]; then
+            echo "::warning::mentholmike/homebrew-ciderbox does not exist yet; GoReleaser will create it"
           fi
 
       - name: GoReleaser
@@ -78,7 +77,6 @@ jobs:
           args: release --clean --config /tmp/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Publish GitHub release notes
         env:
@@ -104,15 +102,16 @@ jobs:
 
       - name: Verify Homebrew formula
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
-          formula="$(gh api repos/openclaw/homebrew-tap/contents/Formula/crabbox.rb --jq '.content' | base64 --decode)"
+          sleep 5
+          formula="$(gh api repos/mentholmike/homebrew-ciderbox/contents/Formula/ciderbox.rb --jq '.content' | base64 --decode)"
           if ! grep -q "version \"$RELEASE_VERSION\"" <<<"$formula"; then
-            echo "::error::openclaw/homebrew-tap Formula/crabbox.rb was not updated to $RELEASE_VERSION"
+            echo "::error::mentholmike/homebrew-ciderbox Formula/ciderbox.rb was not updated to $RELEASE_VERSION"
             exit 1
           fi
           if ! grep -q "releases/download/v$RELEASE_VERSION/" <<<"$formula"; then
-            echo "::error::openclaw/homebrew-tap Formula/crabbox.rb does not point at v$RELEASE_VERSION assets"
+            echo "::error::mentholmike/homebrew-ciderbox Formula/ciderbox.rb does not point at v$RELEASE_VERSION assets"
             exit 1
           fi

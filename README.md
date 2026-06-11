@@ -22,7 +22,13 @@ ciderbox chop
 
 ## Install
 
-### Homebrew (coming soon)
+### Homebrew (recommended)
+
+```sh
+brew install mentholmike/ciderbox/ciderbox
+```
+
+Or tap separately:
 
 ```sh
 brew tap mentholmike/ciderbox

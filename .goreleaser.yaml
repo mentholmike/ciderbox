@@ -43,7 +43,7 @@ brews:
     repository:
       owner: mentholmike
       name: homebrew-ciderbox
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: "{{ .Env.GITHUB_TOKEN }}"
     directory: Formula
     commit_author:
       name: mentholmike-bot
