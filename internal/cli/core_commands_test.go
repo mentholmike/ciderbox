@@ -10,15 +10,17 @@ func TestPackageListMapsCommonPackagesByManager(t *testing.T) {
 		manager string
 		want    string
 	}{
-		{manager: "apt", want: "golang python3 rsync"},
-		{manager: "dnf", want: "golang python3 rsync"},
-		{manager: "apk", want: "go python3 rsync"},
-		{manager: "pacman", want: "go python rsync"},
-		{manager: "zypper", want: "go python3 rsync"},
+		{manager: "apt", want: "curl golang python3 rsync xz-utils"},
+		{manager: "dnf", want: "curl-minimal golang python3 rsync xz"},
+		{manager: "microdnf", want: "curl-minimal golang python3 rsync xz"},
+		{manager: "yum", want: "curl golang python3 rsync xz"},
+		{manager: "apk", want: "curl go python3 rsync xz"},
+		{manager: "pacman", want: "curl go python rsync xz"},
+		{manager: "zypper", want: "curl go python3 rsync xz"},
 	}
 
 	for _, tt := range tests {
-		got := packageList(tt.manager, []string{"golang", "python3", "rsync", "rsync"})
+		got := packageList(tt.manager, []string{"curl", "golang", "python3", "rsync", "rsync", "xz"})
 		if got != tt.want {
 			t.Fatalf("%s package list = %q, want %q", tt.manager, got, tt.want)
 		}

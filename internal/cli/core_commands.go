@@ -618,9 +618,9 @@ func packageInstallScript(packages []string) string {
 		"elif command -v dnf >/dev/null 2>&1; then",
 		fmt.Sprintf("  dnf install -y %s", packageList("dnf", packages)),
 		"elif command -v microdnf >/dev/null 2>&1; then",
-		fmt.Sprintf("  microdnf install -y %s", packageList("dnf", packages)),
+		fmt.Sprintf("  microdnf install -y %s", packageList("microdnf", packages)),
 		"elif command -v yum >/dev/null 2>&1; then",
-		fmt.Sprintf("  yum install -y %s", packageList("dnf", packages)),
+		fmt.Sprintf("  yum install -y %s", packageList("yum", packages)),
 		"elif command -v pacman >/dev/null 2>&1; then",
 		fmt.Sprintf("  pacman -Sy --noconfirm %s", packageList("pacman", packages)),
 		"elif command -v zypper >/dev/null 2>&1; then",
@@ -648,6 +648,11 @@ func packageList(manager string, packages []string) string {
 
 func mapPackageName(manager, pkg string) string {
 	switch pkg {
+	case "curl":
+		switch manager {
+		case "dnf", "microdnf":
+			return "curl-minimal"
+		}
 	case "golang":
 		switch manager {
 		case "apk", "pacman", "zypper":
@@ -656,6 +661,10 @@ func mapPackageName(manager, pkg string) string {
 	case "python3":
 		if manager == "pacman" {
 			return "python"
+		}
+	case "xz":
+		if manager == "apt" {
+			return "xz-utils"
 		}
 	}
 	return pkg
