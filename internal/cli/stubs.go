@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -180,13 +181,15 @@ func firstNonBlank(values ...string) string {
 // ---- Apple SSHTarget helpers ----
 
 func SSHTargetFromConfig(cfg Config, host string) SSHTarget {
-	cfg.SSHKey = testboxKeyPath(cfg.Slug)
-	_ = cfg
+	keyPath := cfg.SSHKey
+	if keyPath == "" {
+		keyPath = testboxKeyPath(cfg.Slug)
+	}
 	return SSHTarget{
 		Host: host,
 		Port: "22",
 		User: cfg.AppleContainer.User,
-		Key:  cfg.SSHKey,
+		Key:  keyPath,
 	}
 }
 
@@ -226,8 +229,16 @@ func EnsureTestboxKeyForConfig(cfg Config, leaseID string) (string, string, erro
 			return keyPath, strings.TrimSpace(string(data)), nil
 		}
 	}
-	publicKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINOPLYKEYPLACEHOLDER"
-	return keyPath, publicKey, nil
+	// Generate a real ED25519 key pair via ssh-keygen
+	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-f", keyPath, "-N", "", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return keyPath, "", fmt.Errorf("generate key at %s: %w\n%s", keyPath, err, string(out))
+	}
+	pubData, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		return keyPath, "", fmt.Errorf("read public key: %w", err)
+	}
+	return keyPath, strings.TrimSpace(string(pubData)), nil
 }
 
 func RemoveStoredTestboxKey(leaseID string) {
@@ -338,7 +349,34 @@ func TouchDirectLeaseLabels(original map[string]string, cfg Config, state string
 // ---- SSH readiness ----
 
 func WaitForSSHReady(ctx context.Context, target *SSHTarget, stderr io.Writer, label string, timeout time.Duration) error {
-	return nil
+	if target == nil {
+		return nil
+	}
+	host := target.Host
+	port := target.Port
+	if port == "" {
+		port = "22"
+	}
+	fmt.Fprintf(stderr, "waiting for SSH at %s:%s...\n", host, port)
+	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+			if time.Now().After(deadline) {
+				return fmt.Errorf("SSH wait timeout after %v at %s:%s", timeout, host, port)
+			}
+			cmd := exec.CommandContext(ctx, "sh", "-c",
+				fmt.Sprintf("nc -z -w3 %s %s", host, port))
+			if cmd.Run() == nil {
+				fmt.Fprintf(stderr, "SSH ready at %s:%s\n", host, port)
+				return nil
+			}
+		}
+	}
 }
 
 func MarkAppleContainerImageExplicit(cfg *Config) { cfg.OSImage = cfg.AppleContainer.Image }

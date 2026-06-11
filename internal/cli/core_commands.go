@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -67,50 +69,151 @@ func (a App) list(ctx context.Context, args []string) error {
 		return err
 	}
 
-	leases, err := a.listLeases(ctx, *provider)
+	runtime, err := a.loadContainerRuntime(ctx, *provider)
 	if err != nil {
 		return exit(2, "list: %v", err)
 	}
 
-	if len(leases) == 0 {
-		fmt.Fprintln(a.Stdout, "no active leases")
+	containers, err := runtime.List(ctx, nil)
+	if err != nil {
+		return exit(2, "list: %v", err)
+	}
+
+	if len(containers) == 0 {
+		fmt.Fprintln(a.Stdout, "no active ciderbox containers")
 		return nil
 	}
 
-	sort.Slice(leases, func(i, j int) bool {
-		return leases[i].Slug < leases[j].Slug
+	// Filter to ciderbox-managed containers only
+	var ours []ContainerInfo
+	for _, c := range containers {
+		if isCiderboxContainer(c) {
+			ours = append(ours, c)
+		}
+	}
+
+	if len(ours) == 0 {
+		fmt.Fprintln(a.Stdout, "no active ciderbox containers")
+		return nil
+	}
+
+	sort.Slice(ours, func(i, j int) bool {
+		return ours[i].ID < ours[j].ID
 	})
 
-	fmt.Fprintf(a.Stdout, "%-24s %-12s %-16s %s\n", "LEASE", "STATUS", "IP", "SLUG")
+	fmt.Fprintf(a.Stdout, "%-28s %-10s %-16s %s\n", "ID", "STATUS", "IP", "IMAGE")
 	fmt.Fprintln(a.Stdout, strings.Repeat("-", 64))
-	for _, l := range leases {
-		ip := l.Server.PublicNet.IPv4.IP
+	for _, c := range ours {
+		ip := c.IP
 		if ip == "" {
 			ip = "-"
 		}
-		fmt.Fprintf(a.Stdout, "%-24s %-12s %-16s %s\n", l.ID, l.State, ip, l.Slug)
+		status := c.Status
+		if status == "" {
+			status = "running"
+		}
+		fmt.Fprintf(a.Stdout, "%-28s %-10s %-16s %s\n", shortCiderboxID(c.ID), status, ip, c.Image)
 	}
 	return nil
 }
 
-func (a App) listLeases(ctx context.Context, provider string) ([]LeaseView, error) {
-	cfg, rt, err := a.providerConfigRuntime(provider)
-	if err != nil {
-		return nil, err
+func isCiderboxContainer(c ContainerInfo) bool {
+	labels := c.Labels
+	if labels == nil {
+		return strings.HasPrefix(c.ID, "cbx_") || strings.HasPrefix(c.Name, "cbx_")
 	}
-	p, err := ProviderFor(provider)
-	if err != nil {
-		return nil, err
+	if v, ok := labels["ciderbox"]; ok && v == "true" {
+		return true
 	}
-	backend, err := p.Configure(cfg, rt)
-	if err != nil {
-		return nil, err
+	return strings.HasPrefix(labels["lease_id"], "cbx_") || strings.HasPrefix(c.ID, "cbx_")
+}
+
+func shortCiderboxID(id string) string {
+	if len(id) > 20 {
+		return id[:20] + "..."
 	}
-	sshBackend, ok := backend.(SSHLeaseBackend)
-	if !ok {
-		return nil, fmt.Errorf("provider %q does not support SSH leases", provider)
+	return id
+}
+
+// ---- run ----
+
+type runFlags struct {
+	provider string
+	keep     bool
+	image    string
+	memory   string
+	cpus     int
+	user     string
+	workRoot string
+	noSync   bool
+	env      map[string]string
+}
+
+func (a App) runCommand(ctx context.Context, args []string) error {
+	fs := newFlagSet("run", a.Stderr)
+	provider := fs.String("provider", "apple-container", "provider name")
+	keep := fs.Bool("keep", false, "keep container after command")
+	image := fs.String("apple-container-image", "", "container image override")
+	memory := fs.String("apple-container-memory", "", "memory limit, e.g. 4G")
+	cpus := fs.Int("apple-container-cpus", 0, "CPU limit; 0 leaves runtime default")
+	user := fs.String("apple-container-user", "", "container user")
+	if err := parseFlags(fs, args); err != nil {
+		return err
 	}
-	return sshBackend.List(ctx, ListRequest{})
+
+	command := fs.Args()
+	if len(command) == 0 {
+		return exit(2, "usage: ciderbox run [flags] -- <command...>")
+	}
+
+	// Resolve image
+	runImage := *image
+	if runImage == "" {
+		cfg, _, err := a.providerConfigRuntime(*provider)
+		if err == nil && cfg.AppleContainer.Image != "" {
+			runImage = cfg.AppleContainer.Image
+		}
+	}
+	if runImage == "" {
+		runImage = "debian:bookworm"
+	}
+
+	// Build the container run args.
+	// Use foreground mode (no -d) so output streams directly to the user.
+	// --rm removes the container automatically after the command exits (unless --keep).
+	runArgs := []string{"run"}
+	if !*keep {
+		runArgs = append(runArgs, "--rm")
+	}
+	runArgs = append(runArgs, buildContainerRunFlags(*memory, *cpus, *user)...)
+	runArgs = append(runArgs, runImage)
+	runArgs = append(runArgs, command...)
+
+	fmt.Fprintf(a.Stderr, "running image=%s command=%s\n", runImage, strings.Join(command, " "))
+
+	cmd := exec.CommandContext(ctx, "container", runArgs...)
+	cmd.Stdout = a.Stdout
+	cmd.Stderr = a.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return exit(1, "run: command failed: %v", err)
+	}
+	return nil
+}
+
+func buildContainerRunFlags(memory string, cpus int, user string) []string {
+	var flags []string
+	if memory != "" {
+		flags = append(flags, "--memory", memory)
+	}
+	if cpus > 0 {
+		flags = append(flags, "--cpus", strconv.Itoa(cpus))
+	}
+	if user != "" {
+		flags = append(flags, "--user", user)
+	}
+	flags = append(flags, "--label", "ciderbox=true")
+	return flags
 }
 
 // ---- cleanup ----
@@ -123,168 +226,49 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 		return err
 	}
 
-	cfg, rt, err := a.providerConfigRuntime(*provider)
+	runtime, err := a.loadContainerRuntime(ctx, *provider)
 	if err != nil {
 		return exit(2, "cleanup: %v", err)
 	}
 
-	p, err := ProviderFor(*provider)
-	if err != nil {
-		return exit(2, "cleanup: %v", err)
-	}
-
-	backend, err := p.Configure(cfg, rt)
-	if err != nil {
-		return exit(2, "cleanup: %v", err)
-	}
-
-	// Provider's backend.Cleanup isn't on the interface, so use List + ReleaseLease
-	sshBackend, ok := backend.(SSHLeaseBackend)
-	if !ok {
-		return exit(2, "cleanup: provider %q does not support leases", *provider)
-	}
-
-	leases, err := sshBackend.List(ctx, ListRequest{})
+	containers, err := runtime.List(ctx, nil)
 	if err != nil {
 		return exit(2, "cleanup: %v", err)
 	}
 
 	removed := 0
-	for _, l := range leases {
-		if !shouldCleanupLease(l) {
+	for _, c := range containers {
+		if !isCiderboxContainer(c) {
 			continue
 		}
 		if *dryRun {
-			fmt.Fprintf(a.Stdout, "would remove lease=%s slug=%s\n", l.ID, l.Slug)
+			fmt.Fprintf(a.Stdout, "would remove container=%s image=%s\n", c.ID, c.Image)
 			continue
 		}
-		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{LeaseID: l.ID, DeleteServer: true}); err != nil {
-			fmt.Fprintf(a.Stderr, "remove lease=%s: %v\n", l.ID, err)
+		if err := runtime.Remove(ctx, c.ID, true); err != nil {
+			fmt.Fprintf(a.Stderr, "remove container=%s: %v\n", c.ID, err)
 			continue
 		}
-		fmt.Fprintf(a.Stdout, "removed lease=%s slug=%s\n", l.ID, l.Slug)
+		fmt.Fprintf(a.Stdout, "removed container=%s image=%s\n", c.ID, c.Image)
 		removed++
 	}
 
 	if !*dryRun {
-		fmt.Fprintf(a.Stdout, "cleanup: removed %d lease(s), checked %d\n", removed, len(leases))
+		fmt.Fprintf(a.Stdout, "cleanup: removed %d container(s), checked %d\n", removed, len(containers))
 	}
-	return nil
-}
-
-func shouldCleanupLease(l LeaseView) bool {
-	if l.Labels == nil {
-		return true
-	}
-	return !strings.EqualFold(l.Labels["keep"], "true") && !strings.EqualFold(l.Labels["ciderbox-protected"], "true")
-}
-
-// ---- run ----
-
-func (a App) runCommand(ctx context.Context, args []string) error {
-	fs := newFlagSet("run", a.Stderr)
-	provider := fs.String("provider", "apple-container", "provider name")
-	keep := fs.Bool("keep", false, "keep container after command")
-	slug := fs.String("slug", "", "lease slug (auto-generated if empty)")
-	image := fs.String("apple-container-image", "", "container image override")
-	if err := parseFlags(fs, args); err != nil {
-		return err
-	}
-
-	command := fs.Args()
-	if len(command) == 0 {
-		return exit(2, "usage: ciderbox run [flags] -- <command...>")
-	}
-
-	cfg, rt, err := a.providerConfigRuntime(*provider)
-	if err != nil {
-		return exit(2, "run: %v", err)
-	}
-	if *image != "" {
-		cfg.AppleContainer.Image = *image
-	}
-
-	p, err := ProviderFor(*provider)
-	if err != nil {
-		return exit(2, "run: %v", err)
-	}
-
-	backend, err := p.Configure(cfg, rt)
-	if err != nil {
-		return exit(2, "run: %v", err)
-	}
-
-	sshBackend, ok := backend.(SSHLeaseBackend)
-	if !ok {
-		return exit(2, "run: provider %q does not support SSH leases", *provider)
-	}
-
-	lease, err := sshBackend.Acquire(ctx, AcquireRequest{
-		Config:        cfg,
-		Keep:          *keep,
-		RequestedSlug: *slug,
-	})
-	if err != nil {
-		return exit(2, "run: acquire lease: %v", err)
-	}
-
-	sshTarget := lease.SSH
-	if sshTarget.Host == "" {
-		sshTarget = lease.Target
-	}
-	if sshTarget.Host == "" {
-		sshTarget.Host = lease.Server.PublicNet.IPv4.IP
-	}
-	if sshTarget.Port == "" {
-		sshTarget.Port = "22"
-	}
-	if sshTarget.User == "" {
-		sshTarget.User = cfg.AppleContainer.User
-	}
-
-	remoteCommand := strings.Join(command, " ")
-	sshArgs := []string{
-		"-p", sshTarget.Port,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ConnectTimeout=10",
-		fmt.Sprintf("%s@%s", sshTarget.User, sshTarget.Host),
-		remoteCommand,
-	}
-	if sshTarget.Key != "" {
-		sshArgs = append([]string{"-i", sshTarget.Key}, sshArgs...)
-	}
-
-	fmt.Fprintf(a.Stderr, "running on %s@%s:%s...\n", sshTarget.User, sshTarget.Host, sshTarget.Port)
-	_, err = rt.Exec.Run(ctx, LocalCommandRequest{
-		Name:   "ssh",
-		Args:   sshArgs,
-		Stdout: a.Stdout,
-		Stderr: a.Stderr,
-	})
-	if err != nil {
-		return exit(1, "run: command failed: %v", err)
-	}
-
-	if !*keep {
-		if err := sshBackend.ReleaseLease(ctx, ReleaseLeaseRequest{LeaseID: lease.LeaseID, DeleteServer: true}); err != nil {
-			fmt.Fprintf(a.Stderr, "run: release lease: %v\n", err)
-		}
-	}
-
 	return nil
 }
 
 // ---- compile-test ----
 
 func (a App) compileTest(ctx context.Context, args []string) error {
-	return exit(2, "compile-test: not implemented in ciderbox yet; use `ciderbox run` with your test command")
+	return exit(2, "compile-test: not implemented yet; use `ciderbox run` with your test command")
 }
 
 // ---- build ----
 
 func (a App) buildCommand(ctx context.Context, args []string) error {
-	return exit(2, "build: not implemented in ciderbox yet; use `ciderbox run` with your build command")
+	return exit(2, "build: not implemented yet; use `ciderbox run` with your build command")
 }
 
 // ---- chop ----
@@ -293,3 +277,27 @@ func (a App) chopCommand(ctx context.Context, args []string) error {
 	return a.cleanup(ctx, append(args, "--provider", "apple-container"))
 }
 
+// ---- helpers ----
+
+// loadContainerRuntime loads the provider and returns its native ContainerRuntime.
+// This is the primary execution path for local Apple containers, where SSH
+// is unavailable due to Virtualization.framework network isolation.
+func (a App) loadContainerRuntime(ctx context.Context, providerName string) (ContainerRuntime, error) {
+	cfg, rt, err := a.providerConfigRuntime(providerName)
+	if err != nil {
+		return nil, err
+	}
+	p, err := ProviderFor(providerName)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := p.Configure(cfg, rt)
+	if err != nil {
+		return nil, err
+	}
+	crBackend, ok := backend.(ContainerRuntimeBackend)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not expose native ContainerRuntime", providerName)
+	}
+	return crBackend.ContainerRuntime()
+}
