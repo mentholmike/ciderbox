@@ -1,6 +1,6 @@
 # Orchid - AI Agent Swarm on Apple Container VMs
 
-**A Ciderbox Feature (Milestone 9)**
+**A Ciderbox Feature**
 
 ---
 

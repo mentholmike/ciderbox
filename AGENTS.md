@@ -2,43 +2,35 @@
 
 ## Project Structure & Module Organization
 
-Crabbox is a Go CLI plus a Cloudflare Worker coordinator. The CLI entrypoint is `cmd/crabbox`, with implementation and Go tests in `internal/cli`. Worker source lives in `worker/src`, with Vitest tests in `worker/test`. Documentation lives in `docs/`; command docs are under `docs/commands`, and feature notes under `docs/features`. Release configuration is in `.goreleaser.yaml`; GitHub Actions live in `.github/workflows`. Generated outputs such as `bin/`, `dist/`, `worker/dist/`, and `worker/node_modules/` should not be edited by hand.
+Ciderbox is a Go CLI for Apple-native container dev environments. The CLI entrypoint is `cmd/ciderbox`, with implementation and Go tests in `internal/cli`. Documentation lives in `docs/`; command docs are under `docs/commands`, and feature notes under `docs/features`. Release configuration is in `.goreleaser.yaml`; GitHub Actions live in `.github/workflows`. Generated outputs such as `bin/`, `dist/` should not be edited by hand.
 
 ## Product Positioning
 
-Crabbox is a generic remote software testing and execution tool. New code, docs, tests, and examples should not mention OpenClaw, Peter, or other project/person-specific workflows unless the file is explicitly about legacy compatibility or release history. Prefer neutral examples such as `example-org`, `alice@example.com`, `my-app`, `test:live`, and generic repository workflows.
+Ciderbox is an Apple-native dev/test container tool. New code, docs, tests, and examples should not mention OpenClaw, Peter, or other project/person-specific workflows unless the file is explicitly about legacy compatibility or release history. Prefer neutral examples such as `example-org`, `alice@example.com`, `my-app`, and generic repository workflows.
 
 ## Architecture Boundaries
 
-Keep core provider-neutral. Core may pass generic request/lease context and call provider capabilities for defaults, access, provision, images, release, cleanup, and diagnostics. Provider-specific reconciliation, firewall/security-group semantics, labels, snapshots, hosts, regions, rollout compatibility, and resource naming live behind provider adapters. No `provider == aws/gcp/...` logic in core unless it is unavoidable routing/config glue and no provider hook fits.
+Keep the apple-container provider as the sole provider. Core logic handles container lifecycle (run, exec, rm, cp) through the Apple `container` CLI. No multi-provider abstraction needed — this is intentionally a single-purpose tool.
 
 ## Build, Test, and Development Commands
 
-- `go build -trimpath -o bin/crabbox ./cmd/crabbox`: build the local CLI.
+- `go build -trimpath -o bin/ciderbox ./cmd/ciderbox`: build the local CLI.
 - `go vet ./...`: run Go static checks.
 - `go test -race ./...`: run the Go test suite with the race detector.
 - `gofmt -w $(git ls-files '*.go')`: format Go files.
-- `npm ci --prefix worker`: install Worker dependencies.
-- `npm run format:check --prefix worker`: verify TypeScript formatting.
-- `npm run lint --prefix worker`: run `oxlint`.
-- `npm run check --prefix worker`: run TypeScript typechecking.
-- `npm test --prefix worker`: run Vitest tests.
-- `npm run build --prefix worker`: dry-run the Worker build through Wrangler.
-- `node scripts/build-docs-site.mjs`: generate the docs site into `dist/docs-site`.
 
 ## Coding Style & Naming Conventions
 
-Use standard Go formatting and keep package names short and lowercase. Prefer table-driven Go tests where behavior has multiple cases, and keep command behavior close to the matching file in `internal/cli` (for example, cache behavior in `cache.go`). Worker code is TypeScript ESM; use existing module boundaries in `worker/src` and rely on `oxfmt`, `oxlint`, and `tsc`.
+Use standard Go formatting and keep package names short and lowercase. Prefer table-driven Go tests where behavior has multiple cases, and keep command behavior close to the matching file in `internal/cli`.
 
 ## Testing Guidelines
 
-Name Go tests `*_test.go` beside the code they cover. Name Worker tests `*.test.ts` under `worker/test`. Add regression tests for bug fixes when practical. Before handoff, run the relevant subset; before release or broad changes, run the full CI-equivalent gate from the README.
+Name Go tests `*_test.go` beside the code they cover. Add regression tests for bug fixes when practical. Before handoff, run the relevant subset; before release or broad changes, run the full CI-equivalent gate.
 
 ## Commit & Pull Request Guidelines
 
-History uses Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `ci:`. Keep commits focused and mention user-visible behavior changes. Pull requests should include a clear summary, verification commands, config or secret implications, and screenshots only for generated docs or UI changes. Issue/PR references: always use full GitHub URLs, every time.
+History uses Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `ci:`. Keep commits focused and mention user-visible behavior changes. Pull requests should include a clear summary, verification commands, and config implications.
 
 ## Security & Configuration Tips
 
-Keep provider and broker tokens out of the repository. Do not pass secrets as command-line arguments. Local config belongs in `~/.config/crabbox/config.yaml`, `~/Library/Application Support/crabbox/config.yaml`, `crabbox.yaml`, or `.crabbox.yaml` as documented.
-Tenki provider SSH uses `tenki sandbox ssh-proxy` with Tenki-managed key/cert files under `~/.config/tenki`; do not use Crabbox per-lease keys for gateway auth.
+Keep API tokens out of the repository. Do not pass secrets as command-line arguments. Local config belongs in `~/.config/ciderbox/config.yaml`, `~/Library/Application Support/ciderbox/config.yaml`, `ciderbox.yaml`, or `.ciderbox.yaml` as documented.
