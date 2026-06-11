@@ -26,7 +26,8 @@ func (a App) orchardRun(ctx context.Context, args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if *task == "" {
+	taskText := orchardRunTaskText(*task, fs.Args())
+	if taskText == "" {
 		return exit(2, "--task required")
 	}
 
@@ -96,7 +97,7 @@ func (a App) orchardRun(ctx context.Context, args []string) error {
 		command = defaultOrchardAgentCommand
 	}
 
-	encodedTask := base64.StdEncoding.EncodeToString([]byte(*task))
+	encodedTask := base64.StdEncoding.EncodeToString([]byte(taskText))
 	encodedCommand := base64.StdEncoding.EncodeToString([]byte(command))
 
 	fmt.Fprintf(a.Stdout, "=== Orchard Run ===\n")
@@ -118,7 +119,7 @@ func (a App) orchardRun(ctx context.Context, args []string) error {
 	taskMeta := map[string]interface{}{
 		"id":           taskID,
 		"orchard":      config.Name,
-		"task":         *task,
+		"task":         taskText,
 		"status":       "running",
 		"trees":        treesStatus,
 		"created_at":   startedAt.Format(time.RFC3339Nano),
@@ -262,6 +263,13 @@ exit "$status"
 		return exit(1, "%d tree task(s) failed", failures)
 	}
 	return nil
+}
+
+func orchardRunTaskText(flagTask string, positional []string) string {
+	if task := strings.TrimSpace(flagTask); task != "" {
+		return task
+	}
+	return strings.TrimSpace(strings.Join(positional, " "))
 }
 
 // orchardSyncTree tars the current project directory and pipes it into a tree container.

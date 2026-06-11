@@ -88,10 +88,31 @@ func TestDefaultOrchardAgentCommandUsesSupportedOpenClawCLI(t *testing.T) {
 	if strings.Contains(defaultOrchardAgentCommand, "openclaw run") {
 		t.Fatalf("default orchard command uses removed OpenClaw run command: %s", defaultOrchardAgentCommand)
 	}
-	for _, want := range []string{"openclaw", "agent", "--local", "--agent main", "--message \"$ORCHARD_TASK\""} {
+	for _, want := range []string{"cd \"${ORCHARD_WORKSPACE:-/root/.openclaw/workspace}\"", "openclaw", "agent", "--local", "--agent main", "--message \"$ORCHARD_TASK\""} {
 		if !strings.Contains(defaultOrchardAgentCommand, want) {
 			t.Fatalf("default orchard command missing %q: %s", want, defaultOrchardAgentCommand)
 		}
+	}
+}
+
+func TestOrchardRunTaskTextAcceptsFlagOrPositionalTask(t *testing.T) {
+	tests := []struct {
+		name       string
+		flagTask   string
+		positional []string
+		want       string
+	}{
+		{name: "flag wins", flagTask: " review repo ", positional: []string{"ignored"}, want: "review repo"},
+		{name: "positional", positional: []string{"review", "this", "repo"}, want: "review this repo"},
+		{name: "blank", flagTask: " ", positional: []string{" "}, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := orchardRunTaskText(tt.flagTask, tt.positional); got != tt.want {
+				t.Fatalf("task text = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

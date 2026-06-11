@@ -49,3 +49,15 @@ func TestDistroRunFlagsPutImageBeforeBaseFlags(t *testing.T) {
 		t.Fatalf("command = %q", command)
 	}
 }
+
+func TestCompileTestDependenciesAcceptCanonicalAndDeprecatedKeys(t *testing.T) {
+	cfg := CompileTestConfig{
+		Deps:         []string{"rsync"},
+		Dependencies: []string{"build-essential", "git"},
+	}
+	got := strings.Join(compileTestDependencies(cfg), ",")
+	want := "rsync,build-essential,git"
+	if got != want {
+		t.Fatalf("compile test dependencies = %q, want %q", got, want)
+	}
+}

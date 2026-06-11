@@ -288,11 +288,7 @@ func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) erro
 		if command == "" {
 			command = "go test ./..."
 		}
-		// Merge deps and dependencies (backward compat)
-		allDeps := make([]string, 0, len(cfg.CompileTest.Deps)+len(cfg.CompileTest.Dependencies))
-		allDeps = append(allDeps, cfg.CompileTest.Deps...)
-		allDeps = append(allDeps, cfg.CompileTest.Dependencies...)
-		for _, dep := range allDeps {
+		for _, dep := range compileTestDependencies(cfg.CompileTest) {
 			depFlags = append(depFlags, "--dep", dep)
 		}
 		depFlags = append(depFlags, "--")
@@ -316,6 +312,13 @@ func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) erro
 		}
 	}
 	return nil
+}
+
+func compileTestDependencies(cfg CompileTestConfig) []string {
+	deps := make([]string, 0, len(cfg.Deps)+len(cfg.Dependencies))
+	deps = append(deps, cfg.Deps...)
+	deps = append(deps, cfg.Dependencies...)
+	return deps
 }
 
 func distroRunFlags(baseFlags []string, image string) []string {

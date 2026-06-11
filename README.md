@@ -232,16 +232,20 @@ For AI agent swarms, see [ORCHID.md](ORCHID.md).
 name: my-orchard
 trees: 3
 template:
-  image: ubuntu:26.04
+  image: debian:bookworm
   cpus: 2
   memory: 4G
 agent:
   identity: archimedes-clone
-  skills: [web-search, github, discord]
-  model: gpt-5.3-codex-spark
-mesh:
-  mode: gossip
-  broadcast: true
+  skills: []
+  model: CHANGE_ME
+  command: cd "${ORCHARD_WORKSPACE:-/root/.openclaw/workspace}" && openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off
+secrets:
+  envFile: .orchid.env
+  required: []
+workspace:
+  sync: true
+  path: /work/ciderbox
 ```
 
 ## Troubleshooting

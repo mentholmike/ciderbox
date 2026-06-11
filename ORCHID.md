@@ -123,34 +123,24 @@ Current `orchard init` output:
 name: my-orchard
 trees: 3
 template:
-    image: ubuntu:26.04
+    image: debian:bookworm
     cpus: 2
     memory: 4G
-    distro: ubuntu
+    distro: debian
 agent:
     identity: tree-agent
-    skills:
-        - github
-        - web-search
+    skills: []
     model: CHANGE_ME
-    command: openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off
-```
-
-The config structs also support:
-
-```yaml
+    command: cd "${ORCHARD_WORKSPACE:-/root/.openclaw/workspace}" && openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off
 secrets:
     envFile: .orchid.env
-    passThrough:
-        - OPENROUTER_API_KEY
-    required:
-        - OPENROUTER_API_KEY
+    required: []
 workspace:
     sync: true
     path: /work/ciderbox
 ```
 
-`agent.command` runs inside each tree. The task text is available as `ORCHARD_TASK`. When workspace sync is enabled, the workspace path is available as `ORCHARD_WORKSPACE`.
+`agent.command` runs inside each tree. The task text is available as `ORCHARD_TASK`. When workspace sync is enabled, the workspace path is available as `ORCHARD_WORKSPACE`; the generated command starts there before launching OpenClaw.
 
 ---
 
@@ -186,6 +176,7 @@ For API-key providers, set the matching environment variable in `.orchid.env` or
 ciderbox orchard plant
 ciderbox orchard graft --all
 ciderbox orchard run --sync --task "review this repo and write findings"
+ciderbox orchard run --sync -- "review this repo and write findings"
 ciderbox orchard harvest --task <task-id> --output results.json
 ciderbox orchard press --task <task-id>
 ciderbox orchard chop --yes
@@ -209,7 +200,7 @@ Each tree writes structured JSON containing the task ID, tree name, status, outp
 
 ## Linux Support
 
-Orchid graft and runtime dependency installation currently support Ubuntu/Debian-style trees only.
+Orchid graft and runtime dependency installation currently support Debian/Ubuntu-style trees only.
 
 The current graft path expects:
 

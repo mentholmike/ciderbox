@@ -77,7 +77,7 @@ const orchardDefaultFile = ".orchard.yaml"
 // orchardResultPath is where trees write their work output for harvest.
 const orchardResultPath = "/tmp/orchard-result.json"
 
-const defaultOrchardAgentCommand = `openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off`
+const defaultOrchardAgentCommand = `cd "${ORCHARD_WORKSPACE:-/root/.openclaw/workspace}" && openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off`
 
 // ContainerRuntimeBackend is implemented by providers that can expose a native
 // container lifecycle runtime. This keeps cli from importing applecontainer
@@ -150,6 +150,7 @@ Examples:
   ciderbox orchard plant --config .orchard.yaml
   ciderbox orchard graft --tree tree-0
   ciderbox orchard run --task "review this repo and write JSON findings"
+  ciderbox orchard run -- "review this repo and write JSON findings"
   ciderbox orchard harvest --output results.json
   ciderbox orchard press --input results.json
   ciderbox orchard doctor
@@ -175,16 +176,24 @@ func (a App) orchardInit(ctx context.Context, args []string) error {
 		Name:  "my-orchard",
 		Trees: 3,
 		Template: TreeTemplate{
-			Image:  "ubuntu:26.04",
+			Image:  "debian:bookworm",
 			CPUs:   2,
 			Memory: "4G",
-			Distro: "ubuntu",
+			Distro: "debian",
 		},
 		Agent: AgentConfig{
 			Identity: "tree-agent",
-			Skills:   []string{"github", "web-search"},
+			Skills:   []string{},
 			Model:    "CHANGE_ME",
 			Command:  defaultOrchardAgentCommand,
+		},
+		Workspace: WorkspaceConfig{
+			Sync: true,
+			Path: "/work/ciderbox",
+		},
+		Secrets: SecretsConfig{
+			EnvFile:  ".orchid.env",
+			Required: []string{},
 		},
 	}
 
@@ -987,7 +996,7 @@ func readOrchardConfig(path string) (*OrchardConfig, error) {
 		config.Trees = 1
 	}
 	if config.Template.Image == "" {
-		config.Template.Image = "ubuntu:26.04"
+		config.Template.Image = "debian:bookworm"
 	}
 	if config.Template.CPUs <= 0 {
 		config.Template.CPUs = 2
