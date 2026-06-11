@@ -626,21 +626,22 @@ func (a App) orchardPress(ctx context.Context, args []string) error {
 				continue
 			}
 			var result HarvestResult
-			if err := json.Unmarshal(d, &result); err != nil || result.Tree == "" {
-				// Try as tree result format from orchard run
-				var tr struct {
-					TaskID string `json:"task_id"`
-					Tree   string `json:"tree"`
-					Status string `json:"status"`
-					Output string `json:"output"`
-				}
-				if json.Unmarshal(d, &tr) == nil && tr.Tree != "" {
-					result = HarvestResult{Tree: tr.Tree, Status: tr.Status}
-					if tr.Output != "" {
-						q, _ := json.Marshal(tr.Output)
-						result.Result = q
-					}
-				}
+			var tr struct {
+				TaskID   string `json:"task_id"`
+				Tree     string `json:"tree"`
+				Status   string `json:"status"`
+				Output   string `json:"output"`
+				ExitCode int    `json:"exit_code"`
+			}
+			if json.Unmarshal(d, &tr) == nil && tr.Tree != "" && tr.TaskID != "" {
+				result = HarvestResult{Tree: tr.Tree, Status: tr.Status}
+				q, _ := json.Marshal(map[string]interface{}{
+					"output":    tr.Output,
+					"exit_code": tr.ExitCode,
+				})
+				result.Result = q
+			} else if err := json.Unmarshal(d, &result); err != nil || result.Tree == "" {
+				continue
 			}
 			if result.Tree != "" {
 				results = append(results, result)
@@ -718,7 +719,7 @@ func (a App) graftTree(ctx context.Context, containerRuntime ContainerRuntime, c
 		"export DEBIAN_FRONTEND=noninteractive",
 		"if ! command -v apt-get >/dev/null 2>&1; then echo 'graft currently supports Debian/Ubuntu trees only' >&2; exit 1; fi",
 		"apt-get update -qq",
-		"apt-get install -y -qq --no-install-recommends curl ca-certificates git gnupg",
+		"apt-get install -y -qq --no-install-recommends curl ca-certificates git gnupg python3",
 		"if ! command -v node >/dev/null 2>&1 || [ \"$(node -e 'process.stdout.write(String(process.versions.node.split(\".\")[0]))')\" -lt 22 ]; then curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs; fi",
 		"npm install -g openclaw" + boolFlag(upgrade, " --upgrade", ""),
 		"mkdir -p /root/.openclaw/workspace",

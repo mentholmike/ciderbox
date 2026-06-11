@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -45,8 +47,14 @@ func loadSecrets(cfg *OrchardConfig) (*SecretsState, error) {
 		}
 	}
 
-	// 2. Merge pass-through host env vars (higher priority)
-	for _, key := range cfg.Secrets.PassThrough {
+	// 2. Merge allowed host env vars (higher priority)
+	hostKeys := append([]string{}, cfg.Secrets.PassThrough...)
+	for _, key := range cfg.Secrets.Required {
+		if !contains(hostKeys, key) {
+			hostKeys = append(hostKeys, key)
+		}
+	}
+	for _, key := range hostKeys {
 		if val, ok := os.LookupEnv(key); ok {
 			state.Secrets[key] = val
 			state.Sources[key] = "host env"
@@ -254,15 +262,39 @@ func (a App) orchardSecretsInit(ctx context.Context, args []string) error {
 	gData, _ := os.ReadFile(gPath)
 	gContent := string(gData)
 	changed := false
-	patterns := []string{".orchid.env", ".openclaw.env"}
+	existingIgnores := make(map[string]bool)
+	for _, line := range strings.Split(gContent, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line != "" {
+			existingIgnores[line] = true
+		}
+	}
+	ignoreEnvPath := filepath.Clean(envPath)
+	if filepath.IsAbs(ignoreEnvPath) {
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, ignoreEnvPath); err == nil && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".." {
+				ignoreEnvPath = rel
+			}
+		}
+	}
+	patterns := []string{ignoreEnvPath, ".orchid.env", ".openclaw.env"}
 	for _, p := range patterns {
-		if !strings.Contains(gContent, p+"\n") && !strings.Contains(gContent, p+"\r") {
+		if filepath.IsAbs(p) {
+			continue
+		}
+		if p != "" && !existingIgnores[p] {
+			if gContent != "" && !strings.HasSuffix(gContent, "\n") {
+				gContent += "\n"
+			}
 			gContent += p + "\n"
+			existingIgnores[p] = true
 			changed = true
 		}
 	}
 	if changed {
-		os.WriteFile(gPath, []byte(gContent), 0644)
+		if err := os.WriteFile(gPath, []byte(gContent), 0644); err != nil {
+			return exit(2, "write %s: %v", gPath, err)
+		}
 		fmt.Fprintln(a.Stdout, "Updated .gitignore")
 	}
 
@@ -330,8 +362,12 @@ func (a App) orchardSecretsPush(ctx context.Context, args []string) error {
 	fs := newFlagSet("orchard secrets push", a.Stderr)
 	configFile := fs.String("config", orchardDefaultFile, "path to orchard manifest")
 	treeID := fs.String("tree", "", "tree ID to push secrets to; defaults to all trees")
+	pushAll := fs.Bool("all", false, "push secrets to all trees")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if *pushAll && *treeID != "" {
+		return exit(2, "orchard secrets push: specify --tree or --all, not both")
 	}
 
 	cfg, err := readOrchardConfig(*configFile)
@@ -349,10 +385,11 @@ func (a App) orchardSecretsPush(ctx context.Context, args []string) error {
 		return exit(2, "required secrets missing: %s (run 'orchard secrets check')", strings.Join(missing, ", "))
 	}
 
-	trees, _, containerRuntime, err := a.orchardContainers(ctx, cfg.Name)
+	trees, runtimeConfig, _, err := a.orchardContainers(ctx, cfg.Name)
 	if err != nil {
 		return exit(2, "orchard push: %v", err)
 	}
+	containerCLI := blank(runtimeConfig.AppleContainer.CLIPath, "container")
 
 	if *treeID != "" {
 		filtered := trees[:0]
@@ -369,7 +406,6 @@ func (a App) orchardSecretsPush(ctx context.Context, args []string) error {
 	}
 
 	envContent := state.envContent(cfg)
-	encodedEnv := base64.StdEncoding.EncodeToString([]byte(envContent))
 
 	fmt.Fprintf(a.Stdout, "Pushing secrets to %d tree(s)...\n", len(trees))
 	success, failed := 0, 0
@@ -377,9 +413,7 @@ func (a App) orchardSecretsPush(ctx context.Context, args []string) error {
 		name := blank(tree.Labels["tree.id"], tree.Name)
 		fmt.Fprintf(a.Stdout, "  [%s] writing /root/.openclaw/.env...\n", name)
 
-		script := fmt.Sprintf(`mkdir -p /root/.openclaw && printf %%s %q | base64 -d > /root/.openclaw/.env && chmod 600 /root/.openclaw/.env`, encodedEnv)
-
-		if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"/bin/sh", "-lc", script}); err != nil {
+		if err := a.writeTreeFile(ctx, containerCLI, tree.ID, "/root/.openclaw/.env", envContent, "600"); err != nil {
 			fmt.Fprintf(a.Stderr, "  [%s] failed: %v\n", name, err)
 			failed++
 			continue
@@ -436,7 +470,7 @@ Provider keys in /root/.openclaw/.env are sufficient.
 }
 
 // ensureOpenClawConfig generates openclaw.json and .env inside a tree.
-func (a App) ensureOpenClawConfig(ctx context.Context, runtime ContainerRuntime, containerID string, cfg *OrchardConfig, treeID string, workspacePath string, secrets *SecretsState) error {
+func (a App) ensureOpenClawConfig(ctx context.Context, runtime ContainerRuntime, containerCLI, containerID string, cfg *OrchardConfig, treeID string, workspacePath string, secrets *SecretsState) error {
 	// 1. Generate and write openclaw.json
 	ocJSON := generateOpenClawJSON(cfg, treeID, workspacePath)
 	encodedJSON := base64.StdEncoding.EncodeToString([]byte(ocJSON))
@@ -452,14 +486,20 @@ chmod 600 /root/.openclaw/openclaw.json`, encodedJSON)
 	// 2. Write .env from secrets
 	if secrets != nil {
 		envContent := secrets.envContent(cfg)
-		encodedEnv := base64.StdEncoding.EncodeToString([]byte(envContent))
-		envScript := fmt.Sprintf(`printf %%s %q | base64 -d > /root/.openclaw/.env && chmod 600 /root/.openclaw/.env`, encodedEnv)
-		if err := a.treeExec(ctx, runtime, containerID, []string{"/bin/sh", "-lc", envScript}); err != nil {
+		if err := a.writeTreeFile(ctx, containerCLI, containerID, "/root/.openclaw/.env", envContent, "600"); err != nil {
 			return fmt.Errorf("write .env: %w", err)
 		}
 	}
 
 	return nil
+}
+
+func (a App) writeTreeFile(ctx context.Context, containerCLI, containerID, path, content, mode string) error {
+	script := fmt.Sprintf("mkdir -p %s && cat > %s && chmod %s %s", shQuote(filepath.Dir(path)), shQuote(path), shQuote(mode), shQuote(path))
+	cmd := exec.CommandContext(ctx, containerCLI, "exec", "-i", containerID, "/bin/sh", "-lc", script)
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stderr = a.Stderr
+	return cmd.Run()
 }
 
 // contains checks if a string is in a slice.

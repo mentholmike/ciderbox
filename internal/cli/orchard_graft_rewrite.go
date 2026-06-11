@@ -18,16 +18,20 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	if *graftAll && *treeID != "" {
+		return exit(2, "orchard graft: specify --tree or --all, not both")
+	}
 
 	config, err := readOrchardConfig(*configFile)
 	if err != nil {
 		return exit(2, "orchard graft: config: %v", err)
 	}
 
-	trees, _, containerRuntime, err := a.orchardContainers(ctx, config.Name)
+	trees, runtimeConfig, containerRuntime, err := a.orchardContainers(ctx, config.Name)
 	if err != nil {
 		return exit(2, "orchard graft: %v", err)
 	}
+	containerCLI := blank(runtimeConfig.AppleContainer.CLIPath, "container")
 
 	targetTrees := make([]ContainerInfo, 0)
 	if *graftAll {
@@ -74,29 +78,38 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 	fmt.Fprintf(a.Stdout, "Secrets: %d pass-through, %d required\n", len(config.Secrets.PassThrough), len(config.Secrets.Required))
 	fmt.Fprintln(a.Stdout)
 
-	grafted, skipped, failed := 0, 0, 0
+	installed, configured, skipped, failed := 0, 0, 0, 0
 	for _, tree := range targetTrees {
 		name := blank(tree.Labels["tree.id"], tree.Name)
 		fmt.Fprintf(a.Stdout, "[%s] checking...\n", name)
 
-		// Skip if already grafted (unless --upgrade)
+		alreadyInstalled := false
 		if !*upgrade {
 			if out, err := a.treeExecCapture(ctx, containerRuntime, tree.ID, []string{"openclaw", "--version"}); err == nil && out != "" {
-				fmt.Fprintf(a.Stdout, "[%s] already grafted (openclaw %s); use --upgrade to reinstall\n", name, strings.TrimSpace(out))
+				fmt.Fprintf(a.Stdout, "[%s] OpenClaw already installed (%s); refreshing config\n", name, strings.TrimSpace(out))
+				alreadyInstalled = true
 				skipped++
-				continue
 			}
 		}
 
-		fmt.Fprintf(a.Stdout, "[%s] grafting (Node 22 + OpenClaw)...\n", name)
-		if err := a.graftTree(ctx, containerRuntime, config, tree, name, *upgrade); err != nil {
-			fmt.Fprintf(a.Stderr, "[%s] graft failed: %v\n", name, err)
+		if !alreadyInstalled {
+			fmt.Fprintf(a.Stdout, "[%s] grafting (Node 22 + OpenClaw)...\n", name)
+			if err := a.graftTree(ctx, containerRuntime, config, tree, name, *upgrade); err != nil {
+				fmt.Fprintf(a.Stderr, "[%s] graft failed: %v\n", name, err)
+				failed++
+				continue
+			}
+			installed++
+		}
+
+		if err := a.ensureTreeRuntimeDeps(ctx, containerRuntime, tree.ID); err != nil {
+			fmt.Fprintf(a.Stderr, "[%s] runtime dependency check failed: %v\n", name, err)
 			failed++
 			continue
 		}
 
 		fmt.Fprintf(a.Stdout, "[%s] generating openclaw.json + .env...\n", name)
-		if err := a.ensureOpenClawConfig(ctx, containerRuntime, tree.ID, config, name, wsPath, secrets); err != nil {
+		if err := a.ensureOpenClawConfig(ctx, containerRuntime, containerCLI, tree.ID, config, name, wsPath, secrets); err != nil {
 			fmt.Fprintf(a.Stderr, "[%s] config generation failed: %v\n", name, err)
 			failed++
 			continue
@@ -112,17 +125,31 @@ func (a App) orchardGraft(ctx context.Context, args []string) error {
 		// Validate OpenClaw config
 		if !*noValidate {
 			fmt.Fprintf(a.Stdout, "[%s] validating OpenClaw config...\n", name)
-			if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"/bin/sh", "-lc", "openclaw config validate 2>&1 || echo 'config validate: non-fatal'"}); err != nil {
+			if err := a.treeExec(ctx, containerRuntime, tree.ID, []string{"openclaw", "config", "validate"}); err != nil {
 				fmt.Fprintf(a.Stderr, "[%s] openclaw config validate: %v\n", name, err)
+				failed++
+				continue
 			}
 		}
 
-		grafted++
+		configured++
 	}
 
-	fmt.Fprintf(a.Stdout, "\ngrafted=%d skipped=%d failed=%d\n", grafted, skipped, failed)
+	fmt.Fprintf(a.Stdout, "\ninstalled=%d configured=%d skipped_install=%d failed=%d\n", installed, configured, skipped, failed)
 	if failed > 0 {
 		return exit(1, "%d tree(s) failed to graft", failed)
 	}
 	return nil
+}
+
+func (a App) ensureTreeRuntimeDeps(ctx context.Context, containerRuntime ContainerRuntime, containerID string) error {
+	script := strings.Join([]string{
+		"set -e",
+		"if command -v python3 >/dev/null 2>&1; then exit 0; fi",
+		"export DEBIAN_FRONTEND=noninteractive",
+		"if ! command -v apt-get >/dev/null 2>&1; then echo 'python3 missing and apt-get unavailable' >&2; exit 1; fi",
+		"apt-get update -qq",
+		"apt-get install -y -qq --no-install-recommends python3",
+	}, " && ")
+	return a.treeExec(ctx, containerRuntime, containerID, []string{"/bin/sh", "-lc", script})
 }
