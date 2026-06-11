@@ -1,6 +1,8 @@
 # 🍎 Ciderbox
 
-**Apple-native throwaway dev environments.** A fork of [crabbox](https://github.com/openclaw/crabbox) that replaces Docker with Apple's native `container` CLI for sub-second, hypervisor-isolated Linux VMs on Apple Silicon Macs.
+**Apple-native throwaway dev environments.** <https://ciderbox.dev>
+
+A fork of [crabbox](https://github.com/openclaw/crabbox) that replaces Docker with Apple's native `container` CLI for sub-second, hypervisor-isolated Linux VMs on Apple Silicon Macs.
 
 ```sh
 # Test your code across multiple Linux distros
@@ -34,6 +36,8 @@ Or in one line:
 ```sh
 brew install mentholmike/ciderbox/ciderbox
 ```
+
+**Note:** `brew install ciderbox` (without the tap prefix) requires [homebrew-core](https://docs.brew.sh/Acceptable-Formulae) notability. Since this is a new project, use the tap above.
 
 ### From source
 
