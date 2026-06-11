@@ -133,7 +133,7 @@ agent:
         - github
         - web-search
     model: CHANGE_ME
-    command: openclaw run "$ORCHARD_TASK"
+    command: openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off
 ```
 
 The config structs also support:

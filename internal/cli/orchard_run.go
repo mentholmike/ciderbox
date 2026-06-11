@@ -93,7 +93,7 @@ func (a App) orchardRun(ctx context.Context, args []string) error {
 
 	command := strings.TrimSpace(config.Agent.Command)
 	if command == "" {
-		command = `openclaw run "$ORCHARD_TASK"`
+		command = defaultOrchardAgentCommand
 	}
 
 	encodedTask := base64.StdEncoding.EncodeToString([]byte(*task))

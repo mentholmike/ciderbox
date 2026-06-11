@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,17 @@ func TestPlantTreeRunsContainerAsRoot(t *testing.T) {
 	}
 	if runtime.spec.User != "root" {
 		t.Fatalf("container user = %q, want root", runtime.spec.User)
+	}
+}
+
+func TestDefaultOrchardAgentCommandUsesSupportedOpenClawCLI(t *testing.T) {
+	if strings.Contains(defaultOrchardAgentCommand, "openclaw run") {
+		t.Fatalf("default orchard command uses removed OpenClaw run command: %s", defaultOrchardAgentCommand)
+	}
+	for _, want := range []string{"openclaw", "agent", "--local", "--agent main", "--message \"$ORCHARD_TASK\""} {
+		if !strings.Contains(defaultOrchardAgentCommand, want) {
+			t.Fatalf("default orchard command missing %q: %s", want, defaultOrchardAgentCommand)
+		}
 	}
 }
 

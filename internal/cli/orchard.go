@@ -77,6 +77,8 @@ const orchardDefaultFile = ".orchard.yaml"
 // orchardResultPath is where trees write their work output for harvest.
 const orchardResultPath = "/tmp/orchard-result.json"
 
+const defaultOrchardAgentCommand = `openclaw --log-level silent agent --local --agent main --session-key "orchard:${HOSTNAME:-tree}" --message "$ORCHARD_TASK" --timeout 180 --verbose off`
+
 // ContainerRuntimeBackend is implemented by providers that can expose a native
 // container lifecycle runtime. This keeps cli from importing applecontainer
 // directly, which would create an import cycle.
@@ -182,7 +184,7 @@ func (a App) orchardInit(ctx context.Context, args []string) error {
 			Identity: "tree-agent",
 			Skills:   []string{"github", "web-search"},
 			Model:    "CHANGE_ME",
-			Command:  `openclaw run "$ORCHARD_TASK"`,
+			Command:  defaultOrchardAgentCommand,
 		},
 	}
 
@@ -994,7 +996,7 @@ func readOrchardConfig(path string) (*OrchardConfig, error) {
 		config.Template.Memory = "4G"
 	}
 	if config.Agent.Command == "" {
-		config.Agent.Command = `openclaw run "$ORCHARD_TASK"`
+		config.Agent.Command = defaultOrchardAgentCommand
 	}
 
 	return &config, nil
