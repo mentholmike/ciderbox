@@ -52,7 +52,6 @@ type TargetSpec struct {
 	OS string
 }
 
-
 type Feature string
 
 type FeatureSet []Feature
@@ -293,15 +292,15 @@ func registerProviderFlags(fs *flag.FlagSet, defaults Config) providerFlagValues
 func ProviderServerTypeProvider(cfg Config) string { return cfg.Provider }
 
 const (
-	azureProvider         = "azure"
-	awsProvider           = "aws"
-	gcpProvider           = "gcp"
-	hetznerProvider       = "hetzner"
-	parallelsProvider     = "parallels"
-	proxmoxProvider       = "proxmox"
-	incusProvider         = "incus"
-	blacksmithProvider    = "blacksmith"
+	azureProvider      = "azure"
+	awsProvider        = "aws"
+	gcpProvider        = "gcp"
+	hetznerProvider    = "hetzner"
+	parallelsProvider  = "parallels"
+	proxmoxProvider    = "proxmox"
+	incusProvider      = "incus"
+	blacksmithProvider = "blacksmith"
 )
 
-func isBlacksmithProvider(cfg Config) bool   { return false }
-func isStaticProvider(provider string) bool   { return false }
+func isBlacksmithProvider(cfg Config) bool  { return false }
+func isStaticProvider(provider string) bool { return false }

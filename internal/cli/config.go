@@ -8,39 +8,39 @@ import (
 
 // Config is the ciderbox user configuration.
 type Config struct {
-	Profile            string        `yaml:"profile"`
-	Provider           string        `yaml:"provider"`
-	Coordinator        string        `yaml:"coordinator,omitempty"`
-	CoordToken         string        `yaml:"-"`
-	CoordAdminToken    string        `yaml:"-"`
-	TargetOS           string        `yaml:"target"`
-	WindowsMode        string        `yaml:"windowsMode,omitempty"`
-	Architecture       string        `yaml:"architecture,omitempty"`
-	OSImage            string        `yaml:"osImage,omitempty"`
-	ServerType         string        `yaml:"type,omitempty"`
-	Class              string        `yaml:"class,omitempty"`
-	WorkRoot           string        `yaml:"workRoot,omitempty"`
-	SSHUser            string        `yaml:"sshUser,omitempty"`
-	SSHPort            string        `yaml:"sshPort,omitempty"`
-	SSHKey             string        `yaml:"sshKey,omitempty"`
-	SSHFallbackPorts   []string      `yaml:"sshFallbackPorts,omitempty"`
-	DesktopEnv         string        `yaml:"desktopEnv,omitempty"`
-	Network            NetworkMode   `yaml:"network,omitempty"`
-	Tailscale          TailscaleConfig `yaml:"tailscale,omitempty"`
-	Pond               string        `yaml:"pond,omitempty"`
-	IdleTimeout        time.Duration `yaml:"-"`
-	TTL                time.Duration `yaml:"-"`
-	ProfileStore       string        `yaml:"-"`
-	Slug               string        `yaml:"slug,omitempty"`
-	ExposedPorts       []string      `yaml:"expose,omitempty"`
+	Profile          string          `yaml:"profile"`
+	Provider         string          `yaml:"provider"`
+	Coordinator      string          `yaml:"coordinator,omitempty"`
+	CoordToken       string          `yaml:"-"`
+	CoordAdminToken  string          `yaml:"-"`
+	TargetOS         string          `yaml:"target"`
+	WindowsMode      string          `yaml:"windowsMode,omitempty"`
+	Architecture     string          `yaml:"architecture,omitempty"`
+	OSImage          string          `yaml:"osImage,omitempty"`
+	ServerType       string          `yaml:"type,omitempty"`
+	Class            string          `yaml:"class,omitempty"`
+	WorkRoot         string          `yaml:"workRoot,omitempty"`
+	SSHUser          string          `yaml:"sshUser,omitempty"`
+	SSHPort          string          `yaml:"sshPort,omitempty"`
+	SSHKey           string          `yaml:"sshKey,omitempty"`
+	SSHFallbackPorts []string        `yaml:"sshFallbackPorts,omitempty"`
+	DesktopEnv       string          `yaml:"desktopEnv,omitempty"`
+	Network          NetworkMode     `yaml:"network,omitempty"`
+	Tailscale        TailscaleConfig `yaml:"tailscale,omitempty"`
+	Pond             string          `yaml:"pond,omitempty"`
+	IdleTimeout      time.Duration   `yaml:"-"`
+	TTL              time.Duration   `yaml:"-"`
+	ProfileStore     string          `yaml:"-"`
+	Slug             string          `yaml:"slug,omitempty"`
+	ExposedPorts     []string        `yaml:"expose,omitempty"`
 
 	AppleContainer AppleContainerConfig `yaml:"appleContainer,omitempty"`
 
 	Cache CacheConfig `yaml:"cache,omitempty"`
 
 	// Internal fields populated during config loading
-	GCPProject     string `yaml:"-"`
-	Static         StaticConfig `yaml:"-"`
+	GCPProject string       `yaml:"-"`
+	Static     StaticConfig `yaml:"-"`
 }
 
 type CacheConfig struct {
@@ -100,19 +100,19 @@ func expandUserPath(path string) string {
 	return path
 }
 
-func normalizeNetworkConfig(cfg *Config) {}
+func normalizeNetworkConfig(cfg *Config)     {}
 func validateNetworkConfig(cfg Config) error { return nil }
 
-func normalizeOSImage(value string) (string, error) { return value, nil }
-func normalizeArchitecture(value string) (string, error) { return value, nil }
-func effectiveArchitectureForConfig(cfg Config) string { return "amd64" }
-func normalizeTargetConfig(cfg *Config) {}
-func validateTargetConfig(cfg Config) error { return nil }
+func normalizeOSImage(value string) (string, error)       { return value, nil }
+func normalizeArchitecture(value string) (string, error)  { return value, nil }
+func effectiveArchitectureForConfig(cfg Config) string    { return "amd64" }
+func normalizeTargetConfig(cfg *Config)                   {}
+func validateTargetConfig(cfg Config) error               { return nil }
 func normalizePreflightToolNames(names []string) []string { return names }
-func normalizeTailscaleTags(tags []string) []string { return tags }
-func routeConfiguredProvider(cfg *Config) error { return nil }
-func canonicalizeConfigProvider(cfg *Config) {}
-func applyProviderConfigDefaults(cfg *Config) error { return nil }
+func normalizeTailscaleTags(tags []string) []string       { return tags }
+func routeConfiguredProvider(cfg *Config) error           { return nil }
+func canonicalizeConfigProvider(cfg *Config)              {}
+func applyProviderConfigDefaults(cfg *Config) error       { return nil }
 
 const (
 	TargetLinux   = "linux"

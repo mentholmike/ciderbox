@@ -33,13 +33,13 @@ type TailscaleConfig struct {
 }
 
 type TailscaleMetadata struct {
-	Enabled                bool
-	Hostname               string
-	FQDN                   string
-	IPv4                   string
-	Tags                   []string
-	State                  string
-	Error                  string
+	Enabled  bool
+	Hostname string
+	FQDN     string
+	IPv4     string
+	Tags     []string
+	State    string
+	Error    string
 }
 
 type PublicNetInfo struct {
@@ -121,7 +121,7 @@ type CoordinatorCapability struct {
 func NewCoordinatorClient(url, adminToken, runtimeToken string) *CoordinatorClient {
 	return &CoordinatorClient{}
 }
-func (c *CoordinatorClient) Close() {}
+func (c *CoordinatorClient) Close()                         {}
 func (c *CoordinatorClient) Ping(ctx context.Context) error { return nil }
 
 // ---- Repo ----
@@ -249,13 +249,13 @@ func RemoveStoredTestboxKey(leaseID string) {
 // ---- Lease claim management ----
 
 type LeaseClaim struct {
-	LeaseID        string `json:"lease_id"`
-	Slug          string `json:"slug"`
-	Provider      string `json:"provider"`
-	ProviderScope string `json:"provider_scope"`
-	RepoRoot      string `json:"repo_root"`
-	IdleTimeoutSeconds int `json:"idle_timeout_seconds"`
-	LastUsedAt    string `json:"last_used_at"`
+	LeaseID            string `json:"lease_id"`
+	Slug               string `json:"slug"`
+	Provider           string `json:"provider"`
+	ProviderScope      string `json:"provider_scope"`
+	RepoRoot           string `json:"repo_root"`
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
+	LastUsedAt         string `json:"last_used_at"`
 }
 
 type CacheVolumeConfig struct {
@@ -269,8 +269,8 @@ type CleanupRequest struct {
 }
 
 type TouchRequest struct {
-	Lease  LeaseTarget
-	State  string
+	Lease LeaseTarget
+	State string
 }
 
 type LeaseClaimStore struct {
@@ -281,12 +281,12 @@ var globalClaimStore = &LeaseClaimStore{claims: map[string]LeaseClaim{}}
 
 func ClaimLeaseForRepoProviderScopePond(leaseID, slug, provider, providerScope, pond, repoRoot string, idleTimeout time.Duration, reclaim bool) error {
 	globalClaimStore.claims[leaseID] = LeaseClaim{
-		LeaseID:   leaseID,
-		Slug:     slug,
-		Provider: provider,
-		RepoRoot: repoRoot,
+		LeaseID:            leaseID,
+		Slug:               slug,
+		Provider:           provider,
+		RepoRoot:           repoRoot,
 		IdleTimeoutSeconds: int(idleTimeout.Seconds()),
-		LastUsedAt: time.Now().UTC().Format(time.RFC3339),
+		LastUsedAt:         time.Now().UTC().Format(time.RFC3339),
 	}
 	return nil
 }
@@ -326,13 +326,13 @@ func CacheVolumeStickyDiskSpecs(cacheVolumes []CacheVolumeConfig) []string {
 
 func DirectLeaseLabels(cfg Config, leaseID, slug, provider, providerScope string, keep bool, createdAt time.Time) map[string]string {
 	return map[string]string{
-		"crabbox":      "true",
-		"provider":     provider,
-		"lease":        leaseID,
-		"slug":         slug,
-		"keep":         fmt.Sprintf("%v", keep),
-		"created_at":   createdAt.Format(time.RFC3339),
-		"ciderbox":     "true",
+		"crabbox":    "true",
+		"provider":   provider,
+		"lease":      leaseID,
+		"slug":       slug,
+		"keep":       fmt.Sprintf("%v", keep),
+		"created_at": createdAt.Format(time.RFC3339),
+		"ciderbox":   "true",
 	}
 }
 
