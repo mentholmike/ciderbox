@@ -417,7 +417,7 @@ func (a App) plantTree(ctx context.Context, containerRuntime ContainerRuntime, c
 		Image:     config.Template.Image,
 		CPUs:      config.Template.CPUs,
 		Memory:    config.Template.Memory,
-		User:      cfg.AppleContainer.User,
+		User:      "root",
 		Labels:    labels,
 		ExtraArgs: append([]string(nil), cfg.AppleContainer.ExtraRunArgs...),
 		Command:   []string{"sleep", "infinity"},

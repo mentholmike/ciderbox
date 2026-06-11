@@ -111,61 +111,47 @@ func (s *SecretsState) envContent(cfg *OrchardConfig) string {
 // generateOpenClawJSON builds the content for /root/.openclaw/openclaw.json.
 func generateOpenClawJSON(cfg *OrchardConfig, treeID string, workspacePath string) string {
 	modelProvider, modelName := parseModel(cfg.Agent.Model)
-
-	roots := []string{"/work/ciderbox"}
-	if workspacePath != "" {
-		roots = []string{workspacePath}
-	}
+	modelID := modelProvider + "/" + modelName
+	workspace := blank(workspacePath, "/work/ciderbox")
 
 	return fmt.Sprintf(`{
- "orchid": {
-  "orchard": %q,
-  "tree": %q,
-  "workspace": %q
- },
- "model": {
-  "provider": %q,
-  "name": %q
- },
- "tools": {
-  "shell": {
-   "enabled": true,
-   "workdir": %q
-  },
-  "filesystem": {
-   "enabled": true,
-   "roots": [
-    %s
-   ]
-  },
-  "browser": {
-   "enabled": false
-  }
- },
- "security": {
-  "approvalMode": "cautious",
-  "allowNetwork": true,
-  "allowSecrets": false
- }
-}
-`,
-		cfg.Name, treeID,
-		blank(workspacePath, "/work/ciderbox"),
-		modelProvider, modelName,
-		blank(workspacePath, "/work/ciderbox"),
-		rootsJSON(roots),
-	)
-}
-
-func rootsJSON(roots []string) string {
-	var b strings.Builder
-	for i, r := range roots {
-		if i > 0 {
-			b.WriteString(",\n")
-		}
-		b.WriteString(fmt.Sprintf("    %q", r))
+	 "agents": {
+	  "defaults": {
+	   "model": {
+	    "primary": %q
+	   },
+	   "workspace": %q,
+	   "repoRoot": %q
+	  }
+	 },
+	 "tools": {
+	  "profile": "coding",
+	  "fs": {
+	   "workspaceOnly": true
+	  },
+	  "exec": {
+	   "mode": "ask"
+	  },
+	  "web": {
+	   "fetch": {
+	    "enabled": true
+	   },
+	   "search": {
+	    "enabled": false
+	   }
+	  }
+	 },
+	 "approvals": {
+	  "exec": {
+	   "enabled": false
+	  }
+	 }
 	}
-	return b.String()
+	`,
+		modelID,
+		workspace,
+		workspace,
+	)
 }
 
 // parseModel splits "provider/model" into ("provider", "model").
