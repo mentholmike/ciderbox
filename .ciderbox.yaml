@@ -4,9 +4,15 @@ compileTest:
       image: ubuntu:26.04
     - name: debian
       image: debian:bookworm
-  command: "uname -a"
-  parallel: true
+    - name: alpine
+      image: alpine:latest
+    - name: fedora
+      image: fedora:latest
+    - name: rocky
+      image: rockylinux:9
+    - name: opensuse
+      image: opensuse/leap:latest
+  command: "command -v rsync && sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '\"' && uname -a"
+  parallel: false
   deps:
-    - golang
-    - git
     - rsync

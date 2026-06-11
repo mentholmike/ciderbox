@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // ---- doctor ----
@@ -202,6 +204,9 @@ func (a App) runCommand(ctx context.Context, args []string) error {
 	// so we tar the project dir (excluding large/binary artifacts) and pipe
 	// it into the container via container exec -i.
 	if !opts.noSync {
+		if err := a.ensureSyncTools(ctx, containerID); err != nil {
+			return exit(2, "run: install sync tools: %v", err)
+		}
 		fmt.Fprintf(a.Stderr, "syncing %s -> %s...\n", cwd, workDir)
 		if err := a.syncWorkspace(ctx, containerID, cwd, workDir); err != nil {
 			return exit(2, "run: sync workspace: %v", err)
@@ -215,8 +220,7 @@ func (a App) runCommand(ctx context.Context, args []string) error {
 			"mkdir", "-p", depsDir); err != nil {
 			return exit(2, "run: create deps dir: %v", err)
 		}
-		// Install deps via apt-get
-		depCmd := "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(opts.dependencies, " ")
+		depCmd := packageInstallScript(opts.dependencies)
 		fmt.Fprintf(a.Stderr, "installing dependencies: %s\n", strings.Join(opts.dependencies, " "))
 		if err := a.containerExec(ctx, containerID, nil, a.Stderr,
 			"sh", "-c", depCmd); err != nil {
@@ -266,7 +270,7 @@ func (a App) compileTest(ctx context.Context, args []string) error {
 		flags = append(flags, "--dep", "golang")
 	}
 
-	return a.runCommand(ctx, append(flags, strings.Fields(command)...))
+	return a.runCommand(ctx, append(flags, shellCommand(command)...))
 }
 
 func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) error {
@@ -288,12 +292,12 @@ func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) erro
 			depFlags = append(depFlags, "--dep", dep)
 		}
 		depFlags = append(depFlags, "--")
-		depFlags = append(depFlags, strings.Fields(command)...)
+		depFlags = append(depFlags, shellCommand(command)...)
 	}
 
 	if cfg.CompileTest.Parallel {
 		fmt.Fprintf(a.Stderr, "compile-test: running across %d distros (parallel)\n", len(cfg.CompileTest.Distros))
-		return a.runCommand(ctx, depFlags)
+		return a.runDistrosParallel(ctx, cfg.CompileTest.Distros, depFlags)
 	}
 
 	// Sequential across distros
@@ -302,10 +306,71 @@ func (a App) runMultiDistro(ctx context.Context, args []string, cfg Config) erro
 		fmt.Fprintf(a.Stderr, "\n--- %s (%s) ---\n", distro.Name, distro.Image)
 		distroFlags := make([]string, len(depFlags))
 		copy(distroFlags, depFlags)
-		distroFlags = append([]string{"--apple-container-image", distro.Image}, distroFlags...)
+		distroFlags = distroRunFlags(distroFlags, distro.Image)
 		if err := a.runCommand(ctx, distroFlags); err != nil {
 			return fmt.Errorf("distro %s failed: %w", distro.Name, err)
 		}
+	}
+	return nil
+}
+
+func distroRunFlags(baseFlags []string, image string) []string {
+	flags := []string{"--apple-container-image", image}
+	return append(flags, baseFlags...)
+}
+
+func (a App) runDistrosParallel(ctx context.Context, distros []DistroConfig, baseFlags []string) error {
+	type result struct {
+		index  int
+		name   string
+		image  string
+		stdout string
+		stderr string
+		err    error
+	}
+
+	results := make([]result, len(distros))
+	var wg sync.WaitGroup
+	for i, distro := range distros {
+		i, distro := i, distro
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var stdout, stderr bytes.Buffer
+			distroFlags := make([]string, len(baseFlags))
+			copy(distroFlags, baseFlags)
+			distroFlags = distroRunFlags(distroFlags, distro.Image)
+			err := (App{Stdout: &stdout, Stderr: &stderr, Stdin: a.Stdin}).runCommand(ctx, distroFlags)
+			results[i] = result{
+				index:  i,
+				name:   distro.Name,
+				image:  distro.Image,
+				stdout: stdout.String(),
+				stderr: stderr.String(),
+				err:    err,
+			}
+		}()
+	}
+	wg.Wait()
+
+	var failed []string
+	for _, r := range results {
+		fmt.Fprintf(a.Stderr, "\n--- %s (%s) ---\n", r.name, r.image)
+		if r.stderr != "" {
+			fmt.Fprint(a.Stderr, r.stderr)
+		}
+		if r.stdout != "" {
+			fmt.Fprint(a.Stdout, r.stdout)
+		}
+		if r.err != nil {
+			fmt.Fprintf(a.Stderr, "FAILED %s: %v\n", r.name, r.err)
+			failed = append(failed, r.name)
+		} else {
+			fmt.Fprintf(a.Stderr, "PASS %s\n", r.name)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("distros failed: %s", strings.Join(failed, ", "))
 	}
 	return nil
 }
@@ -327,7 +392,7 @@ func (a App) buildCommand(ctx context.Context, args []string) error {
 		flags = append(flags, "--dep", "golang")
 	}
 
-	return a.runCommand(ctx, append(flags, strings.Fields(command)...))
+	return a.runCommand(ctx, append(flags, shellCommand(command)...))
 }
 
 // ---- chop ----
@@ -529,6 +594,71 @@ func (a App) startContainer(ctx context.Context, opts runOptions, keepContainer 
 	}
 	fmt.Fprintf(a.Stderr, "started container=%s\n", id)
 	return id, nil
+}
+
+func (a App) ensureSyncTools(ctx context.Context, containerID string) error {
+	script := strings.Join([]string{
+		"if command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1; then exit 0; fi",
+		packageInstallScript([]string{"tar", "gzip"}),
+	}, "\n")
+	return a.containerExec(ctx, containerID, nil, a.Stderr, "sh", "-c", script)
+}
+
+func shellCommand(command string) []string {
+	return []string{"sh", "-c", command}
+}
+
+func packageInstallScript(packages []string) string {
+	return strings.Join([]string{
+		"set -e",
+		"if command -v apt-get >/dev/null 2>&1; then",
+		fmt.Sprintf("  apt-get update && apt-get install -y --no-install-recommends %s", packageList("apt", packages)),
+		"elif command -v apk >/dev/null 2>&1; then",
+		fmt.Sprintf("  apk add --no-cache %s", packageList("apk", packages)),
+		"elif command -v dnf >/dev/null 2>&1; then",
+		fmt.Sprintf("  dnf install -y %s", packageList("dnf", packages)),
+		"elif command -v microdnf >/dev/null 2>&1; then",
+		fmt.Sprintf("  microdnf install -y %s", packageList("dnf", packages)),
+		"elif command -v yum >/dev/null 2>&1; then",
+		fmt.Sprintf("  yum install -y %s", packageList("dnf", packages)),
+		"elif command -v pacman >/dev/null 2>&1; then",
+		fmt.Sprintf("  pacman -Sy --noconfirm %s", packageList("pacman", packages)),
+		"elif command -v zypper >/dev/null 2>&1; then",
+		fmt.Sprintf("  zypper --non-interactive refresh && zypper --non-interactive install --no-recommends %s", packageList("zypper", packages)),
+		"else",
+		"  echo 'no supported package manager found (apt-get, apk, dnf, microdnf, yum, pacman, zypper)' >&2",
+		"  exit 127",
+		"fi",
+	}, "\n")
+}
+
+func packageList(manager string, packages []string) string {
+	mapped := make([]string, 0, len(packages))
+	seen := make(map[string]bool)
+	for _, pkg := range packages {
+		pkg = mapPackageName(manager, strings.TrimSpace(pkg))
+		if pkg == "" || seen[pkg] {
+			continue
+		}
+		seen[pkg] = true
+		mapped = append(mapped, pkg)
+	}
+	return strings.Join(shQuoteAll(mapped), " ")
+}
+
+func mapPackageName(manager, pkg string) string {
+	switch pkg {
+	case "golang":
+		switch manager {
+		case "apk", "pacman", "zypper":
+			return "go"
+		}
+	case "python3":
+		if manager == "pacman" {
+			return "python"
+		}
+	}
+	return pkg
 }
 
 // removeContainer removes a container by ID.
