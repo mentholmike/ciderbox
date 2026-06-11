@@ -25,14 +25,14 @@ ciderbox chop
 ### Homebrew (recommended)
 
 ```sh
-brew install mentholmike/ciderbox/ciderbox
-```
-
-Or tap separately:
-
-```sh
 brew tap mentholmike/ciderbox
 brew install ciderbox
+```
+
+Or in one line:
+
+```sh
+brew install mentholmike/ciderbox/ciderbox
 ```
 
 ### From source
