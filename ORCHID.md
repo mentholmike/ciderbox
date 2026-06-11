@@ -1,4 +1,4 @@
-# Orchid — AI Agent Swarm on Apple Container VMs
+# Orchid - AI Agent Swarm on Apple Container VMs
 
 **A Ciderbox Feature (Milestone 9)**
 
@@ -6,175 +6,269 @@
 
 ## What is Ciderbox?
 
-Ciderbox is a fork of [Crabbox](https://github.com/openclaw/crabbox) (by OpenClaw), stripped down to a single provider: **Apple Container** — Apple's native container runtime for macOS (not Docker, not Podman).
+Ciderbox is a fork of [Crabbox](https://github.com/openclaw/crabbox) stripped down to a single provider: **Apple Container**, Apple's native container runtime for macOS.
 
 **Ciderbox exists to:**
-- Lease Apple Silicon VMs on your local Mac (sub-second boot)
-- Sync your repo into them
-- Run commands, tests, builds
-- Clean up automatically
+- Lease Apple Silicon Linux VMs on your local Mac
+- Sync a repo into them
+- Run commands, tests, and builds
+- Clean up the local VMs afterward
 
 **Key differences from upstream Crabbox:**
-- Removed all cloud providers (Hetzner, AWS, Azure, GCP, etc.)
 - Single provider: `apple-container`
-- Local-only — no broker, no remote infrastructure
-- Cider-themed branding (`/work/ciderbox`, `ciderbox-protected` labels)
+- Local-only by default
+- Cider-themed paths and labels such as `/work/ciderbox` and `ciderbox-protected`
 
 ---
 
 ## What is Orchid?
 
-Orchid is **Feature M9** in the Ciderbox roadmap: an **AI agent swarm** running on Apple Container VMs.
-
-Instead of leasing VMs to compile code, Orchid leases VMs to run **autonomous OpenClaw agents** — each tree is an independent AI that can:
-- Process tasks
-- Communicate with other trees
-- Report results back to the host
+Orchid is Ciderbox's local OpenClaw swarm layer. It plants Apple Container VMs, called trees, and grafts an OpenClaw runtime/config into each one so tasks can run across the orchard.
 
 **The metaphor:**
 - **Orchard** = the swarm
 - **Trees** = individual container VMs
-- **Graft** = install OpenClaw agent on a tree
-- **Tend** = check swarm health
-- **Harvest** = collect results from all trees
-- **Press** = aggregate results into a unified report
+- **Plant** = create tree containers
+- **Graft** = install/configure OpenClaw on a tree
+- **Tend** = inspect live tree health
+- **Run** = execute a task on one tree or all trees
+- **Harvest** = collect task output
+- **Press** = aggregate harvested output
 - **Chop** = tear down the orchard
 
 ---
 
-## What Orchid Does Currently
+## Current Status
 
 ### Commands
 
 | Command | Status | Description |
 |---------|--------|-------------|
-| `orchard init` | ✅ Working | Scaffolds `.orchard.yaml` manifest |
-| `orchard plant` | ✅ Working | Spins up N trees via apple-container provider |
-| `orchard tend` | ⚠️ Simulated | Shows tree status (mocked IPs for now) |
-| `orchard graft` | ✅ Working | Installs OpenClaw via `container exec` (no SSH) |
-| `orchard harvest` | ⚠️ Simulated | Collects results (structure in place) |
-| `orchard press` | ⚠️ Simulated | Aggregates outputs (structure in place) |
-| `orchard chop` | ✅ Working | Destroys all trees via provider `ReleaseLease` |
-| `orchard list` | ⚠️ Simulated | Lists active trees (placeholder) |
+| `orchard init` | Working | Scaffolds `.orchard.yaml` |
+| `orchard plant` | Working | Starts N trees through the native Apple Container runtime |
+| `orchard tend` | Working | Reads live tree status, IPs, and age from container labels/state |
+| `orchard list` | Working | Lists active trees across orchards |
+| `orchard graft --tree <id>` | Working | Installs Node/OpenClaw, writes identity/config, and validates OpenClaw config |
+| `orchard graft --all` | Working | Grafts every running tree in the orchard |
+| `orchard run --task "..."` | Working | Runs an agent command on one tree or all trees and creates a task ID |
+| `orchard run --sync --task "..."` | Working | Syncs the current workspace before running the task |
+| `orchard harvest` | Working | Collects legacy `/tmp/orchard-result.json` from trees |
+| `orchard harvest --task <id>` | Working | Collects structured task results from `/tmp/orchid/tasks/<id>/result.json` |
+| `orchard press --input results.json` | Working | Prints a readable summary from harvested results |
+| `orchard press --task <id>` | Working | Reads local task result files and prints a summary |
+| `orchard secrets init` | Working | Creates `.orchid.env` and updates `.gitignore` |
+| `orchard secrets check` | Working | Validates required secrets without printing values |
+| `orchard secrets push --all` | Working | Writes `/root/.openclaw/.env` into running trees |
+| `orchard login <provider>` | Working | Prints provider-specific auth setup guidance |
+| `orchard doctor` | Working | Checks runtime, model config, OpenClaw install, generated files, and config validation |
+| `orchard logs --tree <id>` | Working | Shows tree logs |
+| `orchard chop --yes` | Working | Removes orchard trees and clears local orchard state |
+
+### Generated Files
+
+On the host:
+
+```text
+.orchard.yaml
+.orchid.env
+~/.ciderbox/orchards/<orchard>/state.json
+~/.ciderbox/orchards/<orchard>/tasks/<task-id>/task.json
+~/.ciderbox/orchards/<orchard>/tasks/<task-id>/<tree>.json
+```
+
+Inside each tree after `orchard graft`:
+
+```text
+/root/.openclaw/openclaw.json
+/root/.openclaw/.env
+/root/.openclaw/workspace/IDENTITY.md
+```
+
+Inside each tree after `orchard run`:
+
+```text
+/tmp/orchid/tasks/<task-id>/result.json
+/tmp/orchard-result.json
+```
 
 ### Architecture
 
+```text
+Host Mac
+  ciderbox orchard
+      |
+      v
+Apple Container runtime
+      |
+      +-- tree-0
+      |     /root/.openclaw/openclaw.json
+      |     /root/.openclaw/.env
+      |     /root/.openclaw/workspace/IDENTITY.md
+      |     /tmp/orchid/tasks/<task-id>/result.json
+      |
+      +-- tree-1
+      |
+      +-- tree-N
 ```
-Host Mac (OpenClaw with Ciderbox)
-├── .openclaw.json          # Main agent config
-└── orchard/
-    ├── .orchard.yaml       # Swarm manifest
-    └── (commands via CLI)
 
-Apple Container VMs (Trees)
-├── Tree 0: crabbox-my-orchard-0-xxx
-│   ├── Ubuntu 26.04
-│   ├── OpenClaw agent (grafted)
-│   └── Independent memory/skills
-├── Tree 1: crabbox-my-orchard-1-xxx
-│   └── ...
-└── Tree N...
-```
+Orchid uses `container exec` and the native Apple Container runtime. It does not require SSH for tree management.
 
-### Key Design Decisions
+---
 
-1. **No SSH** — Uses `container exec` and `container copy` directly
-2. **No Lethe** — Each tree uses standard OpenClaw memory (not persistent Lethe)
-3. **Provider-native** — Reuses Ciderbox's `SSHLeaseBackend` for lifecycle
-4. **Container ID tracking** — Each `TreeState` stores `container_id` for direct `exec` access
+## Manifest Format
 
-### Manifest Format
+Current `orchard init` output:
 
 ```yaml
-# .orchard.yaml
 name: my-orchard
 trees: 3
 template:
-  image: ubuntu:26.04
-  cpus: 2
-  memory: 4G
-  distro: ubuntu
+    image: ubuntu:26.04
+    cpus: 2
+    memory: 4G
+    distro: ubuntu
 agent:
-  identity: archimedes-clone
-  skills: [web-search, github, discord]
-  memory_provider: builtin
-  model: gpt-5.3-codex-spark
-mesh:
-  mode: gossip
-  broadcast: true
-  port: 18790
+    identity: tree-agent
+    skills:
+        - github
+        - web-search
+    model: CHANGE_ME
+    command: openclaw run "$ORCHARD_TASK"
+```
+
+The config structs also support:
+
+```yaml
+secrets:
+    envFile: .orchid.env
+    passThrough:
+        - OPENROUTER_API_KEY
+    required:
+        - OPENROUTER_API_KEY
+workspace:
+    sync: true
+    path: /work/ciderbox
+```
+
+`agent.command` runs inside each tree. The task text is available as `ORCHARD_TASK`. When workspace sync is enabled, the workspace path is available as `ORCHARD_WORKSPACE`.
+
+---
+
+## Secrets and Auth
+
+Use `.orchid.env` for local API keys. Do not put secrets directly in `.orchard.yaml`.
+
+```sh
+ciderbox orchard secrets init
+# edit .orchid.env
+ciderbox orchard secrets check
+ciderbox orchard secrets push --all
+```
+
+`orchard secrets check` reports whether keys are present and where they came from (`.orchid.env` or host env), but it does not print secret values.
+
+`orchard login` is a helper for provider setup:
+
+```sh
+ciderbox orchard login openclaw
+ciderbox orchard login openrouter
+ciderbox orchard login anthropic
+ciderbox orchard login openai
+```
+
+For API-key providers, set the matching environment variable in `.orchid.env` or the host environment, then run `orchard secrets check` and `orchard secrets push --all`.
+
+---
+
+## Task Flow
+
+```sh
+ciderbox orchard plant
+ciderbox orchard graft --all
+ciderbox orchard run --sync --task "review this repo and write findings"
+ciderbox orchard harvest --task <task-id> --output results.json
+ciderbox orchard press --task <task-id>
+ciderbox orchard chop --yes
+```
+
+Each `orchard run` creates a task ID like:
+
+```text
+task-20260610-235100-123456789
+```
+
+Local task state is stored under:
+
+```text
+~/.ciderbox/orchards/<orchard>/tasks/<task-id>/
+```
+
+Each tree writes structured JSON containing the task ID, tree name, status, output, and exit code.
+
+---
+
+## Linux Support
+
+Orchid graft and runtime dependency installation currently support Ubuntu/Debian-style trees only.
+
+The current graft path expects:
+
+```text
+apt-get
+curl
+ca-certificates
+git
+gnupg
+python3
+npm / nodejs
+```
+
+The current runtime dependency helper installs missing Python with `apt-get`. Images based on Alpine, Fedora, Arch, or other distributions may plant successfully, but `orchard graft`, `orchard run`, and dependency installation are not considered supported until package-manager detection is implemented.
+
+Future package-manager support should map:
+
+```text
+apt-get -> Ubuntu/Debian
+apk     -> Alpine
+dnf     -> Fedora
+pacman  -> Arch
 ```
 
 ---
 
-## What Orchid Will Do
+## Current Gaps
 
-### Immediate Next Steps
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| **Real `tend`** | High | Query `container ls` to show actual tree status, IPs, container IDs |
-| **Real `harvest`** | High | Use `container exec` to collect JSON results from each tree |
-| **Real `press`** | High | Aggregate harvest results into unified report |
-| **Real `list`** | Medium | Filter `container ls` for orchard labels |
-
-### Future Work
-
-| Feature | Description |
-|---------|-------------|
-| **Mesh communication** | Tree-to-tree messaging via gossip/broker/star topology |
-| **Graft OpenClaw** | Actually download and install OpenClaw binary (not just apt) |
-| **Tree identity** | Each tree gets unique `.openclaw.json` with skills/model config |
-| **Pre-baked images** | Build `orchid-agent` image with OpenClaw pre-installed |
-| **Workload distribution** | Distribute tasks across trees, collect parallel results |
-| **Auto-scaling** | Add/remove trees based on queue depth |
-
----
-
-## Code Changes Made
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `internal/cli/orchard.go` | New file — full orchard command suite |
-| `internal/cli/app.go` | Registered `orchard` command |
-| `internal/cli/cli_kong.go` | Added `orchardKongCmd` struct and wiring |
-| `internal/cli/config.go` | Changed default provider from `hetzner` → `apple-container` |
-| `internal/cli/compiletest.go` | Fixed `--keep` leak, `strings.Fields` bug, added `ciderbox-protected` |
-| `internal/providers/applecontainer/backend.go` | Added macOS 26 version gate, 48h protected ceiling |
-| `internal/providers/applecontainer/backend_test.go` | Updated tests for `inspectStatus` struct |
-
-### Bugs Fixed (Code Review)
-
-| # | Issue | Severity | Fix |
-|---|-------|----------|-----|
-| 1 | `chop` bypassed provider layer | Blocker | Rewrote to use `SSHLeaseBackend` |
-| 2 | `--keep` caused VM leak | Blocker | Auto-release on PASS, 48h ceiling |
-| 3 | `strings.Fields` broke commands | Major | Use `/bin/sh -lc` instead |
-| 4 | No macOS 26 gate | Major | Added `sw_vers` check |
-| 5 | Parallel output interleaved | Minor | Added per-distro buffered writers |
-| 6 | Identity drift | Minor | `/work/crabbox` → `/work/ciderbox` |
+- `orchard init` still emits a smaller manifest than the newer config structs support.
+- `harvest --task latest` and `press --task latest` are not implemented yet; pass an explicit task ID.
+- Automated Go tests for secrets, generated env content, redaction, task state, and harvest/press behavior still need to be added.
+- Tree-to-tree mesh communication is not implemented.
+- A prebuilt Orchid image would remove repeated package installation during graft.
 
 ---
 
 ## Testing
 
-**Verified on-device:**
-```bash
-$ ciderbox orchard init --force
-$ ciderbox orchard plant
-  → Container crabbox-my-orchard-0-xxx ready (13s)
-$ ciderbox orchard graft --tree tree-0
-  → apt-get update/install via container exec
-$ ciderbox orchard chop --yes
-  → Container destroyed via ReleaseLease
+Current local proof:
+
+```sh
+go test ./...
+go build -o /tmp/ciderbox ./cmd/ciderbox
+```
+
+On-device smoke path:
+
+```sh
+ciderbox orchard init --force
+ciderbox orchard plant
+ciderbox orchard graft --all
+ciderbox orchard run --sync --task "inspect this tree"
+ciderbox orchard harvest --task <task-id> --output results.json
+ciderbox orchard press --task <task-id>
+ciderbox orchard chop --yes
 ```
 
 ---
 
 ## License
 
-Same as Ciderbox/Crabbox — MIT.
-
-*Built by [MentholMike](https://github.com/mentholmike).*
+Same as Ciderbox/Crabbox: MIT.
