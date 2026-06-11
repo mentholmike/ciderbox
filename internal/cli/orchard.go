@@ -716,13 +716,17 @@ func (a App) orchardDoctor(ctx context.Context, args []string) error {
 		fmt.Fprintf(a.Stdout, "  ip: %s\n", blank(tree.IP, "-"))
 
 		checks := []struct {
-			name string
-			cmd  []string
+			name   string
+			cmd    []string
+			failOn bool // fail on success (used for negative checks)
 		}{
-			{"node", []string{"node", "--version"}},
-			{"npm", []string{"npm", "--version"}},
-			{"openclaw", []string{"openclaw", "--version"}},
-			{"identity", []string{"test", "-f", "/root/.openclaw/workspace/IDENTITY.md"}},
+			{"node", []string{"node", "--version"}, false},
+			{"npm", []string{"npm", "--version"}, false},
+			{"openclaw", []string{"openclaw", "--version"}, false},
+			{"identity", []string{"test", "-f", "/root/.openclaw/workspace/IDENTITY.md"}, false},
+			{"openclaw.json", []string{"test", "-f", "/root/.openclaw/openclaw.json"}, false},
+			{".env", []string{"test", "-f", "/root/.openclaw/.env"}, false},
+			{"config validate", []string{"openclaw", "config", "validate"}, false},
 		}
 
 		for _, check := range checks {
