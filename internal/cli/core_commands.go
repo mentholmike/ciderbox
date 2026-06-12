@@ -126,6 +126,9 @@ func isCiderboxContainer(c ContainerInfo) bool {
 	if labels == nil {
 		return strings.HasPrefix(c.ID, "cbx_") || strings.HasPrefix(c.Name, "cbx_")
 	}
+	if v, ok := labels["ciderbox-protected"]; ok && v == "true" {
+		return false
+	}
 	if v, ok := labels["ciderbox"]; ok && v == "true" {
 		return true
 	}
@@ -414,6 +417,7 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 	fs := newFlagSet("cleanup", a.Stderr)
 	provider := fs.String("provider", "apple-container", "provider name")
 	dryRun := fs.Bool("dry-run", false, "show what would be removed")
+	force := fs.Bool("force", false, "remove protected containers too")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -429,9 +433,29 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 	}
 
 	removed := 0
+	skipped := 0
 	for _, c := range containers {
 		if !isCiderboxContainer(c) {
-			continue
+			// Check if it's protected and we're not forcing
+			labels := c.Labels
+			if labels != nil {
+				if v, ok := labels["ciderbox-protected"]; ok && v == "true" {
+					if !*force {
+						if *dryRun {
+							fmt.Fprintf(a.Stdout, "would skip protected container=%s (use --force to remove)\n", c.ID)
+						} else {
+							fmt.Fprintf(a.Stdout, "skipping protected container=%s\n", c.ID)
+						}
+						skipped++
+						continue
+					}
+					// Force: treat as ciderbox container and remove it
+				} else {
+					continue
+				}
+			} else {
+				continue
+			}
 		}
 		if *dryRun {
 			fmt.Fprintf(a.Stdout, "would remove container=%s image=%s\n", c.ID, c.Image)
@@ -446,7 +470,7 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 	}
 
 	if !*dryRun {
-		fmt.Fprintf(a.Stdout, "cleanup: removed %d container(s), checked %d\n", removed, len(containers))
+		fmt.Fprintf(a.Stdout, "cleanup: removed %d container(s), skipped %d protected, checked %d\n", removed, skipped, len(containers))
 	}
 	return nil
 }
@@ -463,6 +487,10 @@ type runOptions struct {
 	keep         bool
 	noSync       bool
 	dependencies []string
+	name         string
+	extraLabels  map[string]string
+	volumes      []string
+	ports        []string
 }
 
 func parseRunFlags(args []string) (runOptions, []string, error) {
@@ -525,12 +553,38 @@ func parseRunFlags(args []string) (runOptions, []string, error) {
 			}
 		case args[i] == "--keep":
 			opts.keep = true
+		case args[i] == "--name":
+			if i+1 < len(args) {
+				i++
+				opts.name = args[i]
+			}
+		case args[i] == "--label":
+			if i+1 < len(args) {
+				i++
+				parts := strings.SplitN(args[i], "=", 2)
+				if len(parts) == 2 {
+					if opts.extraLabels == nil {
+						opts.extraLabels = make(map[string]string)
+					}
+					opts.extraLabels[parts[0]] = parts[1]
+				}
+			}
 		case args[i] == "--no-sync":
 			opts.noSync = true
 		case args[i] == "--dependency" || args[i] == "-d" || args[i] == "--dep":
 			if i+1 < len(args) {
 				i++
 				opts.dependencies = append(opts.dependencies, args[i])
+			}
+		case args[i] == "--volume" || args[i] == "-v":
+			if i+1 < len(args) {
+				i++
+				opts.volumes = append(opts.volumes, args[i])
+			}
+		case args[i] == "--port" || args[i] == "-p":
+			if i+1 < len(args) {
+				i++
+				opts.ports = append(opts.ports, args[i])
 			}
 		case args[i] == "--env" || args[i] == "-e":
 			i++ // skip, not implemented for run yet
@@ -564,6 +618,10 @@ func printRunHelp() {
   --apple-container-work-root string
                                   container workspace root (default "/work/ciderbox")
   --keep                          keep container after command exits
+  --name string                   container name
+  --label string                  add a label (key=value, repeatable)
+  --volume string                 mount a volume (host:container, repeatable)
+  --port string                   publish a port (host:container, repeatable)
   --no-sync                       do not copy current directory into container
   --dep, --dependency string      system package to install (repeatable)
   -h, --help                      show this help`)
@@ -575,6 +633,9 @@ func (a App) startContainer(ctx context.Context, opts runOptions, keepContainer 
 	if !keepContainer {
 		runArgs = append(runArgs, "--rm")
 	}
+	if opts.name != "" {
+		runArgs = append(runArgs, "--name", opts.name)
+	}
 	if opts.memory != "" {
 		runArgs = append(runArgs, "--memory", opts.memory)
 	}
@@ -583,6 +644,15 @@ func (a App) startContainer(ctx context.Context, opts runOptions, keepContainer 
 	}
 	if opts.user != "" {
 		runArgs = append(runArgs, "--user", opts.user)
+	}
+	for _, vol := range opts.volumes {
+		runArgs = append(runArgs, "--volume", vol)
+	}
+	for _, port := range opts.ports {
+		runArgs = append(runArgs, "-p", port)
+	}
+	for k, v := range opts.extraLabels {
+		runArgs = append(runArgs, "--label", k+"="+v)
 	}
 	runArgs = append(runArgs, "--label", "ciderbox=true")
 	runArgs = append(runArgs, opts.image)

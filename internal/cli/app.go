@@ -133,6 +133,7 @@ Examples:
   ciderbox compile-test
   ciderbox build
   ciderbox chop --yes
+  ciderbox chop --force
   ciderbox orchard plant
 
 Environment:
