@@ -126,9 +126,6 @@ func isCiderboxContainer(c ContainerInfo) bool {
 	if labels == nil {
 		return strings.HasPrefix(c.ID, "cbx_") || strings.HasPrefix(c.Name, "cbx_")
 	}
-	if v, ok := labels["ciderbox-protected"]; ok && v == "true" {
-		return false
-	}
 	if v, ok := labels["ciderbox"]; ok && v == "true" {
 		return true
 	}
@@ -435,27 +432,24 @@ func (a App) cleanup(ctx context.Context, args []string) error {
 	removed := 0
 	skipped := 0
 	for _, c := range containers {
-		if !isCiderboxContainer(c) {
-			// Check if it's protected and we're not forcing
-			labels := c.Labels
-			if labels != nil {
-				if v, ok := labels["ciderbox-protected"]; ok && v == "true" {
-					if !*force {
-						if *dryRun {
-							fmt.Fprintf(a.Stdout, "would skip protected container=%s (use --force to remove)\n", c.ID)
-						} else {
-							fmt.Fprintf(a.Stdout, "skipping protected container=%s\n", c.ID)
-						}
-						skipped++
-						continue
-					}
-					// Force: treat as ciderbox container and remove it
-				} else {
-					continue
-				}
+		labels := c.Labels
+		if labels == nil {
+			continue
+		}
+		isProtected := labels["ciderbox-protected"] == "true"
+		isCiderbox := labels["ciderbox"] == "true" || strings.HasPrefix(labels["lease_id"], "cbx_") || strings.HasPrefix(c.ID, "cbx_") || strings.HasPrefix(c.Name, "cbx_")
+		
+		if !isCiderbox && !isProtected {
+			continue
+		}
+		if isProtected && !*force {
+			if *dryRun {
+				fmt.Fprintf(a.Stdout, "would skip protected container=%s (use --force to remove)\n", c.ID)
 			} else {
-				continue
+				fmt.Fprintf(a.Stdout, "skipping protected container=%s\n", c.ID)
 			}
+			skipped++
+			continue
 		}
 		if *dryRun {
 			fmt.Fprintf(a.Stdout, "would remove container=%s image=%s\n", c.ID, c.Image)
@@ -581,7 +575,7 @@ func parseRunFlags(args []string) (runOptions, []string, error) {
 				i++
 				opts.volumes = append(opts.volumes, args[i])
 			}
-		case args[i] == "--port" || args[i] == "-p":
+		case args[i] == "--port":
 			if i+1 < len(args) {
 				i++
 				opts.ports = append(opts.ports, args[i])
